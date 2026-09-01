@@ -374,7 +374,17 @@ def get_stats():
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 # Initialiser la base de données au démarrage
-
+@app.route('/api/v1/init-db', methods=['POST'])
+def init_db():
+    """Route pour initialiser la base de données"""
+    try:
+        if db:
+            init_database()
+            return jsonify({"message": "Database initialized successfully"}), 200
+        else:
+            return jsonify({"message": "Database connection failed"}), 500
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
 if __name__ == '__main__':
     print(f"🚀 Backend running on http://localhost:{PORT}")
     print(f"🔐 JWT Secret Key: {SECRET_KEY}")
