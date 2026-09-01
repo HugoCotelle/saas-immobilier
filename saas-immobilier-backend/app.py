@@ -44,7 +44,116 @@ def token_required(f):
             return jsonify({"message": "Invalid token"}), 401
         return f(*args, **kwargs)
     return decorated
-
+def init_database():
+    """Initialiser la base de données avec les tables et données de test"""
+    try:
+        cursor = db.cursor()
+        
+        # Table USERS
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                first_name VARCHAR(100),
+                company_name VARCHAR(255),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        
+        # Table LEADS
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS leads (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id),
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255),
+                phone VARCHAR(20),
+                budget INTEGER,
+                location VARCHAR(255),
+                property_type VARCHAR(100),
+                status VARCHAR(50) DEFAULT 'nouveau',
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        
+        # Table PROPERTIES
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS properties (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id),
+                title VARCHAR(255) NOT NULL,
+                address VARCHAR(255),
+                price INTEGER,
+                size INTEGER,
+                rooms INTEGER,
+                property_type VARCHAR(100),
+                description TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        
+        # Vérifier si vide
+        cursor.execute("SELECT COUNT(*) FROM users")
+        user_count = cursor.fetchone()[0]
+        
+        if user_count == 0:
+            # Insérer utilisateur de test
+            cursor.execute("""
+                INSERT INTO users (email, password_hash, first_name, company_name)
+                VALUES (%s, %s, %s, %s)
+            """, ('test@example.com', 'hashed_password_123', 'Test', 'Test Company'))
+            
+            # 33 leads
+            leads_data = [
+                ('Alice Dupont', 'alice@example.com', '0601020304', 250000, 'Paris 15', 'Appartement'),
+                ('Bob Martin', 'bob@example.com', '0602030405', 350000, 'Lyon', 'Maison'),
+                ('Claire Durand', 'claire@example.com', '0603040506', 450000, 'Marseille', 'Villa'),
+                ('David Petit', 'david@example.com', '0604050607', 300000, 'Toulouse', 'Appartement'),
+                ('Eva Leblanc', 'eva@example.com', '0605060708', 200000, 'Nice', 'Studio'),
+                ('Franck Richard', 'franck@example.com', '0606070809', 500000, 'Bordeaux', 'Maison'),
+                ('Gisele Lefevre', 'gisele@example.com', '0607080910', 275000, 'Lille', 'Appartement'),
+                ('Hervé Mercier', 'herve@example.com', '0608091011', 400000, 'Nantes', 'Maison'),
+                ('Isabelle Roux', 'isabelle@example.com', '0609101112', 320000, 'Strasbourg', 'Appartement'),
+                ('Jacques Simon', 'jacques@example.com', '0610111213', 450000, 'Montpellier', 'Villa'),
+                ('Karine Morel', 'karine@example.com', '0611121314', 280000, 'Toulouse', 'Appartement'),
+                ('Laurent Girard', 'laurent@example.com', '0612131415', 380000, 'Bordeaux', 'Maison'),
+                ('Monique Bertrand', 'monique@example.com', '0613141516', 320000, 'Marseille', 'Appartement'),
+                ('Nicolas Blanc', 'nicolas@example.com', '0614151617', 420000, 'Lyon', 'Maison'),
+                ('Odette Fabre', 'odette@example.com', '0615161718', 260000, 'Nantes', 'Appartement'),
+                ('Pierre Garnier', 'pierre@example.com', '0616171819', 500000, 'Paris 6', 'Penthouse'),
+                ('Quentin Hubert', 'quentin@example.com', '0617181920', 290000, 'Lille', 'Appartement'),
+                ('Renee Jacquet', 'renee@example.com', '0618192021', 410000, 'Bordeaux', 'Maison'),
+                ('Stephane Kerr', 'stephane@example.com', '0619202122', 340000, 'Nice', 'Appartement'),
+                ('Therese Lachance', 'therese@example.com', '0620212223', 480000, 'Strasbourg', 'Villa'),
+                ('Urbain Martin', 'urbain@example.com', '0621222324', 270000, 'Montpellier', 'Appartement'),
+                ('Valerie Noel', 'valerie@example.com', '0622232425', 390000, 'Lyon', 'Maison'),
+                ('William Olivier', 'william@example.com', '0623242526', 330000, 'Marseille', 'Appartement'),
+                ('Yvette Perrin', 'yvette@example.com', '0624252627', 430000, 'Bordeaux', 'Maison'),
+                ('Zacharie Quine', 'zacharie@example.com', '0625262728', 510000, 'Paris 8', 'Penthouse'),
+                ('Amelie Renard', 'amelie@example.com', '0626272829', 295000, 'Nantes', 'Appartement'),
+                ('Benoit Saulnier', 'benoit@example.com', '0627282930', 400000, 'Toulouse', 'Maison'),
+                ('Camille Tetard', 'camille@example.com', '0628293031', 350000, 'Strasbourg', 'Appartement'),
+                ('Dominique Uzan', 'dominique@example.com', '0629303132', 460000, 'Nice', 'Villa'),
+                ('Emilie Verdin', 'emilie@example.com', '0630313233', 280000, 'Lille', 'Appartement'),
+                ('Fabien Walden', 'fabien@example.com', '0631323334', 385000, 'Bordeaux', 'Maison'),
+                ('Genevieve Xavier', 'genevieve@example.com', '0632333435', 325000, 'Lyon', 'Appartement'),
+                ('Henri Yates', 'henri@example.com', '0633343536', 440000, 'Paris 12', 'Maison'),
+            ]
+            
+            for name, email, phone, budget, location, property_type in leads_data:
+                cursor.execute("""
+                    INSERT INTO leads (user_id, name, email, phone, budget, location, property_type, status)
+                    VALUES (1, %s, %s, %s, %s, %s, %s, 'nouveau')
+                """, (name, email, phone, budget, location, property_type))
+        
+        db.commit()
+        cursor.close()
+        print("✅ Base de données initialisée!")
+        
+    except Exception as e:
+        print(f"❌ Erreur: {e}")
+        db.rollback()
 @app.route('/auth/register', methods=['POST'])
 def register():
     data = request.get_json()
@@ -257,7 +366,8 @@ def get_stats():
         return jsonify(stats), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
-
+# Initialiser la base de données au démarrage
+init_database()
 if __name__ == '__main__':
     print(f"🚀 Backend running on http://localhost:{PORT}")
     print(f"🔐 JWT Secret Key: {SECRET_KEY}")
