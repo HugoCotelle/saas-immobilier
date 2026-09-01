@@ -1,0 +1,462 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// GÉOGRAPHIE
+// ============================================================================
+
+model City {
+  id              Int       @id @default(autoincrement())
+  name            String    @db.VarChar(255)
+  inseeCode       String    @unique @db.VarChar(5)
+  postalCode      String?   @db.VarChar(10)
+  departmentName  String?   @db.VarChar(255)
+  departmentCode  String?   @db.VarChar(2)
+  regionName      String?   @db.VarChar(255)
+  latitude        Decimal?  @db.Decimal(10, 8)
+  longitude       Decimal?  @db.Decimal(11, 8)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  agencies        Agency[]
+  agencyCities    AgencyCity[]
+  leadCities      LeadCity[]
+  properties      Property[]
+
+  @@index([name])
+  @@index([inseeCode])
+  @@index([postalCode])
+  @@index([departmentCode])
+}
+
+// ============================================================================
+// AGENCES
+// ============================================================================
+
+model Agency {
+  id                      Int       @id @default(autoincrement())
+  name                    String    @db.VarChar(255)
+  email                   String    @unique @db.VarChar(255)
+  phone                   String?   @db.VarChar(20)
+  address                 String?   @db.VarChar(255)
+  postalCode              String?   @db.VarChar(10)
+  
+  // Subscription
+  subscriptionPlan        String    @default("free") @db.VarChar(50)  // free, starter, pro, enterprise
+  subscriptionStatus      String    @default("active") @db.VarChar(50) // active, trial, cancelled, suspended
+  subscriptionStartDate   DateTime?
+  subscriptionEndDate     DateTime?
+  
+  // Status
+  status                  String    @default("active") @db.VarChar(50)  // active, inactive, suspended
+  
+  // Metadata
+  logoUrl                 String?   @db.VarChar(500)
+  website                 String?   @db.VarChar(255)
+  siren                   String?   @db.VarChar(14)
+  
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  // Relations
+  cityId                  Int
+  city                    City      @relation(fields: [cityId], references: [id], onDelete: Restrict)
+  users                   User[]
+  properties              Property[]
+  leads                   Lead[]
+  agencyCities            AgencyCity[]
+  matches                 Match[]
+  leadActivities          LeadActivity[]
+  dailyStats              DailyAgencyStat[]
+  integrationConfigs      IntegrationConfig[]
+  integrationLogs         IntegrationLog[]
+
+  @@index([status])
+  @@index([email])
+}
+
+model AgencyCity {
+  id          Int       @id @default(autoincrement())
+  priority    String    @default("primary") @db.VarChar(50)  // primary, secondary
+  createdAt   DateTime  @default(now())
+
+  // Relations
+  agencyId    Int
+  agency      Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  cityId      Int
+  city        City      @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@unique([agencyId, cityId])
+  @@index([agencyId])
+  @@index([cityId])
+}
+
+// ============================================================================
+// UTILISATEURS
+// ============================================================================
+
+model User {
+  id                Int       @id @default(autoincrement())
+  firstName         String    @db.VarChar(100)
+  lastName          String    @db.VarChar(100)
+  email             String    @unique @db.VarChar(255)
+  phone             String?   @db.VarChar(20)
+  
+  // Auth
+  passwordHash      String?   @db.VarChar(500)
+  authProvider      String    @default("email") @db.VarChar(50)
+  authProviderId    String?   @db.VarChar(255)
+  
+  // Role & Permissions
+  role              String    @db.VarChar(50)  // admin, manager, agent
+  assignedCities    Json?     // Array de city_id
+  
+  // Status
+  status            String    @default("active") @db.VarChar(50)  // active, inactive, suspended
+  
+  // Audit
+  lastLogin         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  agencyId          Int
+  agency            Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  properties        Property[]
+  leads             Lead[]
+  leadActivities    LeadActivity[]
+
+  @@index([agencyId])
+  @@index([email])
+  @@index([role])
+  @@index([status])
+}
+
+// ============================================================================
+// BIENS
+// ============================================================================
+
+model Property {
+  id                  Int       @id @default(autoincrement())
+  reference           String    @db.VarChar(100)
+  title               String    @db.VarChar(255)
+  
+  // Type de bien
+  transactionType     String    @db.VarChar(50)  // sale, rent
+  propertyType        String    @db.VarChar(50)  // apartment, house, studio, villa, commercial, parking, land, other
+  
+  // Localisation
+  address             String    @db.VarChar(255)
+  postalCode          String?   @db.VarChar(10)
+  latitude            Decimal?  @db.Decimal(10, 8)
+  longitude           Decimal?  @db.Decimal(11, 8)
+  
+  // Prix & Surface
+  price               Decimal   @db.Decimal(15, 2)
+  surface             Int?
+  
+  // Composition
+  rooms               Int?
+  bedrooms            Int?
+  bathrooms           Int?
+  floor               Int?
+  
+  // Équipements
+  hasElevator         Boolean   @default(false)
+  hasBalcony          Boolean   @default(false)
+  hasTerrrace         Boolean   @default(false)
+  hasGarden           Boolean   @default(false)
+  hasParking          Boolean   @default(false)
+  hasCellar           Boolean   @default(false)
+  isFurnished         Boolean   @default(false)
+  
+  // Statut
+  availabilityDate    DateTime?
+  status              String    @default("available") @db.VarChar(50)  // available, reserved, under_offer, sold, rented, inactive
+  
+  // Description
+  description         String?
+  mainPhotoUrl        String?   @db.VarChar(500)
+  
+  // Audit
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relations
+  agencyId            Int
+  agency              Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  assignedAgentId     Int?
+  assignedAgent       User?     @relation(fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  cityId              Int
+  city                City      @relation(fields: [cityId], references: [id], onDelete: Restrict)
+  matches             Match[]
+
+  @@unique([agencyId, reference])
+  @@index([agencyId])
+  @@index([assignedAgentId])
+  @@index([cityId])
+  @@index([status])
+  @@index([transactionType])
+  @@index([propertyType])
+  @@index([price])
+  @@index([surface])
+  @@index([bedrooms])
+}
+
+// ============================================================================
+// LEADS
+// ============================================================================
+
+model Lead {
+  id                  Int       @id @default(autoincrement())
+  firstName           String    @db.VarChar(100)
+  lastName            String    @db.VarChar(100)
+  email               String?   @db.VarChar(255)
+  phone               String?   @db.VarChar(20)
+  
+  // Source
+  source              String    @db.VarChar(50)  // website, leboncoin, seloger, facebook, phone, manual, other
+  sourceMetadata      Json?     // Infos supplémentaires
+  
+  // Critères de recherche
+  transactionType     String    @db.VarChar(50)  // sale, rent
+  propertyType        String    @db.VarChar(50)  // apartment, house, studio, villa, commercial, other
+  
+  // Budget
+  budgetMin           Decimal?  @db.Decimal(15, 2)
+  budgetMax           Decimal   @db.Decimal(15, 2)
+  
+  // Surface
+  surfaceMin          Int?
+  surfaceMax          Int?
+  
+  // Composition
+  roomsMin            Int?
+  roomsMax            Int?
+  bedroomsMin         Int?
+  bedroomsMax         Int?
+  
+  // Autres
+  availabilityDate    DateTime?
+  furnishedRequired   Boolean   @default(false)
+  notes               String?
+  
+  // Statut
+  status              String    @default("new") @db.VarChar(50)  // new, contacted, qualified, properties_sent, visit_scheduled, visit_completed, offer, won, lost, unqualified
+  priority            String    @default("normal") @db.VarChar(50)  // very_hot, hot, normal, low
+  
+  // Audit
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  firstContactAt      DateTime?
+
+  // Relations
+  agencyId            Int
+  agency              Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  assignedAgentId     Int?
+  assignedAgent       User?     @relation(fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  leadCities          LeadCity[]
+  preferences         LeadPreference[]
+  matches             Match[]
+  activities          LeadActivity[]
+  integrationLogs     IntegrationLog[]
+
+  @@index([agencyId])
+  @@index([assignedAgentId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([priority])
+  @@index([source])
+  @@index([transactionType])
+}
+
+model LeadCity {
+  id          Int       @id @default(autoincrement())
+  priority    String    @default("preferred") @db.VarChar(50)  // preferred, acceptable
+  createdAt   DateTime  @default(now())
+
+  // Relations
+  leadId      Int
+  lead        Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  cityId      Int
+  city        City      @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@unique([leadId, cityId])
+  @@index([leadId])
+  @@index([cityId])
+}
+
+model LeadPreference {
+  id            Int       @id @default(autoincrement())
+  criteriaKey   String    @db.VarChar(100)  // parking, balcony, elevator, etc.
+  valueType     String    @db.VarChar(50)   // boolean, integer, string, decimal
+  value         String    // Stored as text, parsed based on valueType
+  importance    String    @db.VarChar(50)   // mandatory, important, preferred
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  leadId        Int
+  lead          Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@index([criteriaKey])
+}
+
+// ============================================================================
+// MATCHING
+// ============================================================================
+
+model Match {
+  id              Int       @id @default(autoincrement())
+  score           Decimal   @db.Decimal(5, 2)  // 0.00 to 100.00
+  eligible        Boolean   // TRUE if passes blocking filters
+  matchDetails    Json      // Complete matching result
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  agencyId        Int
+  agency          Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  leadId          Int
+  lead            Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  propertyId      Int
+  property        Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([leadId, propertyId])
+  @@index([agencyId])
+  @@index([leadId])
+  @@index([propertyId])
+  @@index([score])
+  @@index([eligible])
+}
+
+// ============================================================================
+// AUDIT & ACTIVITIES
+// ============================================================================
+
+model LeadActivity {
+  id            Int       @id @default(autoincrement())
+  actionType    String    @db.VarChar(100)  // call, email, sms, status_change, note_added, properties_sent, visit_scheduled
+  description   String?
+  createdAt     DateTime  @default(now())
+
+  // Relations
+  agencyId      Int
+  agency        Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  leadId        Int
+  lead          Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  userId        Int?
+  user          User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([leadId])
+  @@index([userId])
+  @@index([agencyId])
+}
+
+// ============================================================================
+// ANALYTICS
+// ============================================================================
+
+model DailyAgencyStat {
+  id                      Int       @id @default(autoincrement())
+  date                    DateTime  @db.Date
+  
+  // Leads
+  leadsCreated            Int       @default(0)
+  leadsContacted          Int       @default(0)
+  leadsQualified          Int       @default(0)
+  leadsVisitsScheduled    Int       @default(0)
+  leadsWon                Int       @default(0)
+  
+  // Properties
+  propertiesCreated       Int       @default(0)
+  propertiesSold          Int       @default(0)
+  propertiesRented        Int       @default(0)
+  
+  // Matching
+  totalMatches            Int       @default(0)
+  avgMatchScore           Decimal?  @db.Decimal(5, 2)
+  
+  // Time to response
+  avgResponseTimeMinutes  Int?
+  
+  // Relations
+  agencyId                Int
+  agency                  Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  @@unique([agencyId, date])
+  @@index([agencyId])
+}
+
+// ============================================================================
+// INTEGRATIONS
+// ============================================================================
+
+model IntegrationConfig {
+  id                      Int       @id @default(autoincrement())
+  
+  // Source du portail
+  source                  String    @db.VarChar(50)  // leboncoin, seloger, bien_ici, other
+  
+  // Configuration
+  apiKey                  String    @db.VarChar(500)  // Chiffré!
+  status                  String    @default("pending") @db.VarChar(50)  // pending, connected, error
+  errorMessage            String?   @db.Text
+  
+  // Audit
+  lastCheckAt             DateTime?
+  lastSyncAt              DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  
+  // Relations
+  agencyId                Int
+  agency                  Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  
+  @@unique([agencyId, source])
+  @@index([agencyId])
+  @@index([status])
+}
+
+model IntegrationLog {
+  id                      Int       @id @default(autoincrement())
+  
+  // Source
+  source                  String    @db.VarChar(50)
+  sourceId                String    @db.VarChar(255)  // ID externe (ex: leboncoin_123456)
+  
+  // Résultat
+  status                  String    @db.VarChar(50)  // success, duplicate, error
+  errorMessage            String?   @db.Text
+  
+  // Lead créé (si succès)
+  leadId                  Int?
+  lead                    Lead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  
+  // Metadata
+  data                    Json?     // Données brutes reçues
+  
+  createdAt               DateTime  @default(now())
+  
+  // Relations
+  agencyId                Int
+  agency                  Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  
+  @@index([agencyId])
+  @@index([source])
+  @@index([status])
+  @@index([createdAt])
+}

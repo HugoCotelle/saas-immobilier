@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SaaS Immobilier - Leads</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto'; background: #f5f7fa; }
+        header { background: white; border-bottom: 1px solid #e0e0e0; padding: 20px 0; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); position: sticky; top: 0; z-index: 1000; }
+        .header-content { max-width: 1200px; margin: 0 auto; padding: 0 20px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { font-size: 20px; font-weight: 700; color: #333; }
+        nav { display: flex; gap: 30px; align-items: center; }
+        nav a { color: #666; text-decoration: none; font-weight: 500; transition: color 0.3s ease; cursor: pointer; }
+        nav a:hover { color: #667eea; }
+        nav a.active { color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 5px; }
+        .user-info { display: flex; align-items: center; gap: 15px; }
+        .user-email { font-size: 14px; color: #666; }
+        .logout-btn { background: #ff6b6b; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-weight: 500; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 40px 20px; }
+        .page-title { color: #333; font-size: 32px; margin-bottom: 10px; }
+        .page-subtitle { color: #999; font-size: 16px; margin-bottom: 40px; }
+        .leads-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+        .lead-card { background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); border-left: 4px solid #667eea; }
+        .lead-card:hover { box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12); transform: translateY(-2px); }
+        .lead-name { font-size: 18px; font-weight: 700; color: #333; margin-bottom: 12px; }
+        .lead-field { display: flex; margin-bottom: 10px; font-size: 14px; }
+        .lead-label { color: #999; font-weight: 500; width: 80px; }
+        .lead-value { color: #333; flex: 1; word-break: break-all; }
+        .lead-badge { display: inline-block; background: #e8f0fe; color: #1e40af; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; margin-top: 10px; }
+        .loading { text-align: center; padding: 40px; color: #999; }
+        .loader { display: inline-block; width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top-color: #667eea; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .error { background: #fee; color: #c33; padding: 20px; border-radius: 10px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        function App() {
+            const [leads, setLeads] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [user, setUser] = useState(null);
+            useEffect(() => {
+                const token = localStorage.getItem('token');
+                const userData = localStorage.getItem('user');
+                if (!token) {
+                    window.location.href = '/login.html';
+                    return;
+                }
+                if (userData) setUser(JSON.parse(userData));
+                fetchLeads(token);
+            }, []);
+            const fetchLeads = async (token) => {
+                try {
+                    setLoading(true);
+                    const response = await fetch('http://localhost:8888/api/v1/leads', {
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+                    });
+                    if (!response.ok) {
+                        if (response.status === 401) {
+                            localStorage.removeItem('token');
+                            localStorage.removeItem('user');
+                            window.location.href = '/login.html';
+                        }
+                        throw new Error(`Erreur API: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    setLeads(data);
+                    setError(null);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+            const handleLogout = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = '/login.html';
+            };
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo">🏢 SaaS Immobilier</div>
+                            <nav>
+                                <a href="/index.html" className="active">Leads</a>
+                                <a href="/matching.html">Matching</a>
+                                <a href="/dashboard.html">Dashboard</a>
+                            </nav>
+                            <div className="user-info">
+                                {user && <span className="user-email">{user.email}</span>}
+                                <button className="logout-btn" onClick={handleLogout}>Logout</button>
+                            </div>
+                        </div>
+                    </header>
+                    <div className="container">
+                        <h1 className="page-title">📋 Leads</h1>
+                        <p className="page-subtitle">Gérez vos {leads.length} leads en direct</p>
+                        {error && <div className="error">❌ Erreur: {error}</div>}
+                        {loading ? (
+                            <div className="loading">
+                                <div className="loader"></div>
+                                <p style={{ marginTop: '20px' }}>Chargement des leads...</p>
+                            </div>
+                        ) : (
+                            <div className="leads-grid">
+                                {leads.map((lead, index) => (
+                                    <div key={index} className="lead-card">
+                                        <div className="lead-name">{lead.firstName} {lead.lastName}</div>
+                                        <div className="lead-field"><span className="lead-label">Email:</span><span className="lead-value">{lead.email}</span></div>
+                                        <div className="lead-field"><span className="lead-label">Phone:</span><span className="lead-value">{lead.phone || 'N/A'}</span></div>
+                                        <div className="lead-field"><span className="lead-label">Type:</span><span className="lead-value">{lead.propertyType}</span></div>
+                                        <span className="lead-badge">Lead #{lead.id}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </>
+            );
+        }
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>

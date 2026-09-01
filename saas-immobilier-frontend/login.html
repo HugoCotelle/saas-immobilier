@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SaaS Immobilier - Login</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto'; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 20px; }
+        .auth-container { background: white; border-radius: 10px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2); width: 100%; max-width: 400px; padding: 40px; }
+        .auth-header { text-align: center; margin-bottom: 30px; }
+        .auth-header h1 { color: #333; font-size: 28px; margin-bottom: 10px; }
+        .auth-header p { color: #999; font-size: 14px; }
+        .tabs { display: flex; gap: 0; margin-bottom: 30px; border-bottom: 1px solid #e0e0e0; }
+        .tab { flex: 1; padding: 12px; text-align: center; cursor: pointer; border-bottom: 3px solid transparent; color: #999; font-weight: 500; transition: all 0.3s ease; }
+        .tab.active { border-bottom-color: #667eea; color: #667eea; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; color: #333; font-weight: 500; margin-bottom: 8px; font-size: 14px; }
+        input { width: 100%; padding: 12px; border: 1px solid #e0e0e0; border-radius: 5px; font-size: 14px; }
+        input:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1); }
+        button { width: 100%; padding: 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 5px; font-weight: 600; font-size: 14px; cursor: pointer; margin-top: 10px; }
+        button:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(102, 126, 234, 0.3); }
+        .error { background: #fee; color: #c33; padding: 12px; border-radius: 5px; margin-bottom: 20px; font-size: 14px; }
+        .success { background: #efe; color: #3c3; padding: 12px; border-radius: 5px; margin-bottom: 20px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        function AuthApp() {
+            const [activeTab, setActiveTab] = useState('login');
+            const [loading, setLoading] = useState(false);
+            const [message, setMessage] = useState(null);
+            const [loginData, setLoginData] = useState({ email: '', password: '' });
+            const [signupData, setSignupData] = useState({ email: '', password: '', confirmPassword: '', firstName: '', companyName: '' });
+            const API_URL = 'http://localhost:8888';
+            useEffect(() => {
+                const token = localStorage.getItem('token');
+                if (token) window.location.href = '/index.html';
+            }, []);
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setMessage(null);
+                setLoading(true);
+                try {
+                    const response = await fetch(`${API_URL}/auth/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(loginData)
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        localStorage.setItem('token', data.token);
+                        localStorage.setItem('user', JSON.stringify(data.user));
+                        setMessage({ type: 'success', text: 'Connexion réussie! Redirection...' });
+                        setTimeout(() => { window.location.href = '/index.html'; }, 1500);
+                    } else {
+                        setMessage({ type: 'error', text: data.message || 'Erreur de connexion' });
+                    }
+                } catch (error) {
+                    setMessage({ type: 'error', text: 'Erreur serveur: ' + error.message });
+                } finally {
+                    setLoading(false);
+                }
+            };
+            const handleSignup = async (e) => {
+                e.preventDefault();
+                setMessage(null);
+                if (signupData.password !== signupData.confirmPassword) {
+                    setMessage({ type: 'error', text: 'Les mots de passe ne correspondent pas' });
+                    return;
+                }
+                setLoading(true);
+                try {
+                    const response = await fetch(`${API_URL}/auth/register`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: signupData.email, password: signupData.password, first_name: signupData.firstName, company_name: signupData.companyName })
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        localStorage.setItem('token', data.token);
+                        localStorage.setItem('user', JSON.stringify(data.user));
+                        setMessage({ type: 'success', text: 'Inscription réussie! Redirection...' });
+                        setTimeout(() => { window.location.href = '/index.html'; }, 1500);
+                    } else {
+                        setMessage({ type: 'error', text: data.message || 'Erreur inscription' });
+                    }
+                } catch (error) {
+                    setMessage({ type: 'error', text: 'Erreur serveur: ' + error.message });
+                } finally {
+                    setLoading(false);
+                }
+            };
+            return (
+                <div className="auth-container">
+                    <div className="auth-header">
+                        <h1>🏢 SaaS Immobilier</h1>
+                        <p>Gestion intelligente de vos leads &amp; propriétés</p>
+                    </div>
+                    {message && <div className={message.type === 'error' ? 'error' : 'success'}>{message.text}</div>}
+                    <div className="tabs">
+                        <div className={`tab ${activeTab === 'login' ? 'active' : ''}`} onClick={() => setActiveTab('login')}>Connexion</div>
+                        <div className={`tab ${activeTab === 'signup' ? 'active' : ''}`} onClick={() => setActiveTab('signup')}>Inscription</div>
+                    </div>
+                    {activeTab === 'login' && (
+                        <form onSubmit={handleLogin}>
+                            <div className="form-group">
+                                <label>Email</label>
+                                <input type="email" value={loginData.email} onChange={(e) => setLoginData({...loginData, email: e.target.value})} placeholder="votre@email.com" required disabled={loading} />
+                            </div>
+                            <div className="form-group">
+                                <label>Mot de passe</label>
+                                <input type="password" value={loginData.password} onChange={(e) => setLoginData({...loginData, password: e.target.value})} placeholder="••••••••" required disabled={loading} />
+                            </div>
+                            <button type="submit" disabled={loading}>{loading ? 'Connexion...' : 'Se connecter'}</button>
+                        </form>
+                    )}
+                    {activeTab === 'signup' && (
+                        <form onSubmit={handleSignup}>
+                            <div className="form-group"><label>Email</label><input type="email" value={signupData.email} onChange={(e) => setSignupData({...signupData, email: e.target.value})} placeholder="votre@email.com" required disabled={loading} /></div>
+                            <div className="form-group"><label>Prénom</label><input type="text" value={signupData.firstName} onChange={(e) => setSignupData({...signupData, firstName: e.target.value})} placeholder="Hugo" disabled={loading} /></div>
+                            <div className="form-group"><label>Entreprise</label><input type="text" value={signupData.companyName} onChange={(e) => setSignupData({...signupData, companyName: e.target.value})} placeholder="Votre agence" disabled={loading} /></div>
+                            <div className="form-group"><label>Mot de passe</label><input type="password" value={signupData.password} onChange={(e) => setSignupData({...signupData, password: e.target.value})} placeholder="••••••••" required disabled={loading} /></div>
+                            <div className="form-group"><label>Confirmer le mot de passe</label><input type="password" value={signupData.confirmPassword} onChange={(e) => setSignupData({...signupData, confirmPassword: e.target.value})} placeholder="••••••••" required disabled={loading} /></div>
+                            <button type="submit" disabled={loading}>{loading ? 'Inscription...' : "S'inscrire"}</button>
+                        </form>
+                    )}
+                </div>
+            );
+        }
+        ReactDOM.render(<AuthApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>
