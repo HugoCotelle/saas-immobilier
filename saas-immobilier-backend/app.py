@@ -365,6 +365,20 @@ def get_stats():
         return jsonify(stats), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
+        @app.route('/api/v1/leads', methods=['GET'])
+@token_required
+def get_leads(current_user):
+    """Récupérer tous les leads"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM leads WHERE user_id = %s ORDER BY id", (current_user['id'],))
+        leads = cur.fetchall()
+        cur.close()
+        conn.close()
+        return jsonify(leads), 200
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
 # Initialiser la base de données au démarrage
 @app.route('/api/v1/init-db', methods=['POST'])
 def init_db():
