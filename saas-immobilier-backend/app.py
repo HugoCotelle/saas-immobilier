@@ -221,34 +221,16 @@ def login():
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("SELECT id, email, password_hash, first_name, company_name FROM users WHERE email = %s", (email,))
-user = cur.fetchone()
+        user = cur.fetchone()
         if not user or not check_password_hash(user['password_hash'], password):
             cur.close()
             conn.close()
             return jsonify({"message": "Invalid credentials"}), 401
-        token = jwt.encode(
-            {
-                'user_id': user['id'],
-                'email': user['email'],
-                'exp': datetime.utcnow() + timedelta(days=30)
-            },
-            SECRET_KEY,
-            algorithm="HS256"
-        )
         cur.close()
         conn.close()
-        return jsonify({
-            "message": "Login successful",
-            "token": token,
-            "user": {
-                "id": user['id'],
-                "email": user['email'],
-                "first_name": user['first_name'],
-                "company_name": user['company_name']
-            }
-        }), 200
+        token = create_access_token(identity={'id': user['id'], 'email': user['email']}, expires=timedelta(days=30))
+        return jsonify({"message": "Login successful", "token": token}), 200
     except Exception as e:
-        print(f"Error: {str(e)}")
         return jsonify({"message": str(e)}), 500
 
 @app.route('/auth/profile', methods=['GET'])
