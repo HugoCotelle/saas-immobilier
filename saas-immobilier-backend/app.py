@@ -221,7 +221,7 @@ def login():
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("SELECT id, email, password_hash, first_name, company_name FROM users WHERE email = %s", (email,))
-        user = cur.fetchone()
+user = cur.fetchone()
         if not user or not check_password_hash(user['password_hash'], password):
             cur.close()
             conn.close()
