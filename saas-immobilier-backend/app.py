@@ -8,7 +8,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
-
+from werkzeug.security import generate_password_hash
 load_dotenv()
 
 app = Flask(__name__)
@@ -109,7 +109,7 @@ def init_database():
             cursor.execute("""
                 INSERT INTO users (email, password_hash, first_name, company_name)
                 VALUES (%s, %s, %s, %s)
-            """, ('test@example.com', 'hashed_password_123', 'Test', 'Test Company'))
+      """, ('test@example.com', generate_password_hash('password123'), 'Test', 'Test Company'))
             
             # 33 leads
             leads_data = [
