@@ -24,7 +24,17 @@ try:
 except Exception as e:
     print(f"❌ Erreur de connexion: {e}")
     db = None# Initialiser la base de données
-
+# Créer un JWT token
+def create_access_token(identity, expires):
+    """Créer un JWT token"""
+    payload = {
+        'id': identity['id'],
+        'email': identity['email'],
+        'exp': datetime.utcnow() + expires,
+        'iat': datetime.utcnow()
+    }
+    token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
+    return token
 def get_db_connection():
     conn = psycopg2.connect(DATABASE_URL)
     return conn
