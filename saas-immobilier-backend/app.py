@@ -264,7 +264,6 @@ def health():
     return jsonify({"status": "OK"}), 200
 
 @app.route('/api/v1/leads', methods=['GET'])
-@token_required
 def get_leads():
     try:
         conn = get_db_connection()
