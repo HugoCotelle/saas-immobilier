@@ -24,8 +24,7 @@ try:
 except Exception as e:
     print(f"❌ Erreur de connexion: {e}")
     db = None# Initialiser la base de données
-if db:
-    init_database()
+
 def get_db_connection():
     conn = psycopg2.connect(DATABASE_URL)
     return conn
