@@ -37,7 +37,7 @@
             const [message, setMessage] = useState(null);
             const [loginData, setLoginData] = useState({ email: '', password: '' });
             const [signupData, setSignupData] = useState({ email: '', password: '', confirmPassword: '', firstName: '', companyName: '' });
-            const API_URL = 'http://localhost:8888';
+            const API_URL = 'https://saas-immobilier-921a.onrender.com';
             useEffect(() => {
                 const token = localStorage.getItem('token');
                 if (token) window.location.href = '/index.html';
