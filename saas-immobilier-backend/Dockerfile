@@ -26,9 +26,5 @@ USER appuser
 # Exposer le port
 EXPOSE 8080
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD python -c "import requests; requests.get('http://localhost:8080/health', timeout=5)" || exit 1
-
 # Lancer l'app avec gunicorn
-CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:8080", "--workers", "4", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-"]
+CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:8080", "--workers", "4", "--timeout", "120"]
