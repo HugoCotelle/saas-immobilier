@@ -274,7 +274,6 @@ def get_leads():
         conn.close()
         return jsonify(leads), 200
     except Exception as e:
-        print(f"Error: {str(e)}")
         return jsonify({"message": str(e)}), 500
 
 @app.route('/api/v1/properties', methods=['GET'])
