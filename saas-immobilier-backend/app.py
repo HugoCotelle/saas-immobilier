@@ -17,7 +17,15 @@ CORS(app)
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://hugocotelle@localhost:5432/saas_immobilier")
 PORT = int(os.getenv("PORT", 8888))
-
+# Créer la connexion globale à la BD
+try:
+    db = psycopg2.connect(DATABASE_URL)
+    print("✅ Connexion à la base de données établie")
+except Exception as e:
+    print(f"❌ Erreur de connexion: {e}")
+    db = None# Initialiser la base de données
+if db:
+    init_database()
 def get_db_connection():
     conn = psycopg2.connect(DATABASE_URL)
     return conn
@@ -367,8 +375,8 @@ def get_stats():
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 # Initialiser la base de données au démarrage
-init_database()
+
 if __name__ == '__main__':
     print(f"🚀 Backend running on http://localhost:{PORT}")
     print(f"🔐 JWT Secret Key: {SECRET_KEY}")
-    app.run(host='0.0.0.0', port=PORT, debug=True)
+    app.run(host='0.0.0.0', port=PORT, debug=False)
