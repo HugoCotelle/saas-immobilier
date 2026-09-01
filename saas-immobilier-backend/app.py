@@ -366,13 +366,12 @@ def get_stats():
     except Exception as e:
         return jsonify({"message": str(e)}), 500
         @app.route('/api/v1/leads', methods=['GET'])
-@token_required
-def get_leads(current_user):
+def get_leads():
     """Récupérer tous les leads"""
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT * FROM leads WHERE user_id = %s ORDER BY id", (current_user['id'],))
+        cur.execute("SELECT * FROM leads ORDER BY id")
         leads = cur.fetchall()
         cur.close()
         conn.close()
