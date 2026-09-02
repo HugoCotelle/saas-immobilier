@@ -46,6 +46,7 @@
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
             const [user, setUser] = useState(null);
+            const API_URL = 'https://saas-immobilier-921a.onrender.com';
             useEffect(() => {
                 const token = localStorage.getItem('token');
                 const userData = localStorage.getItem('user');
@@ -54,13 +55,15 @@
                     return;
                 }
                 if (userData) setUser(JSON.parse(userData));
-                fetchLeads(token);
+                fetchLeads();
+                const API_URL = 'https://saas-immobilier-921a.onrender.com';
             }, []);
-            const fetchLeads = async (token) => {
+             const fetchLeads = async () => {
                 try {
                     setLoading(true);
-                    const response = await fetch('http://localhost:8888/api/v1/leads', {
-                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+                    const response = await fetch(`${API_URL}/api/v1/leads`, {
+                        method: 'GET',
+                        headers: { 'Content-Type': 'application/json' }
                     });
                     if (!response.ok) {
                         if (response.status === 401) {
@@ -113,11 +116,13 @@
                             <div className="leads-grid">
                                 {leads.map((lead, index) => (
                                     <div key={index} className="lead-card">
-                                        <div className="lead-name">{lead.firstName} {lead.lastName}</div>
-                                        <div className="lead-field"><span className="lead-label">Email:</span><span className="lead-value">{lead.email}</span></div>
-                                        <div className="lead-field"><span className="lead-label">Phone:</span><span className="lead-value">{lead.phone || 'N/A'}</span></div>
-                                        <div className="lead-field"><span className="lead-label">Type:</span><span className="lead-value">{lead.propertyType}</span></div>
-                                        <span className="lead-badge">Lead #{lead.id}</span>
+                                         <div className="lead-name">{lead.name}</div>
+                                       <div className="lead-field"><span className="lead-label">Email:</span><span className="lead-value">{lead.email || 'N/A'}</span></div>
+                                       <div className="lead-field"><span className="lead-label">Phone:</span><span className="lead-value">{lead.phone || 'N/A'}</span></div>
+                                       <div className="lead-field"><span className="lead-label">Budget:</span><span className="lead-value">{lead.budget ? `${lead.budget.toLocaleString()}€` : 'N/A'}</span></div>
+                                       <div className="lead-field"><span className="lead-label">Location:</span><span className="lead-value">{lead.location || 'N/A'}</span></div>
+                                       <div className="lead-field"><span className="lead-label">Type:</span><span className="lead-value">{lead.property_type || 'N/A'}</span></div>
+                                       <span className="lead-badge">Lead #{lead.id}</span>
                                     </div>
                                 ))}
                             </div>
