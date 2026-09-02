@@ -61,15 +61,18 @@
         console.error('Error parsing user data');
     }
 }
-                const API_URL = 'https://saas-immobilier-921a.onrender.com';
-fetchLeads();
+                
+fetchLeads(token);
             }, []);
-             const fetchLeads = async () => {
+             const fetchLeads = async (token) => {
                 try {
                     setLoading(true);
                     const response = await fetch(`${API_URL}/api/v1/leads`, {
                         method: 'GET',
-                        headers: { 'Content-Type': 'application/json' }
+                        headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`
+}
                     });
                     if (!response.ok) {
                         if (response.status === 401) {
