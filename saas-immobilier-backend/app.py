@@ -268,7 +268,7 @@ def get_leads():
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-       cur.execute("SELECT id, name, email, phone, budget, location, property_type FROM leads ORDER BY id")
+        cur.execute("SELECT id, name, email, phone, budget, location, property_type FROM leads ORDER BY id")
         leads = cur.fetchall()
         cur.close()
         conn.close()
