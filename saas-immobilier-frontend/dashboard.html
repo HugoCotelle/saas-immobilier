@@ -49,6 +49,7 @@
             const [user, setUser] = useState(null);
             const chartRef = useRef(null);
             const chartInstance = useRef(null);
+            const API_URL = 'https://saas-immobilier-921a.onrender.com';
             useEffect(() => {
                 const token = localStorage.getItem('token');
                 const userData = localStorage.getItem('user');
@@ -62,7 +63,7 @@
             const fetchStats = async (token) => {
                 try {
                     setLoading(true);
-                    const response = await fetch('http://localhost:8888/api/v1/stats', {
+                   const response = await fetch(`${API_URL}/api/v1/stats`, {
                         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
                     });
                     if (!response.ok) {
