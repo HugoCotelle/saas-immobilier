@@ -361,8 +361,8 @@ def get_stats():
         cur.close()
         conn.close()
         return jsonify(stats), 200
-        except Exception as e:
-         return jsonify({"message": str(e)}), 500
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
 
 # Initialiser la base de données au démarrage
 @app.route('/api/v1/init-db', methods=['POST'])
