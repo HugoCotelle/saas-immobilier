@@ -9,38 +9,296 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto'; background: #f5f7fa; }
-        header { background: white; border-bottom: 1px solid #e0e0e0; padding: 20px 0; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); position: sticky; top: 0; z-index: 1000; }
-        .header-content { max-width: 1200px; margin: 0 auto; padding: 0 20px; display: flex; justify-content: space-between; align-items: center; }
-        .logo { font-size: 20px; font-weight: 700; color: #333; }
-        nav { display: flex; gap: 30px; }
-        nav a { color: #666; text-decoration: none; font-weight: 500; cursor: pointer; }
-        nav a:hover { color: #667eea; }
-        nav a.active { color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 5px; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 40px 20px; }
-        .filters { background: white; border-radius: 10px; padding: 20px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); display: flex; gap: 15px; align-items: center; flex-wrap: wrap; }
-        .filter-button { padding: 8px 16px; border: 1px solid #ddd; border-radius: 20px; cursor: pointer; background: white; font-weight: 500; transition: all 0.3s; }
-        .filter-button.active { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-color: transparent; }
-        .leads-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px; }
-        .lead-card { background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); cursor: pointer; transition: all 0.3s; border-left: 4px solid #ddd; }
-        .lead-card.hot { border-left-color: #c33; }
-        .lead-card.warm { border-left-color: #d97706; }
-        .lead-card.cold { border-left-color: #999; }
-        .lead-card:hover { transform: translateY(-4px); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12); }
-        .lead-name { font-size: 18px; font-weight: 700; color: #333; margin-bottom: 10px; }
-        .lead-info { font-size: 13px; color: #666; margin-bottom: 5px; }
-        .quality-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-top: 10px; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto'; 
+            background: #f5f7fa;
+        }
+        
+        header {
+            background: white;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 20px 0;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+        
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            font-size: 20px;
+            font-weight: 700;
+            color: #333;
+        }
+        
+        nav {
+            display: flex;
+            gap: 30px;
+        }
+        
+        nav a {
+            color: #666;
+            text-decoration: none;
+            font-weight: 500;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            padding-bottom: 5px;
+            transition: all 0.3s;
+        }
+        
+        nav a:hover, nav a.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        
+        .page-title {
+            font-size: 32px;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        
+        .filters {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .filter-button {
+            padding: 10px 20px;
+            border: 2px solid #ddd;
+            border-radius: 25px;
+            cursor: pointer;
+            background: white;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        .filter-button:hover {
+            border-color: #667eea;
+            color: #667eea;
+        }
+        
+        .filter-button.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: transparent;
+        }
+        
+        .content-wrapper {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 30px;
+        }
+        
+        .leads-section {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        
+        .leads-section h3 {
+            font-size: 16px;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 15px;
+        }
+        
+        .lead-item {
+            padding: 15px;
+            border: 2px solid #f0f0f0;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 10px;
+            transition: all 0.3s;
+            border-left: 4px solid #ddd;
+        }
+        
+        .lead-item:hover {
+            border-color: #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+        }
+        
+        .lead-item.selected {
+            background: #f5f7fa;
+            border-color: #667eea;
+            border-left-color: #667eea;
+        }
+        
+        .lead-item.hot { border-left-color: #c33; }
+        .lead-item.warm { border-left-color: #d97706; }
+        .lead-item.cold { border-left-color: #999; }
+        
+        .lead-name {
+            font-weight: 700;
+            color: #333;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+        
+        .lead-info {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+        
+        .quality-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-top: 8px;
+        }
+        
         .quality-hot { background: #ffe8e8; color: #c33; }
         .quality-warm { background: #fff4e6; color: #d97706; }
         .quality-cold { background: #f0f0f0; color: #666; }
-        .matches-container { display: grid; grid-template-columns: 1fr; gap: 15px; max-height: 400px; overflow-y: auto; }
-        .match-item { background: #f9f9f9; border-radius: 8px; padding: 12px; border-left: 3px solid #667eea; }
-        .match-title { font-weight: 600; color: #333; margin-bottom: 5px; }
-        .match-score { float: right; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 4px 12px; border-radius: 12px; font-weight: 700; font-size: 12px; }
-        .match-details { font-size: 12px; color: #666; }
-        .match-price { font-weight: 600; color: #333; margin-top: 5px; }
-        .empty-state { text-align: center; padding: 40px; color: #999; }
-        .financing-info { background: #f0f8ff; border-left: 3px solid #667eea; padding: 10px; border-radius: 4px; margin-top: 10px; font-size: 12px; }
+        
+        .matches-section {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+        
+        .matches-section h3 {
+            font-size: 16px;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 15px;
+        }
+        
+        .match-card {
+            padding: 15px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            background: #fafafa;
+        }
+        
+        .match-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 10px;
+        }
+        
+        .match-title {
+            font-weight: 700;
+            color: #333;
+            font-size: 14px;
+        }
+        
+        .match-score {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-weight: 700;
+            font-size: 12px;
+        }
+        
+        .match-details {
+            font-size: 12px;
+            color: #666;
+            line-height: 1.5;
+        }
+        
+        .match-details-item {
+            margin-bottom: 5px;
+        }
+        
+        .match-price {
+            font-weight: 700;
+            color: #333;
+            margin-top: 8px;
+            font-size: 13px;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+        
+        .financing-info {
+            background: #f0f8ff;
+            border-left: 3px solid #667eea;
+            padding: 12px;
+            border-radius: 4px;
+            margin-top: 12px;
+            font-size: 12px;
+        }
+        
+        .financing-info-item {
+            margin-bottom: 5px;
+            color: #333;
+        }
+        
+        .edit-button {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 5px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 12px;
+            margin-top: 12px;
+            cursor: pointer;
+            border: none;
+            transition: all 0.3s;
+        }
+        
+        .edit-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .lead-details {
+            background: #f5f7fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 13px;
+        }
+        
+        .lead-details-label {
+            color: #999;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-bottom: 3px;
+        }
+        
+        .lead-details-value {
+            color: #333;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -137,6 +395,8 @@
                     </header>
                     
                     <div className="container">
+                        <div className="page-title">🎯 Matching Intelligent</div>
+                        
                         <div className="filters">
                             <button 
                                 className={`filter-button ${qualityFilter === 'all' ? 'active' : ''}`}
@@ -164,88 +424,90 @@
                             </button>
                         </div>
                         
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
-                            <div className="leads-list">
+                        <div className="content-wrapper">
+                            <div className="leads-section">
+                                <h3>📋 Leads</h3>
                                 {filteredLeads.map(lead => (
                                     <div 
                                         key={lead.id}
-                                        className={`lead-card ${lead.lead_quality}`}
+                                        className={`lead-item ${lead.lead_quality} ${selectedLeadId === lead.id ? 'selected' : ''}`}
                                         onClick={() => setSelectedLeadId(lead.id)}
-                                        style={{ opacity: selectedLeadId === lead.id ? 1 : 0.7 }}
                                     >
                                         <div className="lead-name">{lead.name}</div>
                                         <div className="lead-info">📧 {lead.email}</div>
                                         <div className="lead-info">📱 {lead.phone}</div>
                                         <div className="lead-info">💰 {lead.budget?.toLocaleString()}€</div>
                                         <div className="lead-info">📍 {lead.location}</div>
-                                        <div className="lead-info">🏠 {lead.property_type}</div>
                                         {getQualityBadge(lead.lead_quality)}
-                                        
-                                        {(lead.financing_status !== 'unknown' || lead.purchase_urgency !== 'unknown') && (
-                                            <div className="financing-info">
-                                                <div>💳 {getFinancingLabel(lead.financing_status)}</div>
-                                                <div>⏱️ {getUrgencyLabel(lead.purchase_urgency)}</div>
-                                            </div>
-                                        )}
                                     </div>
                                 ))}
                             </div>
                             
-                            <div>
+                            <div className="matches-section">
                                 {selectedLead ? (
                                     <>
-                                        <div style={{ background: 'white', borderRadius: '10px', padding: '20px', marginBottom: '20px', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)' }}>
-                                            <h2 style={{ marginBottom: '20px' }}>Détails: {selectedLead.name}</h2>
-                                            <div style={{ marginBottom: '15px' }}>
-                                                <strong>Quality:</strong> {getQualityBadge(selectedLead.lead_quality)}
-                                            </div>
-                                            {selectedLead.financing_status !== 'unknown' && (
-                                                <div style={{ marginBottom: '10px' }}>
-                                                    <strong>Financement:</strong> {getFinancingLabel(selectedLead.financing_status)}
-                                                </div>
-                                            )}
-                                            {selectedLead.purchase_urgency !== 'unknown' && (
-                                                <div style={{ marginBottom: '10px' }}>
-                                                    <strong>Urgence:</strong> {getUrgencyLabel(selectedLead.purchase_urgency)}
-                                                </div>
-                                            )}
-                                            <a 
-                                                href={`/leads-profile.html?id=${selectedLead.id}`}
-                                                style={{ 
-                                                    display: 'inline-block',
-                                                    marginTop: '15px',
-                                                    padding: '10px 20px',
-                                                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                                                    color: 'white',
-                                                    textDecoration: 'none',
-                                                    borderRadius: '5px',
-                                                    fontWeight: 600
-                                                }}
-                                            >
-                                                ✏️ Éditer les détails
-                                            </a>
+                                        <h3>Détails: {selectedLead.name}</h3>
+                                        
+                                        <div className="lead-details">
+                                            <div className="lead-details-label">Budget</div>
+                                            <div className="lead-details-value">{selectedLead.budget?.toLocaleString()}€</div>
                                         </div>
                                         
-                                        <div style={{ background: 'white', borderRadius: '10px', padding: '20px', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)' }}>
-                                            <h3 style={{ marginBottom: '15px' }}>🎯 Propriétés Matchées</h3>
-                                            {selectedLead.matches && selectedLead.matches.length > 0 ? (
-                                                <div className="matches-container">
-                                                    {selectedLead.matches.map((match, idx) => (
-                                                        <div key={idx} className="match-item">
-                                                            <div>
-                                                                <div className="match-score">{match.score}%</div>
-                                                                <div className="match-title">{match.title}</div>
-                                                                <div className="match-details">{match.address}</div>
-                                                                <div className="match-price">💰 {match.price?.toLocaleString()}€</div>
-                                                                <div className="match-details">🛏️ {match.rooms} pièces | 📐 {match.size}m²</div>
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            ) : (
-                                                <div className="empty-state">Aucune propriété ne correspond</div>
-                                            )}
+                                        <div className="lead-details">
+                                            <div className="lead-details-label">Type recherché</div>
+                                            <div className="lead-details-value">{selectedLead.property_type}</div>
                                         </div>
+                                        
+                                        <div className="lead-details">
+                                            <div className="lead-details-label">Localisation</div>
+                                            <div className="lead-details-value">{selectedLead.location}</div>
+                                        </div>
+                                        
+                                        {(selectedLead.financing_status !== 'unknown' || selectedLead.purchase_urgency !== 'unknown') && (
+                                            <div className="financing-info">
+                                                {selectedLead.financing_status !== 'unknown' && (
+                                                    <div className="financing-info-item">
+                                                        💳 {getFinancingLabel(selectedLead.financing_status)}
+                                                    </div>
+                                                )}
+                                                {selectedLead.purchase_urgency !== 'unknown' && (
+                                                    <div className="financing-info-item">
+                                                        ⏱️ {getUrgencyLabel(selectedLead.purchase_urgency)}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                        
+                                        <a 
+                                            href={`/leads-profile.html?id=${selectedLead.id}`}
+                                            className="edit-button"
+                                        >
+                                            ✏️ Éditer les détails
+                                        </a>
+                                        
+                                        <h3 style={{ marginTop: '25px', marginBottom: '15px' }}>🎯 Propriétés Matchées</h3>
+                                        
+                                        {selectedLead.matches && selectedLead.matches.length > 0 ? (
+                                            selectedLead.matches.map((match, idx) => (
+                                                <div key={idx} className="match-card">
+                                                    <div className="match-header">
+                                                        <div>
+                                                            <div className="match-title">{match.title}</div>
+                                                            <div className="match-details">{match.address}</div>
+                                                        </div>
+                                                        <div className="match-score">{match.score}%</div>
+                                                    </div>
+                                                    <div className="match-details">
+                                                        <div className="match-details-item">
+                                                            🏠 {match.type} • 🛏️ {match.rooms} pièces • 📐 {match.size}m²
+                                                        </div>
+                                                    </div>
+                                                    <div className="match-price">💰 {match.price?.toLocaleString()}€</div>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div className="empty-state">Aucune propriété ne correspond</div>
+                                        )}
                                     </>
                                 ) : (
                                     <div className="empty-state">Sélectionnez un lead</div>
