@@ -428,6 +428,249 @@ def get_improved_matches():
         return jsonify({"message": str(e)}), 500
 
 # ===== MAIN =====
+# from datetime import datetime, timedelta
+# (ils sont déjà là, pas besoin de les ajouter)
+
+# ===== AJOUTE CES FONCTIONS =====
+
+def calculate_lead_score(lead, property_item):
+    """
+    Calcul intelligent du score de compatibilité lead-propriété
+    Basé sur: budget, type, location, financement, urgence, qualité du lead
+    Score final: 0-100
+    """
+    score = 0
+    
+    # 1. BUDGET MATCH (20 points)
+    if lead['budget']:
+        price_diff = abs(property_item['price'] - lead['budget'])
+        budget_ratio = price_diff / lead['budget']
+        
+        if budget_ratio < 0.05:  # Moins de 5% d'écart
+            score += 20
+        elif budget_ratio < 0.10:  # Moins de 10%
+            score += 18
+        elif budget_ratio < 0.15:  # Moins de 15%
+            score += 15
+        elif budget_ratio < 0.20:  # Moins de 20%
+            score += 12
+        elif budget_ratio < 0.30:  # Moins de 30%
+            score += 8
+        else:
+            score += 0
+    
+    # 2. TYPE DE PROPRIÉTÉ (30 points)
+    if lead.get('property_type') == property_item.get('property_type'):
+        score += 30
+    elif lead.get('property_type') in ['Appartement', 'Maison'] and \
+         property_item.get('property_type') in ['Appartement', 'Maison']:
+        score += 15  # Flexible si les deux sont résidentiels
+    
+    # 3. LOCATION (15 points)
+    if lead.get('location') == property_item.get('address'):
+        score += 15
+    elif lead.get('location') and property_item.get('address'):
+        # Vérifier si la ville est mentionnée dans l'adresse
+        if lead['location'].lower() in property_item['address'].lower():
+            score += 12
+        else:
+            score += 5  # Autre région
+    
+    # 4. ACCORD DE FINANCEMENT (20 points) ← NOUVEAU
+    financing_status = lead.get('financing_status', 'unknown')
+    if financing_status == 'approved':
+        score += 20  # Accord approuvé = très chaud
+    elif financing_status == 'in_progress':
+        score += 15  # En cours = chaud
+    elif financing_status == 'pending':
+        score += 10  # Pending = tiède
+    elif financing_status == 'rejected':
+        score += 0   # Rejeté = froid
+    else:
+        score += 5   # Unknown = on ne sait pas
+    
+    # 5. URGENCE D'ACHAT (15 points) ← NOUVEAU
+    urgency = lead.get('purchase_urgency', 'unknown')
+    if urgency == 'immediate':
+        score += 15  # Urgent = très motivé
+    elif urgency == '1-3_months':
+        score += 12  # Court terme = motivé
+    elif urgency == '3-6_months':
+        score += 8   # Moyen terme = tiède
+    elif urgency == '6plus_months':
+        score += 4   # Long terme = pas pressé
+    else:
+        score += 5   # Unknown
+    
+    # BONUS: Qualité du lead (multiplicateur)
+    quality = lead.get('lead_quality', 'cold')
+    quality_multiplier = {
+        'hot': 1.15,   # +15% pour leads chauds
+        'warm': 1.05,  # +5% pour leads tièdes
+        'cold': 0.90   # -10% pour leads froids
+    }
+    score = score * quality_multiplier.get(quality, 1.0)
+    
+    # Score final entre 0-100
+    return min(100, max(0, int(score)))
+
+
+# ===== AJOUTE CES ROUTES À app.py =====
+
+@app.route('/api/v1/leads/<int:lead_id>', methods=['GET'])
+@token_required
+def get_lead_detail(lead_id):
+    """Récupérer les détails d'un lead spécifique"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, user_id, name, email, phone, budget, location, property_type, 
+                   status, financing_status, purchase_urgency, lead_quality, 
+                   financing_amount, notes, created_at
+            FROM leads 
+            WHERE id = %s AND user_id = %s
+        """, (lead_id, request.user_id))
+        lead = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if not lead:
+            return jsonify({"message": "Lead not found"}), 404
+        
+        return jsonify(lead), 200
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+
+@app.route('/api/v1/leads/<int:lead_id>/update-financing', methods=['PUT'])
+@token_required
+def update_lead_financing(lead_id):
+    """Mettre à jour les infos de financement et urgence du lead"""
+    try:
+        data = request.get_json()
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        cur.execute("""
+            UPDATE leads 
+            SET financing_status = %s,
+                purchase_urgency = %s,
+                lead_quality = %s,
+                financing_amount = %s,
+                notes = %s
+            WHERE id = %s AND user_id = %s
+        """, (
+            data.get('financing_status'),
+            data.get('purchase_urgency'),
+            data.get('lead_quality'),
+            data.get('financing_amount'),
+            data.get('notes'),
+            lead_id,
+            request.user_id
+        ))
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return jsonify({"message": "Lead updated successfully"}), 200
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+
+@app.route('/api/v1/leads/quality/<quality>', methods=['GET'])
+@token_required
+def get_leads_by_quality(quality):
+    """Récupérer les leads par qualité (hot/warm/cold)"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, name, email, phone, budget, location, property_type, 
+                   financing_status, purchase_urgency, lead_quality
+            FROM leads 
+            WHERE user_id = %s AND lead_quality = %s
+            ORDER BY created_at DESC
+        """, (request.user_id, quality))
+        leads = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        return jsonify(leads), 200
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+
+@app.route('/api/v1/improved-matches', methods=['GET'])
+@token_required
+def get_improved_matches():
+    """Retourner les leads avec leurs propriétés matchées ET scoring intelligent"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Récupérer les leads
+        cur.execute("""
+            SELECT id, name, email, phone, budget, location, property_type, 
+                   financing_status, purchase_urgency, lead_quality
+            FROM leads 
+            WHERE user_id = %s
+            ORDER BY lead_quality DESC, created_at DESC
+        """, (request.user_id,))
+        leads = cur.fetchall()
+        
+        # Récupérer les propriétés
+        cur.execute("""
+            SELECT id, title, address, price, rooms, size, property_type, description
+            FROM properties 
+            WHERE user_id = %s
+        """, (request.user_id,))
+        properties = cur.fetchall()
+        
+        cur.close()
+        conn.close()
+        
+        # Calculer les matches avec le nouveau scoring
+        result = []
+        for lead in leads:
+            matches = []
+            for prop in properties:
+                score = calculate_lead_score(lead, prop)
+                
+                if score > 30:  # Minimum 30/100 pour être considéré
+                    matches.append({
+                        "property_id": prop['id'],
+                        "address": prop['address'],
+                        "title": prop['title'],
+                        "type": prop['property_type'],
+                        "price": prop['price'],
+                        "rooms": prop['rooms'],
+                        "size": prop['size'],
+                        "score": score
+                    })
+            
+            # Trier par score décroissant
+            matches.sort(key=lambda x: x['score'], reverse=True)
+            
+            result.append({
+                "id": lead['id'],
+                "name": lead['name'],
+                "email": lead['email'],
+                "phone": lead['phone'],
+                "budget": lead['budget'],
+                "location": lead['location'],
+                "property_type": lead['property_type'],
+                "financing_status": lead['financing_status'],
+                "purchase_urgency": lead['purchase_urgency'],
+                "lead_quality": lead['lead_quality'],
+                "matches": matches
+            })
+        
+        return jsonify(result), 200
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"message": str(e)}), 500
 
 if __name__ == '__main__':
     print(f"🚀 Backend running on http://localhost:{PORT}")
