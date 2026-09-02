@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IMMOFLOW - Profil Lead</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto'; background: #f5f7fa; }
+        header { background: white; border-bottom: 1px solid #e0e0e0; padding: 20px 0; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); position: sticky; top: 0; z-index: 1000; }
+        .header-content { max-width: 1200px; margin: 0 auto; padding: 0 20px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { font-size: 20px; font-weight: 700; color: #333; }
+        nav { display: flex; gap: 30px; align-items: center; }
+        nav a { color: #666; text-decoration: none; font-weight: 500; cursor: pointer; }
+        nav a:hover { color: #667eea; }
+        nav a.active { color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 5px; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 40px 20px; }
+        .lead-header { background: white; border-radius: 10px; padding: 30px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); }
+        .lead-name { font-size: 28px; font-weight: 700; color: #333; margin-bottom: 15px; }
+        .lead-info { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .info-item { display: flex; flex-direction: column; }
+        .info-label { color: #999; font-size: 12px; font-weight: 600; text-transform: uppercase; margin-bottom: 5px; }
+        .info-value { color: #333; font-size: 16px; font-weight: 500; }
+        .quality-badge { display: inline-block; padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 13px; margin-top: 10px; }
+        .quality-hot { background: #ffe8e8; color: #c33; }
+        .quality-warm { background: #fff4e6; color: #d97706; }
+        .quality-cold { background: #f0f0f0; color: #666; }
+        .form-section { background: white; border-radius: 10px; padding: 30px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); }
+        .form-section h2 { font-size: 20px; font-weight: 700; color: #333; margin-bottom: 20px; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; font-weight: 600; color: #333; margin-bottom: 8px; }
+        .form-group select, .form-group input, .form-group textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; font-family: inherit; }
+        .form-group textarea { resize: vertical; min-height: 100px; }
+        .form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
+        .button { padding: 12px 24px; border: none; border-radius: 5px; font-weight: 600; cursor: pointer; transition: all 0.3s; }
+        .button-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .button-primary:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); }
+        .button-secondary { background: #f0f0f0; color: #333; }
+        .button-secondary:hover { background: #e0e0e0; }
+        .matches-section { background: white; border-radius: 10px; padding: 30px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); }
+        .matches-section h2 { font-size: 20px; font-weight: 700; color: #333; margin-bottom: 20px; }
+        .match-card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; margin-bottom: 15px; }
+        .match-header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px; }
+        .match-title { font-weight: 600; color: #333; }
+        .match-score { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 6px 12px; border-radius: 20px; font-weight: 700; font-size: 13px; }
+        .match-details { font-size: 14px; color: #666; }
+        .success-message { background: #efe; color: #3c3; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+        .error-message { background: #fee; color: #c33; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        
+        function LeadProfileApp() {
+            const [lead, setLead] = useState(null);
+            const [matches, setMatches] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [message, setMessage] = useState('');
+            const [formData, setFormData] = useState({
+                financing_status: 'unknown',
+                purchase_urgency: 'unknown',
+                lead_quality: 'cold',
+                financing_amount: '',
+                notes: ''
+            });
+            
+            const API_URL = 'https://saas-immobilier-921a.onrender.com';
+            const leadId = new URLSearchParams(window.location.search).get('id');
+            const token = localStorage.getItem('token');
+            
+            useEffect(() => {
+                fetchLeadData();
+                fetchMatches();
+            }, []);
+            
+            const fetchLeadData = async () => {
+                try {
+                    const response = await fetch(`${API_URL}/api/v1/leads/${leadId}`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    const data = await response.json();
+                    setLead(data);
+                    setFormData({
+                        financing_status: data.financing_status || 'unknown',
+                        purchase_urgency: data.purchase_urgency || 'unknown',
+                        lead_quality: data.lead_quality || 'cold',
+                        financing_amount: data.financing_amount || '',
+                        notes: data.notes || ''
+                    });
+                } catch (err) {
+                    setMessage('Erreur lors du chargement du lead');
+                }
+            };
+            
+            const fetchMatches = async () => {
+                try {
+                    const response = await fetch(`${API_URL}/api/v1/improved-matches`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    const data = await response.json();
+                    const leadMatches = data.find(l => l.id === parseInt(leadId));
+                    if (leadMatches) {
+                        setMatches(leadMatches.matches);
+                    }
+                } catch (err) {
+                    console.error('Erreur:', err);
+                } finally {
+                    setLoading(false);
+                }
+            };
+            
+            const handleSave = async (e) => {
+                e.preventDefault();
+                try {
+                    const response = await fetch(`${API_URL}/api/v1/leads/${leadId}/update-financing`, {
+                        method: 'PUT',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            financing_status: formData.financing_status,
+                            purchase_urgency: formData.purchase_urgency,
+                            lead_quality: formData.lead_quality,
+                            financing_amount: formData.financing_amount ? parseInt(formData.financing_amount) : null,
+                            notes: formData.notes
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        setMessage('Lead mis à jour avec succès!');
+                        setTimeout(() => setMessage(''), 3000);
+                        fetchMatches(); // Actualise les matches
+                    }
+                } catch (err) {
+                    setMessage('Erreur lors de la sauvegarde');
+                }
+            };
+            
+            const handleChange = (e) => {
+                const { name, value } = e.target;
+                setFormData(prev => ({ ...prev, [name]: value }));
+            };
+            
+            const getQualityBadge = (quality) => {
+                const classes = {
+                    hot: 'quality-hot',
+                    warm: 'quality-warm',
+                    cold: 'quality-cold'
+                };
+                const labels = {
+                    hot: '🔥 Chaud',
+                    warm: '🌤️ Tiède',
+                    cold: '❄️ Froid'
+                };
+                return <span className={`quality-badge ${classes[quality]}`}>{labels[quality]}</span>;
+            };
+            
+            if (loading) return <div style={{ textAlign: 'center', padding: '50px' }}>Chargement...</div>;
+            if (!lead) return <div style={{ textAlign: 'center', padding: '50px' }}>Lead non trouvé</div>;
+            
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo">🏢 IMMOFLOW</div>
+                            <nav>
+                                <a href="/index.html">Leads</a>
+                                <a href="/matching.html">Matching</a>
+                                <a href="/dashboard.html">Dashboard</a>
+                            </nav>
+                        </div>
+                    </header>
+                    
+                    <div className="container">
+                        <div className="lead-header">
+                            <div className="lead-name">{lead.name}</div>
+                            {getQualityBadge(formData.lead_quality)}
+                            <div className="lead-info">
+                                <div className="info-item">
+                                    <span className="info-label">Email</span>
+                                    <span className="info-value">{lead.email}</span>
+                                </div>
+                                <div className="info-item">
+                                    <span className="info-label">Téléphone</span>
+                                    <span className="info-value">{lead.phone}</span>
+                                </div>
+                                <div className="info-item">
+                                    <span className="info-label">Budget</span>
+                                    <span className="info-value">{lead.budget?.toLocaleString()}€</span>
+                                </div>
+                                <div className="info-item">
+                                    <span className="info-label">Location</span>
+                                    <span className="info-value">{lead.location}</span>
+                                </div>
+                                <div className="info-item">
+                                    <span className="info-label">Type</span>
+                                    <span className="info-value">{lead.property_type}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        {message && (
+                            <div className={message.includes('succès') ? 'success-message' : 'error-message'}>
+                                {message}
+                            </div>
+                        )}
+                        
+                        <form className="form-section" onSubmit={handleSave}>
+                            <h2>📋 Détails de Financement & Motivation</h2>
+                            
+                            <div className="form-row">
+                                <div className="form-group">
+                                    <label>Accord de Financement</label>
+                                    <select name="financing_status" value={formData.financing_status} onChange={handleChange}>
+                                        <option value="unknown">Non renseigné</option>
+                                        <option value="approved">✅ Approuvé</option>
+                                        <option value="in_progress">🔄 En cours</option>
+                                        <option value="pending">⏳ En attente</option>
+                                        <option value="rejected">❌ Rejeté</option>
+                                    </select>
+                                </div>
+                                
+                                <div className="form-group">
+                                    <label>Urgence d'Achat</label>
+                                    <select name="purchase_urgency" value={formData.purchase_urgency} onChange={handleChange}>
+                                        <option value="unknown">Non renseigné</option>
+                                        <option value="immediate">🔥 Immédiat (cette semaine)</option>
+                                        <option value="1-3_months">📅 1-3 mois</option>
+                                        <option value="3-6_months">📅 3-6 mois</option>
+                                        <option value="6plus_months">📅 6+ mois</option>
+                                    </select>
+                                </div>
+                                
+                                <div className="form-group">
+                                    <label>Qualité du Lead</label>
+                                    <select name="lead_quality" value={formData.lead_quality} onChange={handleChange}>
+                                        <option value="cold">❄️ Froid</option>
+                                        <option value="warm">🌤️ Tiède</option>
+                                        <option value="hot">🔥 Chaud</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div className="form-row">
+                                <div className="form-group">
+                                    <label>Montant Financé (€)</label>
+                                    <input 
+                                        type="number" 
+                                        name="financing_amount" 
+                                        value={formData.financing_amount}
+                                        onChange={handleChange}
+                                        placeholder="Ex: 300000"
+                                    />
+                                </div>
+                            </div>
+                            
+                            <div className="form-group">
+                                <label>Notes Personnelles</label>
+                                <textarea 
+                                    name="notes"
+                                    value={formData.notes}
+                                    onChange={handleChange}
+                                    placeholder="Ajouter des notes sur le lead..."
+                                />
+                            </div>
+                            
+                            <button type="submit" className="button button-primary">💾 Sauvegarder</button>
+                        </form>
+                        
+                        <div className="matches-section">
+                            <h2>🎯 Propriétés Matchées (Scoring Intelligent)</h2>
+                            {matches.length === 0 ? (
+                                <p style={{ color: '#999' }}>Aucune propriété ne correspond à ce lead</p>
+                            ) : (
+                                matches.map((match, idx) => (
+                                    <div key={idx} className="match-card">
+                                        <div className="match-header">
+                                            <div>
+                                                <div className="match-title">{match.title}</div>
+                                                <div className="match-details">{match.address}</div>
+                                                <div className="match-details" style={{ marginTop: '8px' }}>
+                                                    💰 {match.price?.toLocaleString()}€ | 🛏️ {match.rooms} pièces | 📐 {match.size}m²
+                                                </div>
+                                            </div>
+                                            <div className="match-score">{match.score}%</div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </>
+            );
+        }
+        
+        ReactDOM.render(<LeadProfileApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>
