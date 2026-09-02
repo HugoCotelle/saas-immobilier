@@ -515,7 +515,6 @@ def calculate_lead_score(lead, property_item):
     return min(100, max(0, int(score)))
 
 
-# ===== AJOUTE CES ROUTES À app.py =====
 
 @app.route('/api/v1/leads/<int:lead_id>', methods=['GET'])
 @token_required
