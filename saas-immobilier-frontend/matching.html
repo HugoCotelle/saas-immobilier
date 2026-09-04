@@ -1,525 +1,344 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IMMOFLOW - Matching Intelligent</title>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto'; 
-            background: #f5f7fa;
-        }
-        
-        header {
-            background: white;
-            border-bottom: 1px solid #e0e0e0;
-            padding: 20px 0;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-        }
-        
-        .header-content {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .logo {
-            font-size: 20px;
-            font-weight: 700;
-            color: #333;
-        }
-        
-        nav {
-            display: flex;
-            gap: 30px;
-        }
-        
-        nav a {
-            color: #666;
-            text-decoration: none;
-            font-weight: 500;
-            cursor: pointer;
-            border-bottom: 2px solid transparent;
-            padding-bottom: 5px;
-            transition: all 0.3s;
-        }
-        
-        nav a:hover, nav a.active {
-            color: #667eea;
-            border-bottom-color: #667eea;
-        }
-        
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 40px 20px;
-        }
-        
-        .page-title {
-            font-size: 32px;
-            font-weight: 700;
-            color: #333;
-            margin-bottom: 30px;
-        }
-        
-        .filters {
-            background: white;
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 30px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
-        }
-        
-        .filter-button {
-            padding: 10px 20px;
-            border: 2px solid #ddd;
-            border-radius: 25px;
-            cursor: pointer;
-            background: white;
-            font-weight: 600;
-            font-size: 14px;
-            transition: all 0.3s;
-        }
-        
-        .filter-button:hover {
-            border-color: #667eea;
-            color: #667eea;
-        }
-        
-        .filter-button.active {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border-color: transparent;
-        }
-        
-        .content-wrapper {
-            display: grid;
-            grid-template-columns: 1fr 1.2fr;
-            gap: 30px;
-        }
-        
-        .leads-section {
-            background: white;
-            border-radius: 10px;
-            padding: 20px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-            max-height: 600px;
-            overflow-y: auto;
-        }
-        
-        .leads-section h3 {
-            font-size: 16px;
-            font-weight: 700;
-            color: #333;
-            margin-bottom: 15px;
-        }
-        
-        .lead-item {
-            padding: 15px;
-            border: 2px solid #f0f0f0;
-            border-radius: 8px;
-            cursor: pointer;
-            margin-bottom: 10px;
-            transition: all 0.3s;
-            border-left: 4px solid #ddd;
-        }
-        
-        .lead-item:hover {
-            border-color: #667eea;
-            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
-        }
-        
-        .lead-item.selected {
-            background: #f5f7fa;
-            border-color: #667eea;
-            border-left-color: #667eea;
-        }
-        
-        .lead-item.hot { border-left-color: #c33; }
-        .lead-item.warm { border-left-color: #d97706; }
-        .lead-item.cold { border-left-color: #999; }
-        
-        .lead-name {
-            font-weight: 700;
-            color: #333;
-            font-size: 14px;
-            margin-bottom: 8px;
-        }
-        
-        .lead-info {
-            font-size: 12px;
-            color: #666;
-            margin-bottom: 4px;
-        }
-        
-        .quality-badge {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 11px;
-            font-weight: 600;
-            margin-top: 8px;
-        }
-        
-        .quality-hot { background: #ffe8e8; color: #c33; }
-        .quality-warm { background: #fff4e6; color: #d97706; }
-        .quality-cold { background: #f0f0f0; color: #666; }
-        
-        .matches-section {
-            background: white;
-            border-radius: 10px;
-            padding: 20px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-        }
-        
-        .matches-section h3 {
-            font-size: 16px;
-            font-weight: 700;
-            color: #333;
-            margin-bottom: 15px;
-        }
-        
-        .match-card {
-            padding: 15px;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            margin-bottom: 12px;
-            background: #fafafa;
-        }
-        
-        .match-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 10px;
-        }
-        
-        .match-title {
-            font-weight: 700;
-            color: #333;
-            font-size: 14px;
-        }
-        
-        .match-score {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-weight: 700;
-            font-size: 12px;
-        }
-        
-        .match-details {
-            font-size: 12px;
-            color: #666;
-            line-height: 1.5;
-        }
-        
-        .match-details-item {
-            margin-bottom: 5px;
-        }
-        
-        .match-price {
-            font-weight: 700;
-            color: #333;
-            margin-top: 8px;
-            font-size: 13px;
-        }
-        
-        .empty-state {
-            text-align: center;
-            padding: 40px 20px;
-            color: #999;
-        }
-        
-        .financing-info {
-            background: #f0f8ff;
-            border-left: 3px solid #667eea;
-            padding: 12px;
-            border-radius: 4px;
-            margin-top: 12px;
-            font-size: 12px;
-        }
-        
-        .financing-info-item {
-            margin-bottom: 5px;
-            color: #333;
-        }
-        
-        .edit-button {
-            display: inline-block;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 5px;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 12px;
-            margin-top: 12px;
-            cursor: pointer;
-            border: none;
-            transition: all 0.3s;
-        }
-        
-        .edit-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-        }
-        
-        .lead-details {
-            background: #f5f7fa;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 15px;
-            font-size: 13px;
-        }
-        
-        .lead-details-label {
-            color: #999;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-            margin-bottom: 3px;
-        }
-        
-        .lead-details-value {
-            color: #333;
-            font-weight: 600;
-        }
-    </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IMMOFLOW - Matching</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto'; background: #f5f7fa; }
+        header { background: white; border-bottom: 1px solid #e0e0e0; padding: 20px 0; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); position: sticky; top: 0; z-index: 1000; }
+        .header-content { max-width: 1200px; margin: 0 auto; padding: 0 20px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { font-size: 20px; font-weight: 700; color: #333; }
+        nav { display: flex; gap: 30px; align-items: center; }
+        nav a { color: #666; text-decoration: none; font-weight: 500; transition: color 0.3s ease; cursor: pointer; }
+        nav a:hover { color: #667eea; }
+        nav a.active { color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 5px; }
+        .user-info { display: flex; align-items: center; gap: 15px; }
+        .user-email { font-size: 14px; color: #666; }
+        .logout-btn { background: #ff6b6b; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-weight: 500; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 40px 20px; }
+        .page-title { color: #333; font-size: 32px; margin-bottom: 10px; }
+        .page-subtitle { color: #999; font-size: 16px; margin-bottom: 40px; }
+
+        .filters { background: white; border-radius: 10px; padding: 20px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); display: flex; gap: 15px; flex-wrap: wrap; }
+        .filter-button { padding: 10px 20px; border: 2px solid #e0e0e0; border-radius: 25px; cursor: pointer; background: white; font-weight: 600; font-size: 14px; color: #666; transition: all 0.3s ease; }
+        .filter-button:hover { border-color: #667eea; color: #667eea; }
+        .filter-button.active { background: #667eea; color: white; border-color: #667eea; }
+
+        .content-wrapper { display: grid; grid-template-columns: 1fr 1.2fr; gap: 30px; align-items: start; }
+        @media (max-width: 900px) { .content-wrapper { grid-template-columns: 1fr; } }
+
+        .panel { background: white; border-radius: 10px; padding: 25px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); }
+        .panel-title { font-size: 18px; font-weight: 700; color: #333; margin-bottom: 20px; }
+        .leads-panel { max-height: 640px; overflow-y: auto; }
+
+        .lead-item { background: white; border: 1px solid #e0e0e0; border-left: 4px solid #667eea; border-radius: 10px; padding: 20px; margin-bottom: 15px; cursor: pointer; transition: all 0.3s ease; }
+        .lead-item:hover { box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12); transform: translateY(-2px); }
+        .lead-item.selected { background: #f5f7fa; border-color: #667eea; }
+        .lead-item.hot { border-left-color: #c33; }
+        .lead-item.warm { border-left-color: #d97706; }
+        .lead-item.cold { border-left-color: #999; }
+        .lead-name { font-size: 18px; font-weight: 700; color: #333; margin-bottom: 12px; }
+        .lead-field { display: flex; margin-bottom: 10px; font-size: 14px; }
+        .lead-label { color: #999; font-weight: 500; width: 90px; }
+        .lead-value { color: #333; flex: 1; word-break: break-all; }
+        .lead-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; margin-top: 10px; }
+        .badge-hot { background: #ffe8e8; color: #c33; }
+        .badge-warm { background: #fff4e6; color: #d97706; }
+        .badge-cold { background: #f0f0f0; color: #666; }
+
+        .detail-block { background: #f9fafc; border-radius: 8px; padding: 15px; margin-bottom: 12px; }
+        .detail-label { color: #999; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+        .detail-value { color: #333; font-weight: 600; font-size: 15px; }
+        .info-box { background: #e8f0fe; border-left: 3px solid #667eea; padding: 15px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
+        .info-item { color: #333; margin-bottom: 6px; }
+        .info-item:last-child { margin-bottom: 0; }
+        .edit-button { display: inline-block; background: #667eea; color: white; padding: 10px 18px; border-radius: 5px; text-decoration: none; font-weight: 600; font-size: 14px; margin-top: 10px; border: none; cursor: pointer; transition: background 0.3s ease; }
+        .edit-button:hover { background: #5568d3; }
+
+        .section-divider { border-top: 1px solid #e0e0e0; margin: 25px 0 20px; }
+        .match-card { background: white; border: 1px solid #e0e0e0; border-left: 4px solid #667eea; border-radius: 10px; padding: 20px; margin-bottom: 15px; transition: all 0.3s ease; }
+        .match-card:hover { box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12); transform: translateY(-2px); }
+        .match-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 15px; margin-bottom: 12px; }
+        .match-title { font-size: 16px; font-weight: 700; color: #333; margin-bottom: 4px; }
+        .match-address { font-size: 13px; color: #999; }
+        .match-score { background: #667eea; color: white; padding: 6px 14px; border-radius: 20px; font-weight: 700; font-size: 13px; white-space: nowrap; }
+        .match-field { font-size: 14px; color: #666; margin-bottom: 6px; }
+        .match-price { font-size: 16px; font-weight: 700; color: #333; margin-top: 10px; }
+
+        .loading { text-align: center; padding: 40px; color: #999; }
+        .loader { display: inline-block; width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top-color: #667eea; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .error { background: #fee; color: #c33; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 30px; }
+        .empty-state { text-align: center; padding: 40px 20px; color: #999; font-size: 15px; }
+    </style>
 </head>
 <body>
-    <div id="root"></div>
-    <script type="text/babel">
-        const { useState, useEffect } = React;
-        
-        function MatchingApp() {
-            const [leads, setLeads] = useState([]);
-            const [selectedLeadId, setSelectedLeadId] = useState(null);
-            const [qualityFilter, setQualityFilter] = useState('all');
-            const [loading, setLoading] = useState(true);
-            
-            const API_URL = 'https://saas-immobilier-921a.onrender.com';
-            const token = localStorage.getItem('token');
-            
-            useEffect(() => {
-                fetchMatches();
-            }, []);
-            
-            const fetchMatches = async () => {
-                try {
-                    const response = await fetch(`${API_URL}/api/v1/improved-matches`, {
-                        headers: { 'Authorization': `Bearer ${token}` }
-                    });
-                    const data = await response.json();
-                    setLeads(data);
-                    if (data.length > 0) {
-                        setSelectedLeadId(data[0].id);
-                    }
-                } catch (err) {
-                    console.error('Erreur:', err);
-                } finally {
-                    setLoading(false);
-                }
-            };
-            
-            const getQualityBadge = (quality) => {
-                const classes = {
-                    hot: 'quality-hot',
-                    warm: 'quality-warm',
-                    cold: 'quality-cold'
-                };
-                const labels = {
-                    hot: '🔥 Chaud',
-                    warm: '🌤️ Tiède',
-                    cold: '❄️ Froid'
-                };
-                return <span className={`quality-badge ${classes[quality]}`}>{labels[quality]}</span>;
-            };
-            
-            const getFinancingLabel = (status) => {
-                const labels = {
-                    'approved': '✅ Approuvé',
-                    'in_progress': '🔄 En cours',
-                    'pending': '⏳ En attente',
-                    'rejected': '❌ Rejeté',
-                    'unknown': '❓ Non renseigné'
-                };
-                return labels[status] || status;
-            };
-            
-            const getUrgencyLabel = (urgency) => {
-                const labels = {
-                    'immediate': '🔥 Immédiat',
-                    '1-3_months': '📅 1-3 mois',
-                    '3-6_months': '📅 3-6 mois',
-                    '6plus_months': '📅 6+ mois',
-                    'unknown': '❓ Non renseigné'
-                };
-                return labels[urgency] || urgency;
-            };
-            
-            const filteredLeads = leads.filter(lead => {
-                if (qualityFilter === 'all') return true;
-                return lead.lead_quality === qualityFilter;
-            });
-            
-            const selectedLead = leads.find(l => l.id === selectedLeadId);
-            
-            if (loading) return <div style={{ textAlign: 'center', padding: '50px' }}>Chargement...</div>;
-            
-            return (
-                <>
-                    <header>
-                        <div className="header-content">
-                            <div className="logo">🏢 IMMOFLOW</div>
-                            <nav>
-                                <a href="/index.html">Leads</a>
-                                <a href="/matching.html" className="active">Matching</a>
-                                <a href="/dashboard.html">Dashboard</a>
-                            </nav>
-                        </div>
-                    </header>
-                    
-                    <div className="container">
-                        <div className="page-title">🎯 Matching Intelligent</div>
-                        
-                        <div className="filters">
-                            <button 
-                                className={`filter-button ${qualityFilter === 'all' ? 'active' : ''}`}
-                                onClick={() => setQualityFilter('all')}
-                            >
-                                Tous ({leads.length})
-                            </button>
-                            <button 
-                                className={`filter-button ${qualityFilter === 'hot' ? 'active' : ''}`}
-                                onClick={() => setQualityFilter('hot')}
-                            >
-                                🔥 Chauds ({leads.filter(l => l.lead_quality === 'hot').length})
-                            </button>
-                            <button 
-                                className={`filter-button ${qualityFilter === 'warm' ? 'active' : ''}`}
-                                onClick={() => setQualityFilter('warm')}
-                            >
-                                🌤️ Tièdes ({leads.filter(l => l.lead_quality === 'warm').length})
-                            </button>
-                            <button 
-                                className={`filter-button ${qualityFilter === 'cold' ? 'active' : ''}`}
-                                onClick={() => setQualityFilter('cold')}
-                            >
-                                ❄️ Froids ({leads.filter(l => l.lead_quality === 'cold').length})
-                            </button>
-                        </div>
-                        
-                        <div className="content-wrapper">
-                            <div className="leads-section">
-                                <h3>📋 Leads</h3>
-                                {filteredLeads.map(lead => (
-                                    <div 
-                                        key={lead.id}
-                                        className={`lead-item ${lead.lead_quality} ${selectedLeadId === lead.id ? 'selected' : ''}`}
-                                        onClick={() => setSelectedLeadId(lead.id)}
-                                    >
-                                        <div className="lead-name">{lead.name}</div>
-                                        <div className="lead-info">📧 {lead.email}</div>
-                                        <div className="lead-info">📱 {lead.phone}</div>
-                                        <div className="lead-info">💰 {lead.budget?.toLocaleString()}€</div>
-                                        <div className="lead-info">📍 {lead.location}</div>
-                                        {getQualityBadge(lead.lead_quality)}
-                                    </div>
-                                ))}
-                            </div>
-                            
-                            <div className="matches-section">
-                                {selectedLead ? (
-                                    <>
-                                        <h3>Détails: {selectedLead.name}</h3>
-                                        
-                                        <div className="lead-details">
-                                            <div className="lead-details-label">Budget</div>
-                                            <div className="lead-details-value">{selectedLead.budget?.toLocaleString()}€</div>
-                                        </div>
-                                        
-                                        <div className="lead-details">
-                                            <div className="lead-details-label">Type recherché</div>
-                                            <div className="lead-details-value">{selectedLead.property_type}</div>
-                                        </div>
-                                        
-                                        <div className="lead-details">
-                                            <div className="lead-details-label">Localisation</div>
-                                            <div className="lead-details-value">{selectedLead.location}</div>
-                                        </div>
-                                        
-                                        {(selectedLead.financing_status !== 'unknown' || selectedLead.purchase_urgency !== 'unknown') && (
-                                            <div className="financing-info">
-                                                {selectedLead.financing_status !== 'unknown' && (
-                                                    <div className="financing-info-item">
-                                                        💳 {getFinancingLabel(selectedLead.financing_status)}
-                                                    </div>
-                                                )}
-                                                {selectedLead.purchase_urgency !== 'unknown' && (
-                                                    <div className="financing-info-item">
-                                                        ⏱️ {getUrgencyLabel(selectedLead.purchase_urgency)}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )}
-                                        
-                                        <a 
-                                            href={`/leads-profile.html?id=${selectedLead.id}`}
-                                            className="edit-button"
-                                        >
-                                            ✏️ Éditer les détails
-                                        </a>
-                                        
-                                        <h3 style={{ marginTop: '25px', marginBottom: '15px' }}>🎯 Propriétés Matchées</h3>
-                                        
-                                        {selectedLead.matches && selectedLead.matches.length > 0 ? (
-                                            selectedLead.matches.map((match, idx) => (
-                                                <div key={idx} className="match-card">
-                                                    <div className="match-header">
-                                                        <div>
-                                                            <div className="match-title">{match.title}</div>
-                                                            <div className="match-details">{match.address}</div>
-                                                        </div>
-                                                        <div className="match-score">{match.score}%</div>
-                                                    </div>
-                                                    <div className="match-details">
-                                                        <div className="match-details-item">
-                                                            🏠 {match.type} • 🛏️ {match.rooms} pièces • 📐 {match.size}m²
-                                                        </div>
-                                                    </div>
-                                                    <div className="match-price">💰 {match.price?.toLocaleString()}€</div>
-                                                </div>
-                                            ))
-                                        ) : (
-                                            <div className="empty-state">Aucune propriété ne correspond</div>
-                                        )}
-                                    </>
-                                ) : (
-                                    <div className="empty-state">Sélectionnez un lead</div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                </>
-            );
-        }
-        
-        ReactDOM.render(<MatchingApp />, document.getElementById('root'));
-    </script>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function MatchingApp() {
+            const [leads, setLeads] = useState([]);
+            const [selectedLeadId, setSelectedLeadId] = useState(null);
+            const [qualityFilter, setQualityFilter] = useState('all');
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [user, setUser] = useState(null);
+
+            const API_URL = 'https://saas-immobilier-921a.onrender.com';
+
+            useEffect(() => {
+                const token = localStorage.getItem('token');
+                const userData = localStorage.getItem('user');
+                if (!token) {
+                    window.location.href = '/login.html';
+                    return;
+                }
+                if (userData) setUser(JSON.parse(userData));
+                fetchMatches(token);
+            }, []);
+
+            const fetchMatches = async (token) => {
+                try {
+                    setLoading(true);
+                    const response = await fetch(`${API_URL}/api/v1/improved-matches`, {
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+                    });
+                    if (!response.ok) {
+                        if (response.status === 401) {
+                            localStorage.removeItem('token');
+                            localStorage.removeItem('user');
+                            window.location.href = '/login.html';
+                        }
+                        throw new Error(`Erreur API: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    setLeads(data);
+                    if (data.length > 0) setSelectedLeadId(data[0].id);
+                    setError(null);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleLogout = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = '/login.html';
+            };
+
+            const qualityBadge = (quality) => {
+                const classes = { hot: 'badge-hot', warm: 'badge-warm', cold: 'badge-cold' };
+                const labels = { hot: '🔥 Chaud', warm: '🌤️ Tiède', cold: '❄️ Froid' };
+                if (!labels[quality]) return null;
+                return <span className={`lead-badge ${classes[quality]}`}>{labels[quality]}</span>;
+            };
+
+            const financingLabel = (status) => ({
+                approved: '✅ Approuvé',
+                in_progress: '🔄 En cours',
+                pending: '⏳ En attente',
+                rejected: '❌ Rejeté',
+                unknown: '❓ Non renseigné'
+            }[status] || status);
+
+            const urgencyLabel = (urgency) => ({
+                immediate: '🔥 Immédiat',
+                '1-3_months': '📅 1 à 3 mois',
+                '3-6_months': '📅 3 à 6 mois',
+                '6plus_months': '📅 Plus de 6 mois',
+                unknown: '❓ Non renseigné'
+            }[urgency] || urgency);
+
+            const filteredLeads = leads.filter(lead =>
+                qualityFilter === 'all' ? true : lead.lead_quality === qualityFilter
+            );
+            const selectedLead = leads.find(l => l.id === selectedLeadId);
+            const count = (q) => leads.filter(l => l.lead_quality === q).length;
+
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo">🏢 IMMOFLOW</div>
+                            <nav>
+                                <a href="/index.html">Leads</a>
+                                <a href="/matching.html" className="active">Matching</a>
+                                <a href="/dashboard.html">Dashboard</a>
+                            </nav>
+                            <div className="user-info">
+                                {user && <span className="user-email">{user.email}</span>}
+                                <button className="logout-btn" onClick={handleLogout}>Logout</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="container">
+                        <h1 className="page-title">🎯 Matching</h1>
+                        <p className="page-subtitle">
+                            Les meilleures correspondances pour chacun de vos {leads.length} leads
+                        </p>
+
+                        {error && <div className="error">❌ Erreur: {error}</div>}
+
+                        {loading ? (
+                            <div className="loading">
+                                <div className="loader"></div>
+                                <p style={{ marginTop: '20px' }}>Chargement des correspondances...</p>
+                            </div>
+                        ) : leads.length === 0 ? (
+                            <div className="panel">
+                                <div className="empty-state">Aucun lead à rapprocher pour le moment.</div>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="filters">
+                                    <button
+                                        className={`filter-button ${qualityFilter === 'all' ? 'active' : ''}`}
+                                        onClick={() => setQualityFilter('all')}>
+                                        Tous ({leads.length})
+                                    </button>
+                                    <button
+                                        className={`filter-button ${qualityFilter === 'hot' ? 'active' : ''}`}
+                                        onClick={() => setQualityFilter('hot')}>
+                                        🔥 Chauds ({count('hot')})
+                                    </button>
+                                    <button
+                                        className={`filter-button ${qualityFilter === 'warm' ? 'active' : ''}`}
+                                        onClick={() => setQualityFilter('warm')}>
+                                        🌤️ Tièdes ({count('warm')})
+                                    </button>
+                                    <button
+                                        className={`filter-button ${qualityFilter === 'cold' ? 'active' : ''}`}
+                                        onClick={() => setQualityFilter('cold')}>
+                                        ❄️ Froids ({count('cold')})
+                                    </button>
+                                </div>
+
+                                <div className="content-wrapper">
+                                    <div className="panel leads-panel">
+                                        <div className="panel-title">📋 Leads</div>
+                                        {filteredLeads.length === 0 ? (
+                                            <div className="empty-state">Aucun lead dans cette catégorie</div>
+                                        ) : (
+                                            filteredLeads.map(lead => (
+                                                <div
+                                                    key={lead.id}
+                                                    className={`lead-item ${lead.lead_quality || ''} ${selectedLeadId === lead.id ? 'selected' : ''}`}
+                                                    onClick={() => setSelectedLeadId(lead.id)}>
+                                                    <div className="lead-name">{lead.name}</div>
+                                                    <div className="lead-field">
+                                                        <span className="lead-label">Email:</span>
+                                                        <span className="lead-value">{lead.email || 'N/A'}</span>
+                                                    </div>
+                                                    <div className="lead-field">
+                                                        <span className="lead-label">Phone:</span>
+                                                        <span className="lead-value">{lead.phone || 'N/A'}</span>
+                                                    </div>
+                                                    <div className="lead-field">
+                                                        <span className="lead-label">Budget:</span>
+                                                        <span className="lead-value">
+                                                            {lead.budget ? `${lead.budget.toLocaleString()} €` : 'N/A'}
+                                                        </span>
+                                                    </div>
+                                                    <div className="lead-field">
+                                                        <span className="lead-label">Secteur:</span>
+                                                        <span className="lead-value">{lead.location || 'N/A'}</span>
+                                                    </div>
+                                                    {qualityBadge(lead.lead_quality)}
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+
+                                    <div className="panel">
+                                        {selectedLead ? (
+                                            <>
+                                                <div className="panel-title">{selectedLead.name}</div>
+
+                                                <div className="detail-block">
+                                                    <div className="detail-label">Budget</div>
+                                                    <div className="detail-value">
+                                                        {selectedLead.budget ? `${selectedLead.budget.toLocaleString()} €` : 'Non renseigné'}
+                                                    </div>
+                                                </div>
+                                                <div className="detail-block">
+                                                    <div className="detail-label">Type recherché</div>
+                                                    <div className="detail-value">{selectedLead.property_type || 'Non renseigné'}</div>
+                                                </div>
+                                                <div className="detail-block">
+                                                    <div className="detail-label">Localisation</div>
+                                                    <div className="detail-value">{selectedLead.location || 'Non renseignée'}</div>
+                                                </div>
+
+                                                {(selectedLead.financing_status && selectedLead.financing_status !== 'unknown') ||
+                                                 (selectedLead.purchase_urgency && selectedLead.purchase_urgency !== 'unknown') ? (
+                                                    <div className="info-box">
+                                                        {selectedLead.financing_status && selectedLead.financing_status !== 'unknown' && (
+                                                            <div className="info-item">💳 {financingLabel(selectedLead.financing_status)}</div>
+                                                        )}
+                                                        {selectedLead.purchase_urgency && selectedLead.purchase_urgency !== 'unknown' && (
+                                                            <div className="info-item">⏱️ {urgencyLabel(selectedLead.purchase_urgency)}</div>
+                                                        )}
+                                                    </div>
+                                                ) : null}
+
+                                                <a href={`/leads-profile.html?id=${selectedLead.id}`} className="edit-button">
+                                                    ✏️ Éditer les détails
+                                                </a>
+
+                                                <div className="section-divider"></div>
+
+                                                <div className="panel-title">
+                                                    🏠 Propriétés correspondantes
+                                                    {selectedLead.matches && selectedLead.matches.length > 0 &&
+                                                        ` (${selectedLead.matches.length})`}
+                                                </div>
+
+                                                {selectedLead.matches && selectedLead.matches.length > 0 ? (
+                                                    selectedLead.matches.map((match, idx) => (
+                                                        <div key={idx} className="match-card">
+                                                            <div className="match-header">
+                                                                <div>
+                                                                    <div className="match-title">{match.title || match.name}</div>
+                                                                    <div className="match-address">📍 {match.address || 'Adresse non renseignée'}</div>
+                                                                </div>
+                                                                <div className="match-score">{match.score}%</div>
+                                                            </div>
+                                                            <div className="match-field">
+                                                                🏠 {match.type || 'N/A'}
+                                                                {match.rooms ? ` · ${match.rooms} pièces` : ''}
+                                                                {match.size ? ` · ${match.size} m²` : ''}
+                                                            </div>
+                                                            <div className="match-price">
+                                                                {match.price ? `${match.price.toLocaleString()} €` : 'Prix non renseigné'}
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                ) : (
+                                                    <div className="empty-state">Aucune propriété ne correspond à ce lead</div>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <div className="empty-state">Sélectionnez un lead pour voir ses correspondances</div>
+                                        )}
+                                    </div>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </>
+            );
+        }
+
+        ReactDOM.render(<MatchingApp />, document.getElementById('root'));
+    </script>
 </body>
 </html>
