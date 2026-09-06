@@ -72,7 +72,7 @@ def init_database():
     """Initialiser la base de données avec les tables et données de test"""
     try:
         cursor = db.cursor()
-        
+
         # Table USERS
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -84,7 +84,7 @@ def init_database():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
-        
+
         # Table LEADS
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS leads (
@@ -100,7 +100,7 @@ def init_database():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
-        
+
         # Table PROPERTIES
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS properties (
@@ -116,18 +116,18 @@ def init_database():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
-        
+
         # Vérifier si vide
         cursor.execute("SELECT COUNT(*) FROM users")
         user_count = cursor.fetchone()[0]
-        
+
         if user_count == 0:
             # Insérer utilisateur de test
             cursor.execute("""
                 INSERT INTO users (email, password_hash, first_name, company_name)
                 VALUES (%s, %s, %s, %s)
             """, ('test@example.com', generate_password_hash('password123'), 'Test', 'Test Company'))
-            
+
             # 33 leads
             leads_data = [
                 ('Alice Dupont', 'alice@example.com', '0601020304', 250000, 'Paris 15', 'Appartement'),
@@ -164,17 +164,17 @@ def init_database():
                 ('Genevieve Xavier', 'genevieve@example.com', '0632333435', 325000, 'Lyon', 'Appartement'),
                 ('Henri Yates', 'henri@example.com', '0633343536', 440000, 'Paris 12', 'Maison'),
             ]
-            
+
             for name, email, phone, budget, location, property_type in leads_data:
                 cursor.execute("""
                     INSERT INTO leads (user_id, name, email, phone, budget, location, property_type, status)
                     VALUES (1, %s, %s, %s, %s, %s, %s, 'nouveau')
                 """, (name, email, phone, budget, location, property_type))
-        
+
         db.commit()
         cursor.close()
         print("✅ Base de données initialisée!")
-        
+
     except Exception as e:
         print(f"❌ Erreur: {e}")
         db.rollback()
@@ -206,12 +206,12 @@ def register():
     data = request.get_json()
     if not data.get('email') or not data.get('password'):
         return jsonify({"message": "Email and password required"}), 400
-    
+
     email = data.get('email')
     password = data.get('password')
     first_name = data.get('first_name', '')
     company_name = data.get('company_name', '')
-    
+
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -220,7 +220,7 @@ def register():
             cur.close()
             conn.close()
             return jsonify({"message": "User already exists"}), 409
-        
+
         password_hash = generate_password_hash(password, method='pbkdf2:sha256')
         cur.execute(
             "INSERT INTO users (email, password_hash, first_name, company_name) VALUES (%s, %s, %s, %s) RETURNING id",
@@ -228,12 +228,12 @@ def register():
         )
         user_id = cur.fetchone()['id']
         conn.commit()
-        
+
         token = create_access_token(identity={'id': user_id, 'email': email}, expires=timedelta(days=30))
-        
+
         cur.close()
         conn.close()
-        
+
         return jsonify({
             "message": "User created successfully",
             "token": token,
@@ -254,26 +254,26 @@ def login():
     data = request.get_json()
     if not data.get('email') or not data.get('password'):
         return jsonify({"message": "Email and password required"}), 400
-    
+
     email = data.get('email')
     password = data.get('password')
-    
+
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("SELECT id, email, password_hash, first_name, company_name FROM users WHERE email = %s", (email,))
         user = cur.fetchone()
-        
+
         if not user or not check_password_hash(user['password_hash'], password):
             cur.close()
             conn.close()
             return jsonify({"message": "Invalid credentials"}), 401
-        
+
         cur.close()
         conn.close()
-        
+
         token = create_access_token(identity={'id': user['id'], 'email': user['email']}, expires=timedelta(days=30))
-        
+
         return jsonify({
             "message": "Login successful",
             "token": token,
@@ -298,69 +298,63 @@ def get_profile():
         user = cur.fetchone()
         cur.close()
         conn.close()
-        
+
         if not user:
             return jsonify({"message": "User not found"}), 404
-        
+
         return jsonify(user), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
-# ===== ROUTES API LEADS & PROPERTIES =====
-
-@app.route('/api/v1/leads', methods=['GET'])
-def get_leads():
-    """Retourner tous les leads"""
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, name, email, phone, budget, location, property_type, status FROM leads ORDER BY id")
-        leads = cur.fetchall()
-        cur.close()
-        conn.close()
-        return jsonify(leads), 200
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        return jsonify({"message": str(e)}), 500
-
-@app.route('/api/v1/properties', methods=['GET'])
-@token_required
-def get_properties():
-    """Retourner les propriétés de l'utilisateur"""
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, title, address, price, size, rooms, property_type, description FROM properties WHERE user_id = %s ORDER BY id", (request.user_id,))
-        properties = cur.fetchall()
-        cur.close()
-        conn.close()
-        return jsonify(properties), 200
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        return jsonify({"message": str(e)}), 500
-
-@app.route('/api/v1/stats', methods=['GET'])
-@token_required
-def get_stats():
-    """Retourner les statistiques"""
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("""
-            SELECT 
-                (SELECT COUNT(*) FROM leads) as total_leads,
-                (SELECT COUNT(*) FROM properties WHERE user_id = %s) as total_properties,
-                (SELECT COUNT(DISTINCT name) FROM leads) as unique_leads
-        """, (request.user_id,))
-        stats = cur.fetchone()
-        cur.close()
-        conn.close()
-        return jsonify(stats), 200
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        return jsonify({"message": str(e)}), 500
-
 # ===== SCORING INTELLIGENT =====
+
+def derive_lead_quality(lead):
+    """Déduire la qualité d'un lead de ses caractéristiques.
+
+    La qualité était auparavant une colonne saisie à la main, qui servait
+    ensuite à pondérer le score de matching : l'agent décidait qu'un lead
+    était chaud, et l'outil le lui confirmait. Elle est maintenant déduite
+    du financement, de l'urgence et de la précision du besoin — soit des
+    éléments que l'agent n'a pas toujours en tête.
+
+    Les seuils ci-dessous sont un choix, pas une vérité. Pour les régler
+    correctement, il faudrait demander à un directeur d'agence de classer
+    une vingtaine de ses leads et ajuster jusqu'à retrouver son classement.
+    """
+    points = 0
+
+    financing = lead.get('financing_status') or 'unknown'
+    if financing == 'approved':
+        points += 40
+    elif financing == 'in_progress':
+        points += 25
+    elif financing == 'pending':
+        points += 12
+
+    urgency = lead.get('purchase_urgency') or 'unknown'
+    if urgency == 'immediate':
+        points += 35
+    elif urgency == '1-3_months':
+        points += 28
+    elif urgency == '3-6_months':
+        points += 15
+    elif urgency == '6plus_months':
+        points += 5
+
+    # Un dossier complet est un signal d'engagement réel.
+    if lead.get('budget'):
+        points += 10
+    if lead.get('location'):
+        points += 8
+    if lead.get('property_type'):
+        points += 7
+
+    if points >= 80:
+        return 'hot'
+    if points >= 45:
+        return 'warm'
+    return 'cold'
+
 
 def calculate_lead_score(lead, property_item):
     score = 0
@@ -408,10 +402,67 @@ def calculate_lead_score(lead, property_item):
         score += 4
     else:
         score += 5
-    quality = lead.get('lead_quality', 'cold')
-    quality_multiplier = {'hot': 1.15, 'warm': 1.05, 'cold': 0.90}
-    score = score * quality_multiplier.get(quality, 1.0)
+    # Le multiplicateur par lead_quality a été retiré : le financement et
+    # l'urgence sont déjà comptés ci-dessus, les réappliquer les comptait
+    # deux fois.
     return min(100, max(0, int(score)))
+
+# ===== ROUTES API LEADS & PROPERTIES =====
+
+@app.route('/api/v1/leads', methods=['GET'])
+@token_required
+def get_leads():
+    """Retourner les leads de l'utilisateur connecté"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT id, name, email, phone, budget, location, property_type, status, financing_status, purchase_urgency FROM leads WHERE user_id = %s ORDER BY id", (request.user_id,))
+        leads = cur.fetchall()
+        cur.close()
+        conn.close()
+        for lead in leads:
+            lead['lead_quality'] = derive_lead_quality(lead)
+        return jsonify(leads), 200
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"message": str(e)}), 500
+
+@app.route('/api/v1/properties', methods=['GET'])
+@token_required
+def get_properties():
+    """Retourner les propriétés de l'utilisateur"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT id, title, address, price, size, rooms, property_type, description FROM properties WHERE user_id = %s ORDER BY id", (request.user_id,))
+        properties = cur.fetchall()
+        cur.close()
+        conn.close()
+        return jsonify(properties), 200
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"message": str(e)}), 500
+
+@app.route('/api/v1/stats', methods=['GET'])
+@token_required
+def get_stats():
+    """Retourner les statistiques"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT 
+                (SELECT COUNT(*) FROM leads WHERE user_id = %s) as total_leads,
+                (SELECT COUNT(*) FROM properties WHERE user_id = %s) as total_properties,
+                (SELECT COUNT(DISTINCT name) FROM leads WHERE user_id = %s) as unique_leads
+        """, (request.user_id, request.user_id, request.user_id))
+        stats = cur.fetchone()
+        cur.close()
+        conn.close()
+        return jsonify(stats), 200
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"message": str(e)}), 500
 
 
 @app.route('/api/v1/leads/<int:lead_id>', methods=['GET'])
@@ -453,11 +504,15 @@ def get_leads_by_quality(quality):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, name, email, phone, budget, location, property_type, financing_status, purchase_urgency, lead_quality FROM leads WHERE user_id = %s AND lead_quality = %s ORDER BY created_at DESC", (request.user_id, quality))
+        cur.execute("SELECT id, name, email, phone, budget, location, property_type, financing_status, purchase_urgency FROM leads WHERE user_id = %s ORDER BY created_at DESC", (request.user_id,))
         leads = cur.fetchall()
         cur.close()
         conn.close()
-        return jsonify(leads), 200
+        # Le filtre s'applique sur la qualité déduite, pas sur la colonne.
+        filtered = [l for l in leads if derive_lead_quality(l) == quality]
+        for lead in filtered:
+            lead['lead_quality'] = quality
+        return jsonify(filtered), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
@@ -468,7 +523,7 @@ def get_improved_matches():
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, name, email, phone, budget, location, property_type, financing_status, purchase_urgency, lead_quality FROM leads WHERE user_id = %s ORDER BY lead_quality DESC, created_at DESC", (request.user_id,))
+        cur.execute("SELECT id, name, email, phone, budget, location, property_type, financing_status, purchase_urgency FROM leads WHERE user_id = %s ORDER BY created_at DESC", (request.user_id,))
         leads = cur.fetchall()
         cur.execute("SELECT id, title, address, price, rooms, size, property_type, description FROM properties WHERE user_id = %s", (request.user_id,))
         properties = cur.fetchall()
@@ -482,11 +537,16 @@ def get_improved_matches():
                 if score > 30:
                     matches.append({"property_id": prop['id'], "address": prop['address'], "title": prop['title'], "type": prop['property_type'], "price": prop['price'], "rooms": prop['rooms'], "size": prop['size'], "score": score})
             matches.sort(key=lambda x: x['score'], reverse=True)
-            result.append({"id": lead['id'], "name": lead['name'], "email": lead['email'], "phone": lead['phone'], "budget": lead['budget'], "location": lead['location'], "property_type": lead['property_type'], "financing_status": lead['financing_status'], "purchase_urgency": lead['purchase_urgency'], "lead_quality": lead['lead_quality'], "matches": matches})
+            result.append({"id": lead['id'], "name": lead['name'], "email": lead['email'], "phone": lead['phone'], "budget": lead['budget'], "location": lead['location'], "property_type": lead['property_type'], "financing_status": lead['financing_status'], "purchase_urgency": lead['purchase_urgency'], "lead_quality": derive_lead_quality(lead), "matches": matches})
+        # Les leads les plus chauds d'abord.
+        ordre = {'hot': 0, 'warm': 1, 'cold': 2}
+        result.sort(key=lambda x: ordre.get(x['lead_quality'], 3))
         return jsonify(result), 200
     except Exception as e:
         print(f"Error: {str(e)}")
         return jsonify({"message": str(e)}), 500
+
+
 if __name__ == '__main__':
     print(f"🚀 Backend running on http://localhost:{PORT}")
     print(f"🔐 JWT Secret Key: {SECRET_KEY}")
