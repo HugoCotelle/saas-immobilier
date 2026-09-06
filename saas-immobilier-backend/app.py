@@ -372,14 +372,19 @@ def calculate_lead_score(lead, property_item):
             score += 12
         elif budget_ratio < 0.30:
             score += 8
+
     if lead.get('property_type') == property_item.get('property_type'):
         score += 30
     elif lead.get('property_type') in ['Appartement', 'Maison'] and property_item.get('property_type') in ['Appartement', 'Maison']:
         score += 15
-        points_loc, hors_secteur = score_localisation(lead, property_item)
+
+    # La localisation est le seul critère éliminatoire : un budget et un
+    # type qui collent ne rattrapent pas une ville à 750 km.
+    points_loc, hors_secteur = score_localisation(lead, property_item)
     if hors_secteur:
-        return 0          # écarté : le bien n'est pas dans le bon secteur
+        return 0
     score += points_loc
+
     financing_status = lead.get('financing_status', 'unknown')
     if financing_status == 'approved':
         score += 20
@@ -389,6 +394,7 @@ def calculate_lead_score(lead, property_item):
         score += 10
     else:
         score += 5
+
     urgency = lead.get('purchase_urgency', 'unknown')
     if urgency == 'immediate':
         score += 15
@@ -400,6 +406,7 @@ def calculate_lead_score(lead, property_item):
         score += 4
     else:
         score += 5
+
     # Le multiplicateur par lead_quality a été retiré : le financement et
     # l'urgence sont déjà comptés ci-dessus, les réappliquer les comptait
     # deux fois.
