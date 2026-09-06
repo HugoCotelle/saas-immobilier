@@ -485,16 +485,53 @@ def get_lead_detail(lead_id):
 @app.route('/api/v1/leads/<int:lead_id>/update-financing', methods=['PUT'])
 @token_required
 def update_lead_financing(lead_id):
+    """Mettre à jour une fiche prospect.
+
+    lead_quality n'est volontairement pas modifiable : elle est déduite du
+    financement, de l'échéance et de la complétude du dossier par
+    derive_lead_quality(). L'agent renseigne les faits, l'outil en tire le
+    classement.
+    """
     try:
         data = request.get_json()
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("UPDATE leads SET financing_status = %s, purchase_urgency = %s, lead_quality = %s, financing_amount = %s, notes = %s WHERE id = %s AND user_id = %s", (data.get('financing_status'), data.get('purchase_urgency'), data.get('lead_quality'), data.get('financing_amount'), data.get('notes'), lead_id, request.user_id))
+        cur.execute("""
+            UPDATE leads SET
+                budget = %s,
+                location = %s,
+                property_type = %s,
+                financing_status = %s,
+                purchase_urgency = %s,
+                financing_amount = %s,
+                notes = %s
+            WHERE id = %s AND user_id = %s
+        """, (
+            data.get('budget'),
+            data.get('location'),
+            data.get('property_type'),
+            data.get('financing_status'),
+            data.get('purchase_urgency'),
+            data.get('financing_amount'),
+            data.get('notes'),
+            lead_id,
+            request.user_id
+        ))
+        modifiees = cur.rowcount
         conn.commit()
         cur.close()
         conn.close()
+
+        # rowcount à zéro signifie que la fiche n'existe pas OU qu'elle
+        # appartient à une autre agence. On ne distingue pas les deux cas
+        # dans la réponse : révéler qu'un identifiant existe ailleurs
+        # renseignerait sur les données d'un autre compte.
+        if modifiees == 0:
+            return jsonify({"message": "Lead not found"}), 404
+
         return jsonify({"message": "Lead updated successfully"}), 200
     except Exception as e:
+        print(f"Error: {str(e)}")
         return jsonify({"message": str(e)}), 500
 
 
