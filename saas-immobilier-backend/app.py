@@ -375,13 +375,10 @@ def calculate_lead_score(lead, property_item):
         score += 30
     elif lead.get('property_type') in ['Appartement', 'Maison'] and property_item.get('property_type') in ['Appartement', 'Maison']:
         score += 15
-    if lead.get('location') == property_item.get('address'):
-        score += 15
-    elif lead.get('location') and property_item.get('address'):
-        if lead['location'].lower() in property_item['address'].lower():
-            score += 12
-        else:
-            score += 5
+        points_loc, hors_secteur = score_localisation(lead, property_item)
+    if hors_secteur:
+        return 0          # écarté : le bien n'est pas dans le bon secteur
+    score += points_loc
     financing_status = lead.get('financing_status', 'unknown')
     if financing_status == 'approved':
         score += 20
@@ -406,7 +403,64 @@ def calculate_lead_score(lead, property_item):
     # l'urgence sont déjà comptés ci-dessus, les réappliquer les comptait
     # deux fois.
     return min(100, max(0, int(score)))
+def normaliser(txt):
+    """Minuscules, sans accents. « Marseille » et « marseille » doivent
+    correspondre, tout comme « Bécon » et « Becon »."""
+    if not txt:
+        return ""
+    t = unicodedata.normalize("NFD", txt.lower())
+    return "".join(c for c in t if unicodedata.category(c) != "Mn").strip()
 
+
+def ville_de(secteur):
+    """« Paris 15 » -> « paris ». « Lyon » -> « lyon »."""
+    mots = [m for m in normaliser(secteur).split() if not m.isdigit()]
+    return " ".join(mots)
+
+
+# Une adresse française écrit « 75015 Paris », jamais « Paris 15 ».
+# Sans cette conversion, l'arrondissement exact ne serait jamais reconnu.
+PREFIXES_ARRONDISSEMENT = {"paris": "750", "lyon": "690", "marseille": "130"}
+
+
+def code_postal_arrondissement(secteur):
+    """« Paris 15 » -> « 75015 ». Renvoie None si non applicable."""
+    mots = normaliser(secteur).split()
+    chiffres = [m for m in mots if m.isdigit()]
+    ville = " ".join(m for m in mots if not m.isdigit())
+    prefixe = PREFIXES_ARRONDISSEMENT.get(ville)
+    if not prefixe or not chiffres:
+        return None
+    return prefixe + chiffres[0].zfill(2)
+
+
+def score_localisation(lead, prop):
+    """Renvoie (points, exclu).
+
+    La localisation est le seul critère éliminatoire du calcul. Un budget
+    et un type qui correspondent ne rattrapent pas une ville à 750 km.
+    """
+    secteur = lead.get("location")
+    adresse = prop.get("address")
+
+    # Sans secteur déclaré, on ne pénalise pas : le prospect est ouvert.
+    if not secteur or not adresse:
+        return 8, False
+
+    a = normaliser(adresse)
+    ville = ville_de(secteur)
+
+    if ville not in a:
+        return 0, True
+
+    s = normaliser(secteur)
+    if s == ville:
+        return 20, False
+
+    cp = code_postal_arrondissement(secteur)
+    if (cp and cp in a) or s in a:
+        return 20, False       # arrondissement exact
+    return 15, False           # bonne ville, autre arrondissement
 # ===== ROUTES API LEADS & PROPERTIES =====
 
 @app.route('/api/v1/leads', methods=['GET'])
