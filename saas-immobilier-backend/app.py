@@ -3,6 +3,7 @@ from flask_cors import CORS
 from datetime import datetime, timedelta
 import jwt
 import os
+import unicodedata
 from functools import wraps
 import psycopg2
 from psycopg2.extras import RealDictCursor
