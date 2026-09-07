@@ -559,6 +559,61 @@ def get_properties():
     except Exception as e:
         print(f"Error: {str(e)}")
         return jsonify({"message": str(e)}), 500
+@app.route('/api/v1/properties', methods=['POST'])
+@token_required
+def create_property():
+    """Ajouter un bien au portefeuille.
+
+    user_id vient de la session, jamais du corps de la requête : une page
+    web est modifiable par celui qui la consulte, et accepter un user_id
+    envoyé par le navigateur permettrait d'écrire dans le portefeuille
+    d'une autre agence.
+    """
+    try:
+        data = request.get_json() or {}
+
+        titre = (data.get('title') or '').strip()
+        if not titre:
+            return jsonify({"message": "Le titre du bien est obligatoire"}), 400
+
+        # Les nombres arrivent en texte depuis un formulaire. Une valeur
+        # illisible est traitée comme non renseignée plutôt que de faire
+        # échouer toute la requête.
+        def entier(cle):
+            valeur = data.get(cle)
+            if valeur in (None, ''):
+                return None
+            try:
+                return int(valeur)
+            except (TypeError, ValueError):
+                return None
+
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            INSERT INTO properties
+                (user_id, title, address, price, size, rooms, property_type, description)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id, title, address, price, size, rooms, property_type, description
+        """, (
+            request.user_id,
+            titre[:255],
+            (data.get('address') or None),
+            entier('price'),
+            entier('size'),
+            entier('rooms'),
+            (data.get('property_type') or None),
+            (data.get('description') or None)
+        ))
+        bien = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify(bien), 201
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"message": str(e)}), 500
 
 @app.route('/api/v1/stats', methods=['GET'])
 @token_required
