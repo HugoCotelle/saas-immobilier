@@ -24,32 +24,62 @@
         .container { max-width: 1200px; margin: 0 auto; padding: 40px 20px; }
         .page-title { color: #333; font-size: 32px; margin-bottom: 10px; }
         .page-subtitle { color: #999; font-size: 16px; margin-bottom: 40px; }
+
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 40px; }
         .stat-card { background: white; border-radius: 10px; padding: 25px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); text-align: center; border-top: 4px solid #667eea; }
         .stat-value { font-size: 36px; font-weight: 700; color: #667eea; margin-bottom: 8px; }
         .stat-label { color: #666; font-size: 14px; font-weight: 500; }
-        .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 30px; margin-bottom: 40px; }
-        .chart-container { background: white; border-radius: 10px; padding: 30px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); }
-        .chart-title { font-size: 18px; font-weight: 700; color: #333; margin-bottom: 20px; }
-        .chart-wrapper { position: relative; height: 300px; }
+
+        .content-grid { display: grid; grid-template-columns: 1fr 1.3fr; gap: 30px; align-items: start; }
+        @media (max-width: 900px) { .content-grid { grid-template-columns: 1fr; } }
+
+        .panel { background: white; border-radius: 10px; padding: 25px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); margin-bottom: 30px; }
+        .panel-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; gap: 15px; }
+        .panel-title { font-size: 18px; font-weight: 700; color: #333; }
+        .panel-count { font-size: 13px; color: #999; white-space: nowrap; }
+        .panel-note { font-size: 13px; color: #999; margin-bottom: 20px; line-height: 1.6; }
+
+        .chart-wrapper { position: relative; height: 280px; }
+
+        .recherche { width: 100%; padding: 11px 12px; border: 1px solid #e0e0e0; border-radius: 5px; font-size: 14px; font-family: inherit; margin-bottom: 15px; }
+        .recherche:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1); }
+
+        /* La liste défile dans son cadre : le portefeuille peut compter
+           plusieurs centaines de biens sans allonger la page. */
+        .biens-liste { max-height: 520px; overflow-y: auto; padding-right: 8px; }
+        .bien-card { border: 1px solid #e0e0e0; border-left: 4px solid #667eea; border-radius: 8px; padding: 16px; margin-bottom: 12px; transition: all 0.3s ease; }
+        .bien-card:hover { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); }
+        .bien-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
+        .bien-titre { font-size: 15px; font-weight: 700; color: #333; }
+        .bien-prix { font-size: 15px; font-weight: 700; color: #667eea; white-space: nowrap; }
+        .bien-adresse { font-size: 13px; color: #999; margin-bottom: 8px; }
+        .bien-details { font-size: 13px; color: #666; }
+        .bien-type { display: inline-block; background: #e8f0fe; color: #1e40af; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; margin-top: 8px; }
+
         .loading { text-align: center; padding: 40px; color: #999; }
         .loader { display: inline-block; width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top-color: #667eea; border-radius: 50%; animation: spin 0.8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        .error { background: #fee; color: #c33; padding: 20px; border-radius: 10px; text-align: center; }
+        .error { background: #fee; color: #c33; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 30px; }
+        .empty-state { text-align: center; padding: 30px 20px; color: #999; font-size: 14px; line-height: 1.6; }
     </style>
 </head>
 <body>
     <div id="root"></div>
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+
         function DashboardApp() {
             const [stats, setStats] = useState(null);
+            const [biens, setBiens] = useState([]);
+            const [filtre, setFiltre] = useState('');
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
             const [user, setUser] = useState(null);
             const chartRef = useRef(null);
             const chartInstance = useRef(null);
-            const API_URL = 'https://saas-immobilier-921a.onrender.com';
+
             useEffect(() => {
                 const token = localStorage.getItem('token');
                 const userData = localStorage.getItem('user');
@@ -58,32 +88,44 @@
                     return;
                 }
                 if (userData) setUser(JSON.parse(userData));
-                fetchStats(token);
+                chargerTout(token);
             }, []);
-            const fetchStats = async (token) => {
+
+            const chargerTout = async (token) => {
                 try {
                     setLoading(true);
-                   const response = await fetch(`${API_URL}/api/v1/stats`, {
-                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-                    });
-                    if (!response.ok) {
-                        if (response.status === 401) {
-                            localStorage.removeItem('token');
-                            localStorage.removeItem('user');
-                            window.location.href = '/login.html';
-                        }
-                        throw new Error(`Erreur API: ${response.status}`);
+                    const entetes = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+                    // Les deux appels partent ensemble : les enchaîner
+                    // doublerait le temps d'attente sur un serveur qui sort
+                    // de veille.
+                    const [rStats, rBiens] = await Promise.all([
+                        fetch(`${API_URL}/api/v1/stats`, { headers: entetes }),
+                        fetch(`${API_URL}/api/v1/properties`, { headers: entetes })
+                    ]);
+
+                    if (rStats.status === 401 || rBiens.status === 401) {
+                        localStorage.removeItem('token');
+                        localStorage.removeItem('user');
+                        window.location.href = '/login.html';
+                        return;
                     }
-                    const data = await response.json();
-                    setStats(data);
+                    if (!rStats.ok) throw new Error(`Erreur API: ${rStats.status}`);
+                    if (!rBiens.ok) throw new Error(`Erreur API: ${rBiens.status}`);
+
+                    const dStats = await rStats.json();
+                    const dBiens = await rBiens.json();
+                    setStats(dStats);
+                    setBiens(dBiens);
                     setError(null);
-                    setTimeout(() => { initChart(data); }, 100);
+                    setTimeout(() => { initChart(dStats); }, 100);
                 } catch (err) {
                     setError(err.message);
                 } finally {
                     setLoading(false);
                 }
             };
+
             const initChart = (statsData) => {
                 if (!chartRef.current) return;
                 if (chartInstance.current) chartInstance.current.destroy();
@@ -91,7 +133,7 @@
                 chartInstance.current = new Chart(ctx, {
                     type: 'doughnut',
                     data: {
-                        labels: ['Leads', 'Propriétés'],
+                        labels: ['Prospects', 'Biens'],
                         datasets: [{
                             data: [statsData.total_leads || 0, statsData.total_properties || 0],
                             backgroundColor: ['#667eea', '#764ba2'],
@@ -102,17 +144,25 @@
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
-                        plugins: {
-                            legend: { position: 'bottom', labels: { font: { size: 14 }, padding: 20 } }
-                        }
+                        plugins: { legend: { position: 'bottom', labels: { font: { size: 14 }, padding: 20 } } }
                     }
                 });
             };
+
             const handleLogout = () => {
                 localStorage.removeItem('token');
                 localStorage.removeItem('user');
                 window.location.href = '/login.html';
             };
+
+            const f = filtre.trim().toLowerCase();
+            const biensFiltres = f
+                ? biens.filter((b) =>
+                    (b.title || '').toLowerCase().includes(f) ||
+                    (b.address || '').toLowerCase().includes(f) ||
+                    (b.property_type || '').toLowerCase().includes(f))
+                : biens;
+
             return (
                 <>
                     <header>
@@ -129,45 +179,112 @@
                             </div>
                         </div>
                     </header>
+
                     <div className="container">
                         <h1 className="page-title">📊 Dashboard</h1>
-                        <p className="page-subtitle">Vue d'ensemble de votre plateforme</p>
+                        <p className="page-subtitle">Vue d'ensemble de votre agence</p>
+
                         {error && <div className="error">❌ Erreur: {error}</div>}
+
                         {loading ? (
                             <div className="loading">
                                 <div className="loader"></div>
-                                <p style={{ marginTop: '20px' }}>Chargement du dashboard...</p>
+                                <p style={{ marginTop: '20px' }}>Chargement...</p>
                             </div>
-                        ) : stats ? (
+                        ) : (
                             <>
-                                <div className="stats-grid">
-                                    <div className="stat-card">
-                                        <div className="stat-value">{stats.total_leads || 0}</div>
-                                        <div className="stat-label">Leads au total</div>
+                                {stats && (
+                                    <div className="stats-grid">
+                                        <div className="stat-card">
+                                            <div className="stat-value">{stats.total_leads || 0}</div>
+                                            <div className="stat-label">Prospects</div>
+                                        </div>
+                                        <div className="stat-card">
+                                            <div className="stat-value">{stats.total_properties || 0}</div>
+                                            <div className="stat-label">Biens au portefeuille</div>
+                                        </div>
+                                        <div className="stat-card">
+                                            <div className="stat-value">{stats.unique_leads || 0}</div>
+                                            <div className="stat-label">Prospects uniques</div>
+                                        </div>
                                     </div>
-                                    <div className="stat-card">
-                                        <div className="stat-value">{stats.total_properties || 0}</div>
-                                        <div className="stat-label">Propriétés</div>
-                                    </div>
-                                    <div className="stat-card">
-                                        <div className="stat-value">{stats.unique_leads || 0}</div>
-                                        <div className="stat-label">Leads uniques</div>
-                                    </div>
-                                </div>
-                                <div className="charts-grid">
-                                    <div className="chart-container">
-                                        <div className="chart-title">📈 Distribution</div>
+                                )}
+
+                                <div className="content-grid">
+                                    <div className="panel">
+                                        <div className="panel-header">
+                                            <div className="panel-title">📈 Répartition</div>
+                                        </div>
+                                        <div className="panel-note">
+                                            Le rapport entre vos prospects et vos biens. Un déséquilibre
+                                            marqué dans un sens ou dans l'autre explique souvent un
+                                            faible nombre de correspondances.
+                                        </div>
                                         <div className="chart-wrapper">
                                             <canvas ref={chartRef}></canvas>
                                         </div>
                                     </div>
+
+                                    <div className="panel">
+                                        <div className="panel-header">
+                                            <div className="panel-title">🏠 Portefeuille</div>
+                                            <div className="panel-count">
+                                                {biensFiltres.length}
+                                                {f && ` sur ${biens.length}`}
+                                            </div>
+                                        </div>
+                                        <div className="panel-note">
+                                            Tous les biens de votre agence.
+                                        </div>
+
+                                        {biens.length > 0 && (
+                                            <input className="recherche" type="text" value={filtre}
+                                                onChange={(e) => setFiltre(e.target.value)}
+                                                placeholder="Filtrer par titre, adresse ou type..." />
+                                        )}
+
+                                        {biens.length === 0 ? (
+                                            <div className="empty-state">
+                                                Aucun bien au portefeuille.
+                                            </div>
+                                        ) : biensFiltres.length === 0 ? (
+                                            <div className="empty-state">
+                                                Aucun bien ne correspond à « {filtre} ».
+                                            </div>
+                                        ) : (
+                                            <div className="biens-liste">
+                                                {biensFiltres.map((b) => (
+                                                    <div key={b.id} className="bien-card">
+                                                        <div className="bien-header">
+                                                            <div className="bien-titre">{b.title}</div>
+                                                            <div className="bien-prix">
+                                                                {b.price ? `${b.price.toLocaleString('fr-FR')} €` : '—'}
+                                                            </div>
+                                                        </div>
+                                                        <div className="bien-adresse">
+                                                            📍 {b.address || 'Adresse non renseignée'}
+                                                        </div>
+                                                        <div className="bien-details">
+                                                            {b.rooms ? `${b.rooms} pièces` : 'Pièces non renseignées'}
+                                                            {' · '}
+                                                            {b.size ? `${b.size} m²` : 'Surface non renseignée'}
+                                                        </div>
+                                                        {b.property_type && (
+                                                            <span className="bien-type">{b.property_type}</span>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </>
-                        ) : null}
+                        )}
                     </div>
                 </>
             );
         }
+
         ReactDOM.render(<DashboardApp />, document.getElementById('root'));
     </script>
 </body>
