@@ -21,32 +21,84 @@
         .user-email { font-size: 14px; color: #666; }
         .logout-btn { background: #ff6b6b; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-weight: 500; }
         .container { max-width: 1200px; margin: 0 auto; padding: 40px 20px; }
+
+        .titre-ligne { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; gap: 20px; flex-wrap: wrap; }
         .page-title { color: #333; font-size: 32px; margin-bottom: 10px; }
-        .page-subtitle { color: #999; font-size: 16px; margin-bottom: 40px; }
+        .page-subtitle { color: #999; font-size: 16px; }
+
+        .btn { background: #667eea; color: white; border: none; padding: 12px 24px; border-radius: 5px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.3s ease; white-space: nowrap; }
+        .btn:hover { background: #5568d3; }
+        .btn:disabled { opacity: 0.5; cursor: default; }
+        .btn.secondary { background: white; color: #333; border: 1px solid #e0e0e0; margin-left: 10px; }
+        .btn.secondary:hover { background: #f5f7fa; }
+
+        .panel { background: white; border-radius: 10px; padding: 25px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); margin-bottom: 30px; }
+        .panel-title { font-size: 18px; font-weight: 700; color: #333; margin-bottom: 8px; }
+        .panel-note { font-size: 13px; color: #999; margin-bottom: 20px; line-height: 1.6; }
+
+        .form-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 20px; }
+        @media (max-width: 800px) { .form-row { grid-template-columns: 1fr; } }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; color: #999; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .obligatoire { color: #c33; }
+        input, select { width: 100%; padding: 12px; border: 1px solid #e0e0e0; border-radius: 5px; font-size: 14px; font-family: inherit; color: #333; background: white; }
+        input:focus, select:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1); }
+
         .leads-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
-        .lead-card { background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); border-left: 4px solid #667eea; }
+        .lead-card { background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); border-left: 4px solid #667eea; transition: all 0.3s ease; }
         .lead-card:hover { box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12); transform: translateY(-2px); }
+        .lead-card.hot { border-left-color: #c33; }
+        .lead-card.warm { border-left-color: #d97706; }
+        .lead-card.cold { border-left-color: #999; }
         .lead-name { font-size: 18px; font-weight: 700; color: #333; margin-bottom: 12px; }
         .lead-field { display: flex; margin-bottom: 10px; font-size: 14px; }
-        .lead-label { color: #999; font-weight: 500; width: 80px; }
-        .lead-value { color: #333; flex: 1; word-break: break-all; }
-        .lead-badge { display: inline-block; background: #e8f0fe; color: #1e40af; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; margin-top: 10px; }
+        .lead-label { color: #999; font-weight: 500; width: 80px; flex: none; }
+        .lead-value { color: #333; flex: 1; word-break: break-word; }
+        .lead-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 15px; }
+        .lead-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .badge-hot { background: #ffe8e8; color: #c33; }
+        .badge-warm { background: #fff4e6; color: #d97706; }
+        .badge-cold { background: #f0f0f0; color: #666; }
+        .lien-fiche { font-size: 13px; color: #667eea; text-decoration: none; font-weight: 600; }
+        .lien-fiche:hover { text-decoration: underline; }
+
         .loading { text-align: center; padding: 40px; color: #999; }
         .loader { display: inline-block; width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top-color: #667eea; border-radius: 50%; animation: spin 0.8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        .error { background: #fee; color: #c33; padding: 20px; border-radius: 10px; text-align: center; }
+        .error { background: #fee; color: #c33; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 30px; }
+        .success { background: #efe; color: #2d7a3e; padding: 15px 20px; border-radius: 8px; margin-bottom: 25px; font-size: 14px; }
+        .empty-state { text-align: center; padding: 40px 20px; color: #999; font-size: 15px; }
     </style>
 </head>
 <body>
     <div id="root"></div>
     <script type="text/babel">
         const { useState, useEffect } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+
+        const BADGES = {
+            hot: ['badge-hot', '🔥 Chaud'],
+            warm: ['badge-warm', '🌤️ Tiède'],
+            cold: ['badge-cold', '❄️ Froid']
+        };
+
+        const VIDE = {
+            name: '', email: '', phone: '', budget: '',
+            location: '', property_type: '',
+            financing_status: 'unknown', purchase_urgency: 'unknown'
+        };
+
         function App() {
             const [leads, setLeads] = useState([]);
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
+            const [message, setMessage] = useState(null);
             const [user, setUser] = useState(null);
-            const API_URL = 'https://saas-immobilier-921a.onrender.com';
+            const [formOuvert, setFormOuvert] = useState(false);
+            const [form, setForm] = useState(VIDE);
+            const [saving, setSaving] = useState(false);
+
             useEffect(() => {
                 const token = localStorage.getItem('token');
                 const userData = localStorage.getItem('user');
@@ -54,31 +106,23 @@
                     window.location.href = '/login.html';
                     return;
                 }
-                if (userData && userData !== 'undefined') {
-    try {
-        setUser(JSON.parse(userData));
-    } catch (e) {
-        console.error('Error parsing user data');
-    }
-}
-                
-fetchLeads(token);
+                if (userData) setUser(JSON.parse(userData));
+                fetchLeads(token);
             }, []);
-             const fetchLeads = async (token) => {
+
+            const fetchLeads = async (token) => {
                 try {
                     setLoading(true);
                     const response = await fetch(`${API_URL}/api/v1/leads`, {
                         method: 'GET',
-                        headers: {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`
-}
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
                     });
                     if (!response.ok) {
                         if (response.status === 401) {
                             localStorage.removeItem('token');
                             localStorage.removeItem('user');
                             window.location.href = '/login.html';
+                            return;
                         }
                         throw new Error(`Erreur API: ${response.status}`);
                     }
@@ -91,11 +135,53 @@ fetchLeads(token);
                     setLoading(false);
                 }
             };
+
+            const creerLead = async () => {
+                if (!form.name.trim()) {
+                    setError('Le nom du prospect est obligatoire.');
+                    return;
+                }
+                const token = localStorage.getItem('token');
+                setSaving(true);
+                try {
+                    const response = await fetch(`${API_URL}/api/v1/leads`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({
+                            name: form.name.trim(),
+                            email: form.email.trim() || null,
+                            phone: form.phone.trim() || null,
+                            budget: form.budget === '' ? null : parseInt(form.budget, 10),
+                            location: form.location.trim() || null,
+                            property_type: form.property_type || null,
+                            financing_status: form.financing_status,
+                            purchase_urgency: form.purchase_urgency
+                        })
+                    });
+                    if (!response.ok) {
+                        const d = await response.json().catch(() => ({}));
+                        throw new Error(d.message || `Création impossible (${response.status})`);
+                    }
+                    setMessage(`${form.name.trim()} a été ajouté.`);
+                    setForm(VIDE);
+                    setFormOuvert(false);
+                    setError(null);
+                    await fetchLeads(token);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setSaving(false);
+                }
+            };
+
             const handleLogout = () => {
                 localStorage.removeItem('token');
                 localStorage.removeItem('user');
                 window.location.href = '/login.html';
             };
+
+            const set = (k, v) => { setForm({ ...form, [k]: v }); setError(null); };
+
             return (
                 <>
                     <header>
@@ -112,34 +198,172 @@ fetchLeads(token);
                             </div>
                         </div>
                     </header>
+
                     <div className="container">
-                        <h1 className="page-title">📋 Leads</h1>
-                        <p className="page-subtitle">Gérez vos {leads.length} leads en direct</p>
-                        {error && <div className="error">❌ Erreur: {error}</div>}
+                        <div className="titre-ligne">
+                            <div>
+                                <h1 className="page-title">📋 Leads</h1>
+                                <p className="page-subtitle">
+                                    {leads.length} prospect{leads.length > 1 ? 's' : ''} dans votre portefeuille
+                                </p>
+                            </div>
+                            <button className="btn" onClick={() => { setFormOuvert(!formOuvert); setMessage(null); }}>
+                                {formOuvert ? 'Fermer' : '+ Ajouter un prospect'}
+                            </button>
+                        </div>
+
+                        {error && <div className="error">❌ {error}</div>}
+                        {message && <div className="success">✓ {message}</div>}
+
+                        {formOuvert && (
+                            <div className="panel">
+                                <div className="panel-title">Nouveau prospect</div>
+                                <div className="panel-note">
+                                    Seul le nom est obligatoire. Tout le reste peut être complété
+                                    plus tard depuis la fiche — mais plus vous renseignez le
+                                    financement et l'échéance, plus le classement sera juste.
+                                </div>
+
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>Nom <span className="obligatoire">*</span></label>
+                                        <input type="text" value={form.name}
+                                            onChange={(e) => set('name', e.target.value)}
+                                            placeholder="Thomas Martin" />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Email</label>
+                                        <input type="email" value={form.email}
+                                            onChange={(e) => set('email', e.target.value)}
+                                            placeholder="thomas.martin@email.fr" />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Téléphone</label>
+                                        <input type="tel" value={form.phone}
+                                            onChange={(e) => set('phone', e.target.value)}
+                                            placeholder="0612345678" />
+                                    </div>
+                                </div>
+
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>Budget (€)</label>
+                                        <input type="number" value={form.budget}
+                                            onChange={(e) => set('budget', e.target.value)}
+                                            placeholder="280000" />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Secteur recherché</label>
+                                        <input type="text" value={form.location}
+                                            onChange={(e) => set('location', e.target.value)}
+                                            placeholder="Lille" />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Type de bien</label>
+                                        <select value={form.property_type}
+                                            onChange={(e) => set('property_type', e.target.value)}>
+                                            <option value="">Non précisé</option>
+                                            <option value="Appartement">Appartement</option>
+                                            <option value="Maison">Maison</option>
+                                            <option value="Villa">Villa</option>
+                                            <option value="Studio">Studio</option>
+                                            <option value="Penthouse">Penthouse</option>
+                                            <option value="Terrain">Terrain</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>Financement</label>
+                                        <select value={form.financing_status}
+                                            onChange={(e) => set('financing_status', e.target.value)}>
+                                            <option value="unknown">Non renseigné</option>
+                                            <option value="approved">Accord bancaire obtenu</option>
+                                            <option value="in_progress">Démarche en cours</option>
+                                            <option value="pending">En attente</option>
+                                            <option value="rejected">Refusé</option>
+                                        </select>
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Échéance d'achat</label>
+                                        <select value={form.purchase_urgency}
+                                            onChange={(e) => set('purchase_urgency', e.target.value)}>
+                                            <option value="unknown">Non renseignée</option>
+                                            <option value="immediate">Immédiate</option>
+                                            <option value="1-3_months">1 à 3 mois</option>
+                                            <option value="3-6_months">3 à 6 mois</option>
+                                            <option value="6plus_months">Plus de 6 mois</option>
+                                        </select>
+                                    </div>
+                                    <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
+                                        <button className="btn" onClick={creerLead} disabled={saving}
+                                            style={{ width: '100%' }}>
+                                            {saving ? 'Enregistrement...' : 'Ajouter le prospect'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {loading ? (
                             <div className="loading">
                                 <div className="loader"></div>
-                                <p style={{ marginTop: '20px' }}>Chargement des leads...</p>
+                                <p style={{ marginTop: '20px' }}>Chargement des prospects...</p>
+                            </div>
+                        ) : leads.length === 0 ? (
+                            <div className="panel">
+                                <div className="empty-state">
+                                    Aucun prospect pour le moment.<br />
+                                    Utilisez le bouton « Ajouter un prospect » pour commencer.
+                                </div>
                             </div>
                         ) : (
                             <div className="leads-grid">
-                                {leads.map((lead, index) => (
-                                    <div key={index} className="lead-card">
-                                         <div className="lead-name">{lead.name}</div>
-                                       <div className="lead-field"><span className="lead-label">Email:</span><span className="lead-value">{lead.email || 'N/A'}</span></div>
-                                       <div className="lead-field"><span className="lead-label">Phone:</span><span className="lead-value">{lead.phone || 'N/A'}</span></div>
-                                       <div className="lead-field"><span className="lead-label">Budget:</span><span className="lead-value">{lead.budget ? `${lead.budget.toLocaleString()}€` : 'N/A'}</span></div>
-                                       <div className="lead-field"><span className="lead-label">Location:</span><span className="lead-value">{lead.location || 'N/A'}</span></div>
-                                       <div className="lead-field"><span className="lead-label">Type:</span><span className="lead-value">{lead.property_type || 'N/A'}</span></div>
-                                       <span className="lead-badge">Lead #{lead.id}</span>
-                                    </div>
-                                ))}
+                                {leads.map((lead) => {
+                                    const q = lead.lead_quality || 'cold';
+                                    const [cls, libelle] = BADGES[q] || BADGES.cold;
+                                    return (
+                                        <div key={lead.id} className={`lead-card ${q}`}>
+                                            <div className="lead-name">{lead.name}</div>
+                                            <div className="lead-field">
+                                                <span className="lead-label">Email :</span>
+                                                <span className="lead-value">{lead.email || 'N/A'}</span>
+                                            </div>
+                                            <div className="lead-field">
+                                                <span className="lead-label">Tél. :</span>
+                                                <span className="lead-value">{lead.phone || 'N/A'}</span>
+                                            </div>
+                                            <div className="lead-field">
+                                                <span className="lead-label">Budget :</span>
+                                                <span className="lead-value">
+                                                    {lead.budget ? `${lead.budget.toLocaleString('fr-FR')} €` : 'N/A'}
+                                                </span>
+                                            </div>
+                                            <div className="lead-field">
+                                                <span className="lead-label">Secteur :</span>
+                                                <span className="lead-value">{lead.location || 'N/A'}</span>
+                                            </div>
+                                            <div className="lead-field">
+                                                <span className="lead-label">Type :</span>
+                                                <span className="lead-value">{lead.property_type || 'N/A'}</span>
+                                            </div>
+                                            <div className="lead-footer">
+                                                <span className={`lead-badge ${cls}`}>{libelle}</span>
+                                                <a className="lien-fiche" href={`/leads-profile.html?id=${lead.id}`}>
+                                                    Ouvrir la fiche →
+                                                </a>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         )}
                     </div>
                 </>
             );
         }
+
         ReactDOM.render(<App />, document.getElementById('root'));
     </script>
 </body>
