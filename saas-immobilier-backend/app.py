@@ -488,6 +488,61 @@ def get_leads():
     except Exception as e:
         print(f"Error: {str(e)}")
         return jsonify({"message": str(e)}), 500
+@app.route('/api/v1/leads', methods=['POST'])
+@token_required
+def create_lead():
+    """Créer un prospect.
+
+    user_id vient de la session, jamais du corps de la requête. Une page
+    web est modifiable par celui qui la consulte : accepter un user_id
+    envoyé par le navigateur permettrait d'écrire dans la base d'une
+    autre agence.
+    """
+    try:
+        data = request.get_json() or {}
+
+        nom = (data.get('name') or '').strip()
+        if not nom:
+            return jsonify({"message": "Le nom du prospect est obligatoire"}), 400
+
+        # Le budget arrive en texte depuis un formulaire. Une valeur
+        # illisible ne doit pas faire tomber la requête : on la traite
+        # comme non renseignée.
+        try:
+            budget = int(data['budget']) if data.get('budget') not in (None, '') else None
+        except (TypeError, ValueError):
+            budget = None
+
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            INSERT INTO leads
+                (user_id, name, email, phone, budget, location, property_type,
+                 status, financing_status, purchase_urgency)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s)
+            RETURNING id, name, email, phone, budget, location, property_type,
+                      status, financing_status, purchase_urgency
+        """, (
+            request.user_id,
+            nom[:255],
+            (data.get('email') or None),
+            (data.get('phone') or None),
+            budget,
+            (data.get('location') or None),
+            (data.get('property_type') or None),
+            data.get('financing_status') or 'unknown',
+            data.get('purchase_urgency') or 'unknown'
+        ))
+        lead = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        lead['lead_quality'] = derive_lead_quality(lead)
+        return jsonify(lead), 201
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return jsonify({"message": str(e)}), 500
 
 @app.route('/api/v1/properties', methods=['GET'])
 @token_required
