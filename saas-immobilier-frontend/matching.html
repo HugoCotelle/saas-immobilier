@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IMMOFLOW - Matching</title>
+    <title>ZELYRO - Matching</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -82,6 +82,11 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
+        // Déclarée au même niveau que dans les autres pages, hors du
+        // composant : c'est la seule ligne à changer le jour où l'adresse
+        // du serveur change.
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+
         function MatchingApp() {
             const [leads, setLeads] = useState([]);
             const [selectedLeadId, setSelectedLeadId] = useState(null);
@@ -89,8 +94,6 @@
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
             const [user, setUser] = useState(null);
-
-            const API_URL = 'https://saas-immobilier-921a.onrender.com';
 
             useEffect(() => {
                 const token = localStorage.getItem('token');
@@ -114,6 +117,7 @@
                             localStorage.removeItem('token');
                             localStorage.removeItem('user');
                             window.location.href = '/login.html';
+                            return;
                         }
                         throw new Error(`Erreur API: ${response.status}`);
                     }
@@ -167,7 +171,7 @@
                 <>
                     <header>
                         <div className="header-content">
-                            <div className="logo">🏢 IMMOFLOW</div>
+                            <div className="logo">ZELYRO</div>
                             <nav>
                                 <a href="/index.html">Leads</a>
                                 <a href="/biens.html">Biens</a>
@@ -184,7 +188,7 @@
                     <div className="container">
                         <h1 className="page-title">🎯 Matching</h1>
                         <p className="page-subtitle">
-                            Les meilleures correspondances pour chacun de vos {leads.length} leads
+                            Les meilleures correspondances pour chacun de vos {leads.length} prospects
                         </p>
 
                         {error && <div className="error">❌ Erreur: {error}</div>}
@@ -196,7 +200,7 @@
                             </div>
                         ) : leads.length === 0 ? (
                             <div className="panel">
-                                <div className="empty-state">Aucun lead à rapprocher pour le moment.</div>
+                                <div className="empty-state">Aucun prospect à rapprocher pour le moment.</div>
                             </div>
                         ) : (
                             <>
@@ -225,9 +229,9 @@
 
                                 <div className="content-wrapper">
                                     <div className="panel leads-panel">
-                                        <div className="panel-title">📋 Leads</div>
+                                        <div className="panel-title">📋 Prospects</div>
                                         {filteredLeads.length === 0 ? (
-                                            <div className="empty-state">Aucun lead dans cette catégorie</div>
+                                            <div className="empty-state">Aucun prospect dans cette catégorie</div>
                                         ) : (
                                             filteredLeads.map(lead => (
                                                 <div
@@ -236,21 +240,21 @@
                                                     onClick={() => setSelectedLeadId(lead.id)}>
                                                     <div className="lead-name">{lead.name}</div>
                                                     <div className="lead-field">
-                                                        <span className="lead-label">Email:</span>
+                                                        <span className="lead-label">Email :</span>
                                                         <span className="lead-value">{lead.email || 'N/A'}</span>
                                                     </div>
                                                     <div className="lead-field">
-                                                        <span className="lead-label">Phone:</span>
+                                                        <span className="lead-label">Tél. :</span>
                                                         <span className="lead-value">{lead.phone || 'N/A'}</span>
                                                     </div>
                                                     <div className="lead-field">
-                                                        <span className="lead-label">Budget:</span>
+                                                        <span className="lead-label">Budget :</span>
                                                         <span className="lead-value">
-                                                            {lead.budget ? `${lead.budget.toLocaleString()} €` : 'N/A'}
+                                                            {lead.budget ? `${lead.budget.toLocaleString('fr-FR')} €` : 'N/A'}
                                                         </span>
                                                     </div>
                                                     <div className="lead-field">
-                                                        <span className="lead-label">Secteur:</span>
+                                                        <span className="lead-label">Secteur :</span>
                                                         <span className="lead-value">{lead.location || 'N/A'}</span>
                                                     </div>
                                                     {qualityBadge(lead.lead_quality)}
@@ -267,7 +271,7 @@
                                                 <div className="detail-block">
                                                     <div className="detail-label">Budget</div>
                                                     <div className="detail-value">
-                                                        {selectedLead.budget ? `${selectedLead.budget.toLocaleString()} €` : 'Non renseigné'}
+                                                        {selectedLead.budget ? `${selectedLead.budget.toLocaleString('fr-FR')} €` : 'Non renseigné'}
                                                     </div>
                                                 </div>
                                                 <div className="detail-block">
@@ -298,7 +302,7 @@
                                                 <div className="section-divider"></div>
 
                                                 <div className="panel-title">
-                                                    🏠 Propriétés correspondantes
+                                                    🏠 Biens correspondants
                                                     {selectedLead.matches && selectedLead.matches.length > 0 &&
                                                         ` (${selectedLead.matches.length})`}
                                                 </div>
@@ -319,16 +323,16 @@
                                                                 {match.size ? ` · ${match.size} m²` : ''}
                                                             </div>
                                                             <div className="match-price">
-                                                                {match.price ? `${match.price.toLocaleString()} €` : 'Prix non renseigné'}
+                                                                {match.price ? `${match.price.toLocaleString('fr-FR')} €` : 'Prix non renseigné'}
                                                             </div>
                                                         </div>
                                                     ))
                                                 ) : (
-                                                    <div className="empty-state">Aucune propriété ne correspond à ce lead</div>
+                                                    <div className="empty-state">Aucun bien ne correspond à ce prospect</div>
                                                 )}
                                             </>
                                         ) : (
-                                            <div className="empty-state">Sélectionnez un lead pour voir ses correspondances</div>
+                                            <div className="empty-state">Sélectionnez un prospect pour voir ses correspondances</div>
                                         )}
                                     </div>
                                 </div>
