@@ -875,8 +875,6 @@ def _valider(brut):
 
 @app.route('/api/v1/extract', methods=['POST'])
 @token_required
-@app.route('/api/v1/extract', methods=['POST'])
-@token_required
 def extract_message():
     """Extraire des critères d'un message écrit en langage naturel."""
     cle = os.getenv('ANTHROPIC_API_KEY')
