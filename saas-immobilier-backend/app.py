@@ -883,7 +883,8 @@ def extract_message():
     trompe, et une fiche fausse enregistrée sans relecture vaut moins
     que pas de fiche du tout.
     """
-    cle = os.getenv('ANTHROPIC_API_KEY')
+        cle = os.getenv('ANTHROPIC_API_KEY')
+    print(f"Clé chargée : {cle[:12] if cle else 'AUCUNE'}... longueur {len(cle) if cle else 0}")
     if not cle:
         return jsonify({"message": "Extraction non configurée sur le serveur"}), 503
 
