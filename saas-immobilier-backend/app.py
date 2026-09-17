@@ -918,8 +918,12 @@ def extract_message():
         )
         if r.status_code != 200:
             print(f"Erreur API extraction : {r.status_code} {r.text[:200]}")
-            return jsonify({"message": "Service d'extraction indisponible"}), 502
-
+                        # On renvoie le code de l'API en amont : sans lui, il faut
+            # aller dans les logs du serveur pour distinguer une clé
+            # invalide d'un manque de crédit.
+            return jsonify({
+                "message": f"Service d'extraction indisponible (code {r.status_code})"
+            }), 502
         texte = ''.join(
             bloc.get('text', '') for bloc in r.json().get('content', [])
         ).strip()
