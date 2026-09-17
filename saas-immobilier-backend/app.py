@@ -875,15 +875,11 @@ def _valider(brut):
 
 @app.route('/api/v1/extract', methods=['POST'])
 @token_required
+@app.route('/api/v1/extract', methods=['POST'])
+@token_required
 def extract_message():
-    """Extraire des critères d'un message écrit en langage naturel.
-
-    La route n'écrit rien en base : elle renvoie les champs à l'agent,
-    qui vérifie avant d'enregistrer. C'est volontaire — un modèle se
-    trompe, et une fiche fausse enregistrée sans relecture vaut moins
-    que pas de fiche du tout.
-    """
-            cle = os.getenv('ANTHROPIC_API_KEY')
+    """Extraire des critères d'un message écrit en langage naturel."""
+    cle = os.getenv('ANTHROPIC_API_KEY')
     if not cle:
         return jsonify({"message": "Extraction non configurée sur le serveur"}), 503
 
