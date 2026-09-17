@@ -755,6 +755,211 @@ def get_improved_matches():
         print(f"Error: {str(e)}")
         return jsonify({"message": str(e)}), 500
 
+# ===== EXTRACTION DEPUIS UN MESSAGE LIBRE =====
+
+import json as _json
+import requests
+
+# Les seules valeurs que la base accepte. Un modèle de langage produit du
+# texte : sans cette liste, il finira par renvoyer "appartement" ou
+# "T3" un jour où l'autre, et la comparaison avec la base échouera en
+# silence.
+BALISE = chr(96) * 3          # trois accents graves
+TYPES_BIEN = ['Appartement', 'Maison', 'Villa', 'Studio', 'Penthouse', 'Terrain']
+ECHEANCES = ['immediate', '1-3_months', '3-6_months', '6plus_months']
+FINANCEMENTS = ['approved', 'in_progress', 'pending', 'rejected']
+
+CONSIGNE = """Tu es un assistant pour une agence immobilière. Extrais les \
+informations du message et réponds UNIQUEMENT en JSON, sans commentaire ni \
+texte autour.
+
+Date du jour : {date}
+
+Champs : nom, email, telephone, transaction, budget, secteurs, type_bien, \
+nombre_pieces, echeance, financement, garants, profession, notes
+
+Règles strictes :
+- N'invente jamais. Information non explicite dans le message = null.
+- transaction : "achat", "location" ou null. Si le message mentionne des \
+garants, des revenus ou un loyer, c'est une location.
+- secteurs : TABLEAU de noms de communes. "Lille ou Marcq" devient \
+["Lille","Marcq"]. null si aucun secteur.
+- type_bien : exactement l'un de {types}, ou null.
+- telephone : chiffres uniquement, sans espaces ni points.
+- budget : entier en euros. Pour une location, le loyer mensuel.
+- echeance : l'un de {echeances}, ou null. Calcule par rapport à la date du jour.
+- financement : l'un de {financements}, ou null.
+- garants : nombre de garants mentionnés, ou null.
+- profession : situation professionnelle citée, ou null.
+- notes : une phrase résumant ce qui n'entre dans aucun champ, ou null.
+
+Message :
+{message}"""
+
+
+def _entier(v):
+    """Le modèle renvoie parfois "280 000" ou "280000 euros"."""
+    if v in (None, '', 'null'):
+        return None
+    if isinstance(v, int):
+        return v
+    try:
+        return int(''.join(c for c in str(v) if c.isdigit()) or 0) or None
+    except (TypeError, ValueError):
+        return None
+
+
+def _valider(brut):
+    """Ne garde que ce qui est utilisable.
+
+    Un modèle de langage produit du texte libre : tout ce qui sort d'ici
+    est traité comme non fiable jusqu'à vérification. Une valeur hors
+    liste est ramenée à null plutôt que d'être écrite en base, où elle
+    casserait le rapprochement sans qu'on s'en aperçoive.
+    """
+    def texte(cle, maxlen=255):
+        v = brut.get(cle)
+        if not v or not isinstance(v, str):
+            return None
+        v = v.strip()
+        return v[:maxlen] if v and v.lower() != 'null' else None
+
+    def dans(cle, valeurs):
+        """Comparaison insensible à la casse.
+
+        Le modèle renvoie parfois "appartement" au lieu de "Appartement".
+        L'information est juste : la rejeter pour une majuscule reviendrait
+        à perdre un champ correct. En revanche, une valeur absente de la
+        liste reste écartée — c'est ce qui protège la base.
+        """
+        v = brut.get(cle)
+        if not isinstance(v, str):
+            return None
+        v = v.strip().lower()
+        for attendu in valeurs:
+            if v == attendu.lower():
+                return attendu
+        return None
+
+    tel = texte('telephone', 30)
+    if tel:
+        tel = ''.join(c for c in tel if c.isdigit())
+        tel = tel or None
+
+    secteurs = brut.get('secteurs')
+    if isinstance(secteurs, str):
+        secteurs = [secteurs]
+    if not isinstance(secteurs, list):
+        secteurs = []
+    secteurs = [s.strip() for s in secteurs if isinstance(s, str) and s.strip()][:5]
+
+    return {
+        'nom': texte('nom', 120),
+        'email': texte('email', 200),
+        'telephone': tel,
+        'transaction': dans('transaction', ['achat', 'location']),
+        'budget': _entier(brut.get('budget')),
+        # La base ne stocke qu'un secteur : on garde le premier et on
+        # signale les autres dans les notes plutôt que de les perdre.
+        'secteur': secteurs[0] if secteurs else None,
+        'secteurs_secondaires': secteurs[1:] if len(secteurs) > 1 else [],
+        'type_bien': dans('type_bien', TYPES_BIEN),
+        'nombre_pieces': _entier(brut.get('nombre_pieces')),
+        'echeance': dans('echeance', ECHEANCES),
+        'financement': dans('financement', FINANCEMENTS),
+        'garants': _entier(brut.get('garants')),
+        'profession': texte('profession', 120),
+        'notes': texte('notes', 1000),
+    }
+
+
+@app.route('/api/v1/extract', methods=['POST'])
+@token_required
+def extract_message():
+    """Extraire des critères d'un message écrit en langage naturel.
+
+    La route n'écrit rien en base : elle renvoie les champs à l'agent,
+    qui vérifie avant d'enregistrer. C'est volontaire — un modèle se
+    trompe, et une fiche fausse enregistrée sans relecture vaut moins
+    que pas de fiche du tout.
+    """
+    cle = os.getenv('ANTHROPIC_API_KEY')
+    if not cle:
+        return jsonify({"message": "Extraction non configurée sur le serveur"}), 503
+
+    data = request.get_json() or {}
+    message = (data.get('message') or '').strip()
+    if len(message) < 10:
+        return jsonify({"message": "Message trop court pour être analysé"}), 400
+    message = message[:8000]
+
+    consigne = CONSIGNE.format(
+        date=datetime.utcnow().strftime('%Y-%m-%d'),
+        types=', '.join(TYPES_BIEN),
+        echeances=', '.join(ECHEANCES),
+        financements=', '.join(FINANCEMENTS),
+        message=message,
+    )
+
+    try:
+        r = requests.post(
+            'https://api.anthropic.com/v1/messages',
+            headers={
+                'content-type': 'application/json',
+                'x-api-key': cle,
+                'anthropic-version': '2023-06-01',
+            },
+            json={
+                'model': 'claude-haiku-4-5-20251001',
+                'max_tokens': 1000,
+                'messages': [{'role': 'user', 'content': consigne}],
+            },
+            timeout=30,
+        )
+        if r.status_code != 200:
+            print(f"Erreur API extraction : {r.status_code} {r.text[:200]}")
+            return jsonify({"message": "Service d'extraction indisponible"}), 502
+
+        texte = ''.join(
+            bloc.get('text', '') for bloc in r.json().get('content', [])
+        ).strip()
+
+        # Le modèle encadre parfois sa réponse de balises de code.
+        # BALISE est construit par chr() plutôt qu'écrit littéralement :
+        # trois accents graves dans un fichier Python collé depuis un
+        # document markdown coupent le bloc de code à cet endroit.
+        if texte.startswith(BALISE):
+            texte = texte.split(BALISE)[1]
+            if texte.startswith('json'):
+                texte = texte[4:]
+            texte = texte.strip()
+
+        brut = _json.loads(texte)
+
+    except _json.JSONDecodeError:
+        print(f"Réponse non JSON : {texte[:200]}")
+        return jsonify({"message": "Réponse du modèle illisible"}), 502
+    except requests.Timeout:
+        return jsonify({"message": "Délai dépassé, réessayez"}), 504
+    except Exception as e:
+        print(f"Error extraction: {str(e)}")
+        return jsonify({"message": str(e)}), 500
+
+    champs = _valider(brut)
+
+    # Les secteurs qui ne tiennent pas dans la fiche rejoignent les notes :
+    # un agent doit pouvoir voir que le prospect cherche aussi ailleurs.
+    if champs['secteurs_secondaires']:
+        mention = "Cherche aussi : " + ', '.join(champs['secteurs_secondaires'])
+        champs['notes'] = f"{champs['notes']} — {mention}" if champs['notes'] else mention
+
+    # Ce que l'agent doit savoir avant d'enregistrer.
+    remplis = sum(1 for k, v in champs.items()
+                  if k != 'secteurs_secondaires' and v not in (None, [], ''))
+    champs['_champs_remplis'] = remplis
+    champs['_message_source'] = message[:2000]
+
+    return jsonify(champs), 200
 
 if __name__ == '__main__':
     print(f"🚀 Backend running on http://localhost:{PORT}")
