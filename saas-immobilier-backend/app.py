@@ -958,6 +958,21 @@ def extract_message():
     champs['_message_source'] = message[:2000]
 
     return jsonify(champs), 200
+@app.route('/api/v1/debug-cle', methods=['GET'])
+@token_required
+def debug_cle():
+    """Vérifier si la variable d'environnement arrive jusqu'au serveur.
+
+    N'expose que la longueur et le préfixe, jamais la clé. À retirer
+    une fois le diagnostic terminé.
+    """
+    cle = os.getenv('ANTHROPIC_API_KEY')
+    return jsonify({
+        "variable_presente": cle is not None,
+        "longueur": len(cle) if cle else 0,
+        "prefixe": cle[:12] if cle else None,
+        "variables_anthropic": [k for k in os.environ if 'ANTHROPIC' in k.upper()]
+    }), 200
 
 if __name__ == '__main__':
     print(f"🚀 Backend running on http://localhost:{PORT}")
