@@ -1,31 +1,188 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from datetime import datetime, timedelta
 import jwt
 import os
+import re
+import sys
+import secrets
 import unicodedata
 from functools import wraps
 import psycopg2
+import psycopg2.errors
 from psycopg2.extras import RealDictCursor
+from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.exceptions import HTTPException
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
 
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+# Un JSON de formulaire pèse quelques Ko : au-delà, la requête est refusée
+# avant même d'être lue.
+app.config['MAX_CONTENT_LENGTH'] = 128 * 1024
+
+# Sur Render, l'application est derrière un proxy. Sans cette ligne, tous
+# les visiteurs apparaîtraient avec la même adresse IP et les limites de
+# requêtes ci-dessous s'appliqueraient à tout le monde à la fois.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=int(os.getenv("TRUSTED_PROXIES", "1")), x_proto=1)
+
+# ===== CONFIGURATION =====
+
+def _charger_secret():
+    """La clé qui signe les connexions doit venir de l'environnement.
+
+    Avec une valeur par défaut écrite dans le code, quiconque lit le dépôt
+    peut fabriquer un jeton valide et se faire passer pour n'importe quel
+    utilisateur. Mieux vaut que le serveur refuse de démarrer.
+    """
+    secret = os.getenv("SECRET_KEY") or os.getenv("JWT_SECRET") or ""
+    if len(secret) < 32 or secret == "your-secret-key-change-in-production":
+        raise RuntimeError(
+            "SECRET_KEY absente ou trop courte (32 caractères minimum). "
+            "Générez-en une avec : "
+            "python3 -c \"import secrets; print(secrets.token_urlsafe(48))\""
+        )
+    return secret
+
+
+SECRET_KEY = _charger_secret()
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://hugocotelle@localhost:5432/saas_immobilier")
 PORT = int(os.getenv("PORT", 8888))
+TOKEN_LIFETIME_HOURS = int(os.getenv("TOKEN_LIFETIME_HOURS", "24"))
 
-# Créer la connexion globale à la BD
-try:
-    db = psycopg2.connect(DATABASE_URL)
-    print("✅ Connexion à la base de données établie")
-except Exception as e:
-    print(f"❌ Erreur de connexion: {e}")
-    db = None
+# Sites autorisés à appeler l'API depuis un navigateur. Les motifs des
+# équipes Vercel "immo-flow" et "zelyro" couvrent la production et les
+# prévisualisations ; un domaine personnalisé s'ajoute avec la variable
+# ALLOWED_ORIGINS (adresses complètes séparées par des virgules).
+_ORIGINES_AUTORISEES = [
+    r"^https://saas-immobilier(-[a-z0-9]+)*-(immo-flow|zelyro)\.vercel\.app$",
+    r"^https://saas-immobilier\.vercel\.app$",
+    r"^http://localhost(:\d+)?$",
+    r"^http://127\.0\.0\.1(:\d+)?$",
+]
+_ORIGINES_AUTORISEES += [
+    o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
+
+CORS(
+    app,
+    origins=_ORIGINES_AUTORISEES,
+    methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
+    max_age=600,
+)
+
+# ===== LIMITES DE REQUÊTES =====
+
+def _cle_utilisateur():
+    """Clé de limitation : l'utilisateur connecté, à défaut l'adresse IP."""
+    parties = request.headers.get('Authorization', '').split(' ')
+    if len(parties) == 2:
+        try:
+            data = jwt.decode(parties[1], SECRET_KEY, algorithms=["HS256"])
+            return f"u:{data['id']}"
+        except Exception:
+            pass
+    return f"ip:{get_remote_address()}"
+
+
+def _cle_email():
+    """Clé de limitation d'une connexion : l'adresse visée, quelle que soit l'IP."""
+    data = request.get_json(silent=True) or {}
+    return "mail:" + str(data.get('email') or '').strip().lower()[:255]
+
+
+# Le stockage en mémoire suffit pour démarrer ; chaque processus gunicorn
+# compte séparément. Pour un compte global, définir RATELIMIT_STORAGE_URI
+# (par exemple l'adresse d'un Redis).
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["300 per minute"],
+    storage_uri=os.getenv("RATELIMIT_STORAGE_URI", "memory://"),
+)
+
+
+@app.errorhandler(429)
+def trop_de_requetes(e):
+    return jsonify({"message": "Trop de requêtes. Réessayez dans quelques minutes."}), 429
+
+
+@app.errorhandler(413)
+def requete_trop_grosse(e):
+    return jsonify({"message": "Requête trop volumineuse"}), 413
+
+
+@app.errorhandler(404)
+def introuvable(e):
+    return jsonify({"message": "Not found"}), 404
+
+
+@app.errorhandler(405)
+def methode_interdite(e):
+    return jsonify({"message": "Method not allowed"}), 405
+
+
+@app.after_request
+def entetes_securite(reponse):
+    """En-têtes de sécurité sur toutes les réponses de l'API."""
+    reponse.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    reponse.headers.setdefault('Cache-Control', 'no-store')
+    reponse.headers.setdefault('Referrer-Policy', 'no-referrer')
+    reponse.headers.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+    reponse.headers.setdefault('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'")
+    return reponse
+
+
+def erreur_interne():
+    """Réponse générique pour une erreur inattendue.
+
+    Le détail (souvent un message de base de données avec des noms de
+    tables et de colonnes) va dans les journaux du serveur, jamais dans la
+    réponse envoyée au navigateur.
+    """
+    exc = sys.exc_info()[1]
+    if isinstance(exc, HTTPException):
+        # 413, 400... : ce ne sont pas des pannes, on laisse le gestionnaire
+        # d'erreurs HTTP répondre avec le bon code.
+        raise exc
+    app.logger.exception("Erreur inattendue sur %s", request.path)
+    return jsonify({"message": "Erreur interne du serveur"}), 500
+
+
+# ===== VALIDATION DES ENTRÉES =====
+
+FINANCING_VALUES = {'unknown', 'approved', 'in_progress', 'pending', 'rejected'}
+URGENCY_VALUES = {'unknown', 'immediate', '1-3_months', '3-6_months', '6plus_months'}
+
+
+def _texte_court(v, maxlen):
+    """Texte nettoyé et tronqué, ou None. Évite de dépasser la taille des colonnes."""
+    if v is None:
+        return None
+    v = str(v).strip()
+    return v[:maxlen] or None
+
+
+def _entier_borne(v, maxi=2_000_000_000):
+    """Entier entre 0 et maxi (limite d'une colonne INTEGER), sinon None."""
+    if v in (None, ''):
+        return None
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return None
+    return n if 0 <= n <= maxi else None
+
+
+def _choix(v, valeurs, defaut='unknown'):
+    return v if v in valeurs else defaut
+
 
 # ===== HELPERS =====
 
@@ -59,7 +216,8 @@ def token_required(f):
         if not token:
             return jsonify({"message": "Token is missing"}), 401
         try:
-            data = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+            data = jwt.decode(token, SECRET_KEY, algorithms=["HS256"],
+                              options={"require": ["exp", "id"]})
             current_user_id = data['id']
             request.user_id = current_user_id
         except jwt.ExpiredSignatureError:
@@ -69,10 +227,17 @@ def token_required(f):
         return f(*args, **kwargs)
     return decorated
 
-def init_database():
-    """Initialiser la base de données avec les tables et données de test"""
+def init_database(demo=False):
+    """Créer les tables qui n'existent pas encore.
+
+    Cette fonction n'est plus appelable depuis le web. Elle se lance en
+    ligne de commande (python app.py init-db) ou une fois au démarrage avec
+    INIT_DB_ON_START=1. Les données de démonstration ne sont créées qu'avec
+    l'option --demo, sur une base vide, avec un mot de passe tiré au hasard.
+    """
+    conn = get_db_connection()
     try:
-        cursor = db.cursor()
+        cursor = conn.cursor()
 
         # Table USERS
         cursor.execute("""
@@ -118,16 +283,35 @@ def init_database():
             )
         """)
 
+        # Colonnes ajoutées après la première version du schéma : sans elles,
+        # une base neuve ne correspond pas à ce que le code interroge.
+        for ddl in (
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS financing_status VARCHAR(50) DEFAULT 'unknown'",
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS purchase_urgency VARCHAR(50) DEFAULT 'unknown'",
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_quality VARCHAR(20)",
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS financing_amount INTEGER",
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS notes TEXT",
+            "CREATE INDEX IF NOT EXISTS leads_user_id_idx ON leads (user_id)",
+            "CREATE INDEX IF NOT EXISTS properties_user_id_idx ON properties (user_id)",
+        ):
+            cursor.execute(ddl)
+
         # Vérifier si vide
         cursor.execute("SELECT COUNT(*) FROM users")
         user_count = cursor.fetchone()[0]
 
-        if user_count == 0:
-            # Insérer utilisateur de test
+        if demo and user_count == 0:
+            # Compte de démonstration : mot de passe tiré au hasard, affiché
+            # une seule fois. Jamais de mot de passe connu écrit dans le code.
+            mot_de_passe_demo = os.getenv("DEMO_PASSWORD") or secrets.token_urlsafe(12)
             cursor.execute("""
                 INSERT INTO users (email, password_hash, first_name, company_name)
-                VALUES (%s, %s, %s, %s)
-            """, ('test@example.com', generate_password_hash('password123'), 'Test', 'Test Company'))
+                VALUES (%s, %s, %s, %s) RETURNING id
+            """, ('demo@example.com',
+                  generate_password_hash(mot_de_passe_demo, method='pbkdf2:sha256'),
+                  'Demo', 'Demo Company'))
+            demo_user_id = cursor.fetchone()[0]
+            print(f"Compte de démonstration : demo@example.com / {mot_de_passe_demo}")
 
             # 33 leads
             leads_data = [
@@ -169,54 +353,69 @@ def init_database():
             for name, email, phone, budget, location, property_type in leads_data:
                 cursor.execute("""
                     INSERT INTO leads (user_id, name, email, phone, budget, location, property_type, status)
-                    VALUES (1, %s, %s, %s, %s, %s, %s, 'nouveau')
-                """, (name, email, phone, budget, location, property_type))
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'nouveau')
+                """, (demo_user_id, name, email, phone, budget, location, property_type))
 
-        db.commit()
+        conn.commit()
         cursor.close()
         print("✅ Base de données initialisée!")
 
     except Exception as e:
         print(f"❌ Erreur: {e}")
-        db.rollback()
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+if os.getenv("INIT_DB_ON_START") == "1":
+    # Pour les hébergements sans terminal : à activer le temps d'un
+    # déploiement, puis à retirer.
+    try:
+        init_database()
+    except Exception:
+        app.logger.exception("Initialisation de la base impossible")
 
 # ===== ROUTES HEALTH & INIT =====
 
 @app.route('/health', methods=['GET'])
+@limiter.exempt
 def health():
     """Vérifier que le backend répond"""
     return jsonify({"status": "OK"}), 200
 
-@app.route('/api/v1/init-db', methods=['POST'])
-def init_db():
-    """Route pour initialiser la base de données"""
-    try:
-        if db:
-            init_database()
-            return jsonify({"message": "Database initialized successfully"}), 200
-        else:
-            return jsonify({"message": "Database connection failed"}), 500
-    except Exception as e:
-        return jsonify({"message": str(e)}), 500
-
 # ===== ROUTES AUTHENTICATION =====
 
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+# Sert à consommer le même temps de calcul quand l'adresse est inconnue :
+# sans cela, la vitesse de la réponse révèle quelles adresses ont un compte.
+_HASH_FACTICE = generate_password_hash(secrets.token_urlsafe(16), method='pbkdf2:sha256')
+
+
 @app.route('/auth/register', methods=['POST'])
+@limiter.limit("10 per hour")
 def register():
     """Enregistrer un nouvel utilisateur"""
-    data = request.get_json()
-    if not data.get('email') or not data.get('password'):
-        return jsonify({"message": "Email and password required"}), 400
-
-    email = data.get('email')
+    data = request.get_json(silent=True) or {}
+    email = str(data.get('email') or '').strip().lower()
     password = data.get('password')
-    first_name = data.get('first_name', '')
-    company_name = data.get('company_name', '')
+    first_name = str(data.get('first_name') or '').strip()[:100]
+    company_name = str(data.get('company_name') or '').strip()[:255]
+
+    if not email or not password:
+        return jsonify({"message": "Email and password required"}), 400
+    if len(email) > 255 or not EMAIL_RE.match(email):
+        return jsonify({"message": "Adresse email invalide"}), 400
+    if not isinstance(password, str) or len(password) < 10:
+        return jsonify({"message": "Le mot de passe doit contenir au moins 10 caractères"}), 400
+    if len(password) > 128:
+        return jsonify({"message": "Mot de passe trop long (128 caractères maximum)"}), 400
 
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+        cur.execute("SELECT id FROM users WHERE lower(email) = %s", (email,))
         if cur.fetchone():
             cur.close()
             conn.close()
@@ -230,7 +429,7 @@ def register():
         user_id = cur.fetchone()['id']
         conn.commit()
 
-        token = create_access_token(identity={'id': user_id, 'email': email}, expires=timedelta(days=30))
+        token = create_access_token(identity={'id': user_id, 'email': email}, expires=timedelta(hours=TOKEN_LIFETIME_HOURS))
 
         cur.close()
         conn.close()
@@ -245,35 +444,44 @@ def register():
                 "company_name": company_name
             }
         }), 201
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        return jsonify({"message": str(e)}), 500
+    except psycopg2.errors.UniqueViolation:
+        # Deux inscriptions simultanées avec la même adresse.
+        return jsonify({"message": "User already exists"}), 409
+    except Exception:
+        return erreur_interne()
 
 @app.route('/auth/login', methods=['POST'])
+@limiter.limit("30 per minute")
+@limiter.limit("8 per 15 minutes", key_func=_cle_email,
+               deduct_when=lambda reponse: reponse.status_code == 401)
 def login():
     """Connexion utilisateur"""
-    data = request.get_json()
-    if not data.get('email') or not data.get('password'):
-        return jsonify({"message": "Email and password required"}), 400
-
-    email = data.get('email')
+    data = request.get_json(silent=True) or {}
+    email = str(data.get('email') or '').strip().lower()
     password = data.get('password')
+    if not email or not password or not isinstance(password, str):
+        return jsonify({"message": "Email and password required"}), 400
+    if len(password) > 128:
+        return jsonify({"message": "Invalid credentials"}), 401
 
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, email, password_hash, first_name, company_name FROM users WHERE email = %s", (email,))
+        cur.execute("SELECT id, email, password_hash, first_name, company_name FROM users WHERE lower(email) = %s", (email,))
         user = cur.fetchone()
-
-        if not user or not check_password_hash(user['password_hash'], password):
-            cur.close()
-            conn.close()
-            return jsonify({"message": "Invalid credentials"}), 401
-
         cur.close()
         conn.close()
 
-        token = create_access_token(identity={'id': user['id'], 'email': user['email']}, expires=timedelta(days=30))
+        if user:
+            valide = check_password_hash(user['password_hash'], password)
+        else:
+            check_password_hash(_HASH_FACTICE, password)
+            valide = False
+
+        if not valide:
+            return jsonify({"message": "Invalid credentials"}), 401
+
+        token = create_access_token(identity={'id': user['id'], 'email': user['email']}, expires=timedelta(hours=TOKEN_LIFETIME_HOURS))
 
         return jsonify({
             "message": "Login successful",
@@ -285,8 +493,8 @@ def login():
                 "company_name": user['company_name']
             }
         }), 200
-    except Exception as e:
-        return jsonify({"message": str(e)}), 500
+    except Exception:
+        return erreur_interne()
 
 @app.route('/auth/profile', methods=['GET'])
 @token_required
@@ -304,8 +512,8 @@ def get_profile():
             return jsonify({"message": "User not found"}), 404
 
         return jsonify(user), 200
-    except Exception as e:
-        return jsonify({"message": str(e)}), 500
+    except Exception:
+        return erreur_interne()
 
 # ===== SCORING INTELLIGENT =====
 
@@ -485,9 +693,8 @@ def get_leads():
         for lead in leads:
             lead['lead_quality'] = derive_lead_quality(lead)
         return jsonify(leads), 200
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        return jsonify({"message": str(e)}), 500
+    except Exception:
+        return erreur_interne()
 @app.route('/api/v1/leads', methods=['POST'])
 @token_required
 def create_lead():
@@ -499,7 +706,7 @@ def create_lead():
     autre agence.
     """
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
 
         nom = (data.get('name') or '').strip()
         if not nom:
@@ -508,10 +715,7 @@ def create_lead():
         # Le budget arrive en texte depuis un formulaire. Une valeur
         # illisible ne doit pas faire tomber la requête : on la traite
         # comme non renseignée.
-        try:
-            budget = int(data['budget']) if data.get('budget') not in (None, '') else None
-        except (TypeError, ValueError):
-            budget = None
+        budget = _entier_borne(data.get('budget'))
 
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -525,13 +729,13 @@ def create_lead():
         """, (
             request.user_id,
             nom[:255],
-            (data.get('email') or None),
-            (data.get('phone') or None),
+            _texte_court(data.get('email'), 255),
+            _texte_court(data.get('phone'), 20),
             budget,
-            (data.get('location') or None),
-            (data.get('property_type') or None),
-            data.get('financing_status') or 'unknown',
-            data.get('purchase_urgency') or 'unknown'
+            _texte_court(data.get('location'), 255),
+            _texte_court(data.get('property_type'), 100),
+            _choix(data.get('financing_status'), FINANCING_VALUES),
+            _choix(data.get('purchase_urgency'), URGENCY_VALUES)
         ))
         lead = cur.fetchone()
         conn.commit()
@@ -540,9 +744,8 @@ def create_lead():
 
         lead['lead_quality'] = derive_lead_quality(lead)
         return jsonify(lead), 201
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        return jsonify({"message": str(e)}), 500
+    except Exception:
+        return erreur_interne()
 
 @app.route('/api/v1/properties', methods=['GET'])
 @token_required
@@ -556,9 +759,8 @@ def get_properties():
         cur.close()
         conn.close()
         return jsonify(properties), 200
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        return jsonify({"message": str(e)}), 500
+    except Exception:
+        return erreur_interne()
 @app.route('/api/v1/properties', methods=['POST'])
 @token_required
 def create_property():
@@ -570,7 +772,7 @@ def create_property():
     d'une autre agence.
     """
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
 
         titre = (data.get('title') or '').strip()
         if not titre:
@@ -580,13 +782,7 @@ def create_property():
         # illisible est traitée comme non renseignée plutôt que de faire
         # échouer toute la requête.
         def entier(cle):
-            valeur = data.get(cle)
-            if valeur in (None, ''):
-                return None
-            try:
-                return int(valeur)
-            except (TypeError, ValueError):
-                return None
+            return _entier_borne(data.get(cle))
 
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -598,12 +794,12 @@ def create_property():
         """, (
             request.user_id,
             titre[:255],
-            (data.get('address') or None),
+            _texte_court(data.get('address'), 255),
             entier('price'),
             entier('size'),
             entier('rooms'),
-            (data.get('property_type') or None),
-            (data.get('description') or None)
+            _texte_court(data.get('property_type'), 100),
+            _texte_court(data.get('description'), 5000)
         ))
         bien = cur.fetchone()
         conn.commit()
@@ -611,9 +807,8 @@ def create_property():
         conn.close()
 
         return jsonify(bien), 201
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        return jsonify({"message": str(e)}), 500
+    except Exception:
+        return erreur_interne()
 
 @app.route('/api/v1/stats', methods=['GET'])
 @token_required
@@ -632,9 +827,8 @@ def get_stats():
         cur.close()
         conn.close()
         return jsonify(stats), 200
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        return jsonify({"message": str(e)}), 500
+    except Exception:
+        return erreur_interne()
 
 
 @app.route('/api/v1/leads/<int:lead_id>', methods=['GET'])
@@ -650,8 +844,8 @@ def get_lead_detail(lead_id):
         if not lead:
             return jsonify({"message": "Lead not found"}), 404
         return jsonify(lead), 200
-    except Exception as e:
-        return jsonify({"message": str(e)}), 500
+    except Exception:
+        return erreur_interne()
 
 
 @app.route('/api/v1/leads/<int:lead_id>/update-financing', methods=['PUT'])
@@ -665,7 +859,7 @@ def update_lead_financing(lead_id):
     classement.
     """
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
@@ -679,13 +873,13 @@ def update_lead_financing(lead_id):
                 notes = %s
             WHERE id = %s AND user_id = %s
         """, (
-            data.get('budget'),
-            data.get('location'),
-            data.get('property_type'),
-            data.get('financing_status'),
-            data.get('purchase_urgency'),
-            data.get('financing_amount'),
-            data.get('notes'),
+            _entier_borne(data.get('budget')),
+            _texte_court(data.get('location'), 255),
+            _texte_court(data.get('property_type'), 100),
+            _choix(data.get('financing_status'), FINANCING_VALUES),
+            _choix(data.get('purchase_urgency'), URGENCY_VALUES),
+            _entier_borne(data.get('financing_amount')),
+            _texte_court(data.get('notes'), 2000),
             lead_id,
             request.user_id
         ))
@@ -702,9 +896,8 @@ def update_lead_financing(lead_id):
             return jsonify({"message": "Lead not found"}), 404
 
         return jsonify({"message": "Lead updated successfully"}), 200
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        return jsonify({"message": str(e)}), 500
+    except Exception:
+        return erreur_interne()
 
 
 @app.route('/api/v1/leads/quality/<quality>', methods=['GET'])
@@ -722,8 +915,8 @@ def get_leads_by_quality(quality):
         for lead in filtered:
             lead['lead_quality'] = quality
         return jsonify(filtered), 200
-    except Exception as e:
-        return jsonify({"message": str(e)}), 500
+    except Exception:
+        return erreur_interne()
 
 
 @app.route('/api/v1/improved-matches', methods=['GET'])
@@ -751,9 +944,8 @@ def get_improved_matches():
         ordre = {'hot': 0, 'warm': 1, 'cold': 2}
         result.sort(key=lambda x: ordre.get(x['lead_quality'], 3))
         return jsonify(result), 200
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        return jsonify({"message": str(e)}), 500
+    except Exception:
+        return erreur_interne()
 
 # ===== EXTRACTION DEPUIS UN MESSAGE LIBRE =====
 
@@ -874,6 +1066,7 @@ def _valider(brut):
 
 
 @app.route('/api/v1/extract', methods=['POST'])
+@limiter.limit("30 per hour;200 per day", key_func=_cle_utilisateur)
 @token_required
 def extract_message():
     """Extraire des critères d'un message écrit en langage naturel."""
@@ -883,7 +1076,7 @@ def extract_message():
     if not cle:
         return jsonify({"message": "Extraction non configurée sur le serveur"}), 503
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     message = (data.get('message') or '').strip()
     if len(message) < 10:
         return jsonify({"message": "Message trop court pour être analysé"}), 400
@@ -941,9 +1134,8 @@ def extract_message():
         return jsonify({"message": "Réponse du modèle illisible"}), 502
     except requests.Timeout:
         return jsonify({"message": "Délai dépassé, réessayez"}), 504
-    except Exception as e:
-        print(f"Error extraction: {str(e)}")
-        return jsonify({"message": str(e)}), 500
+    except Exception:
+        return erreur_interne()
 
     champs = _valider(brut)
 
@@ -960,23 +1152,9 @@ def extract_message():
     champs['_message_source'] = message[:2000]
 
     return jsonify(champs), 200
-@app.route('/api/v1/debug-cle', methods=['GET'])
-@token_required
-def debug_cle():
-    """Vérifier si la variable d'environnement arrive jusqu'au serveur.
-
-    N'expose que la longueur et le préfixe, jamais la clé. À retirer
-    une fois le diagnostic terminé.
-    """
-    cle = os.getenv('ANTHROPIC_API_KEY')
-    return jsonify({
-        "variable_presente": cle is not None,
-        "longueur": len(cle) if cle else 0,
-        "prefixe": cle[:12] if cle else None,
-        "variables_anthropic": [k for k in os.environ if 'ANTHROPIC' in k.upper()]
-    }), 200
-
 if __name__ == '__main__':
-    print(f"🚀 Backend running on http://localhost:{PORT}")
-    print(f"🔐 JWT Secret Key: {SECRET_KEY}")
-    app.run(host='0.0.0.0', port=PORT, debug=False)
+    if sys.argv[1:2] == ['init-db']:
+        init_database(demo='--demo' in sys.argv)
+    else:
+        print(f"🚀 Backend running on http://localhost:{PORT}")
+        app.run(host='0.0.0.0', port=PORT, debug=False)
