@@ -4,14 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZELYRO - Dashboard</title>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <script src="vendor/chart.min.js"></script>
     <meta name="theme-color" content="#F6F2EA">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400..600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="zelyro.css">
     <style>
         .content-grid { grid-template-columns: 1fr 1.3fr; }
@@ -128,6 +125,7 @@
                                 <a href="/biens.html">Biens</a>
                                 <a href="/matching.html">Matching</a>
                                 <a href="/dashboard.html" className="active">Dashboard</a>
+                                <a href="/compte.html">Compte</a>
                             </nav>
                             <div className="user-info">
                                 {user && <span className="user-email">{user.email}</span>}

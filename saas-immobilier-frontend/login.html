@@ -4,13 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZELYRO - Connexion</title>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
     <meta name="theme-color" content="#F6F2EA">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400..600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="zelyro.css">
 </head>
 <body class="auth">
@@ -127,8 +124,9 @@
                                 <label>Mot de passe</label>
                                 <input type="password" value={loginData.password}
                                     onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
-                                    placeholder="••••••••" required disabled={loading} />
+                                    placeholder="••••••••" autoComplete="current-password" required disabled={loading} />
                             </div>
+                            <a className="auth-link" href="/forgot-password.html">Mot de passe oublié ?</a>
                             <button type="submit" disabled={loading}>
                                 {loading ? 'Connexion…' : 'Se connecter'}
                             </button>
@@ -159,13 +157,14 @@
                                 <label>Mot de passe</label>
                                 <input type="password" value={signupData.password}
                                     onChange={(e) => setSignupData({ ...signupData, password: e.target.value })}
-                                    placeholder="••••••••" required disabled={loading} />
+                                    placeholder="••••••••" autoComplete="new-password" minLength={10} required disabled={loading} />
+                                <p className="field-hint">10 caractères minimum.</p>
                             </div>
                             <div className="form-group">
                                 <label>Confirmer le mot de passe</label>
                                 <input type="password" value={signupData.confirmPassword}
                                     onChange={(e) => setSignupData({ ...signupData, confirmPassword: e.target.value })}
-                                    placeholder="••••••••" required disabled={loading} />
+                                    placeholder="••••••••" autoComplete="new-password" required disabled={loading} />
                             </div>
                             <button type="submit" disabled={loading}>
                                 {loading ? 'Création…' : "S'inscrire"}

@@ -1,10 +1,31 @@
 /* ==========================================================================
-   ZELYRO â€” thÃ¨me partagÃ© (beige / sauge, sobre et Ã©ditorial)
+   ZELYRO — thème partagé (beige / sauge, sobre et éditorial)
    Toutes les pages du frontend chargent ce fichier.
-   Les couleurs, la typographie et les rayons se rÃ¨glent dans :root.
+   Les couleurs, la typographie et les rayons se règlent dans :root.
    ========================================================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;1,400&display=swap');
+/* Polices hébergées avec le site (aucune requête vers Google Fonts). */
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url('vendor/fonts/inter-latin-wght-normal.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'Playfair Display';
+    font-style: normal;
+    font-weight: 400 900;
+    font-display: swap;
+    src: url('vendor/fonts/playfair-display-latin-wght-normal.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'Playfair Display';
+    font-style: italic;
+    font-weight: 400 900;
+    font-display: swap;
+    src: url('vendor/fonts/playfair-display-latin-wght-italic.woff2') format('woff2');
+}
 
 :root {
     --bg: #F6F2EA;
@@ -57,7 +78,7 @@ a:focus-visible, button:focus-visible, .tab:focus-visible, .filter-button:focus-
 }
 ::selection { background: var(--sage-100); color: var(--ink); }
 
-/* ---------- En-tÃªte ---------- */
+/* ---------- En-tête ---------- */
 header {
     background: rgba(246, 242, 234, 0.92);
     -webkit-backdrop-filter: saturate(140%) blur(10px);
@@ -323,7 +344,7 @@ textarea { resize: vertical; min-height: 90px; line-height: 1.6; }
 .bien-details { font-size: 13px; color: var(--ink-2); }
 .bien-desc { font-size: 13px; color: var(--ink-2); line-height: 1.65; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 
-/* Liste dÃ©filante du dashboard */
+/* Liste défilante du dashboard */
 .biens-liste { max-height: 520px; overflow-y: auto; padding-right: 8px; }
 .biens-liste .bien-card { padding: 16px 18px; margin-bottom: 12px; border-left-width: 3px; }
 .biens-liste .bien-titre { font-size: 16px; }
@@ -400,7 +421,7 @@ textarea { resize: vertical; min-height: 90px; line-height: 1.6; }
 .match-field { font-size: 14px; color: var(--ink-2); margin-bottom: 6px; }
 .match-price { font-size: 16px; font-weight: 600; color: var(--ink); margin-top: 10px; font-variant-numeric: tabular-nums; }
 
-/* ---------- Fiche prospect / dÃ©tails ---------- */
+/* ---------- Fiche prospect / détails ---------- */
 .detail-block { background: var(--surface-2); border-radius: var(--radius-sm); padding: 14px 16px; margin-bottom: 12px; }
 .detail-label { color: var(--ink-3); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em; margin-bottom: 4px; }
 .detail-value { color: var(--ink); font-weight: 500; font-size: 15px; }
@@ -428,7 +449,7 @@ textarea { resize: vertical; min-height: 90px; line-height: 1.6; }
 .info-item { color: var(--ink); margin-bottom: 6px; font-size: 14px; }
 .info-item:last-child { margin-bottom: 0; }
 
-/* ---------- Ã‰tats ---------- */
+/* ---------- États ---------- */
 .loading { text-align: center; padding: 56px 20px; color: var(--ink-3); }
 .loader {
     display: inline-block;
@@ -538,7 +559,30 @@ body.auth {
 .auth-container button:disabled { opacity: 0.55; cursor: default; }
 .auth-container .error, .auth-container .success { text-align: left; margin-bottom: 20px; }
 
-/* ---------- Petits Ã©crans ---------- */
+/* ---------- Mot de passe et compte ---------- */
+.auth-link {
+    display: block;
+    text-align: right;
+    margin: -6px 0 4px;
+    font-size: 13px;
+    color: var(--ink-3);
+    text-decoration: none;
+}
+.auth-link:hover { color: var(--sage-700); text-decoration: underline; }
+.auth-footer { text-align: center; margin-top: 24px; font-size: 13px; }
+.auth-footer a { color: var(--ink-3); text-decoration: none; }
+.auth-footer a:hover { color: var(--sage-700); text-decoration: underline; }
+.auth-container .lead-text { font-size: 14px; color: var(--ink-2); line-height: 1.65; margin-bottom: 24px; }
+.auth-container a.btn { display: block; text-align: center; text-decoration: none; margin-top: 10px; padding: 13px; }
+.field-hint { font-size: 12px; color: var(--ink-3); margin-top: 6px; line-height: 1.5; }
+.account-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start; }
+@media (max-width: 900px) { .account-grid { grid-template-columns: 1fr; } }
+.info-list { display: grid; grid-template-columns: 110px 1fr; gap: 14px 16px; font-size: 14px; }
+.info-list dt { color: var(--ink-3); }
+.info-list dd { color: var(--ink); word-break: break-word; }
+.panel form .btn { margin-top: 6px; }
+
+/* ---------- Petits écrans ---------- */
 @media (max-width: 760px) {
     header { padding: 12px 0; }
     .header-content { flex-wrap: wrap; gap: 10px 16px; padding: 0 16px; }

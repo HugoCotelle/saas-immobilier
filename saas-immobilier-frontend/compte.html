@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZELYRO - Mon compte</title>
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="stylesheet" href="zelyro.css">
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+        const VIDE = { actuel: '', nouveau: '', confirmation: '' };
+
+        function App() {
+            const [user, setUser] = useState(null);
+            const [form, setForm] = useState(VIDE);
+            const [saving, setSaving] = useState(false);
+            const [message, setMessage] = useState(null);
+
+            useEffect(() => {
+                if (!localStorage.getItem('token')) {
+                    window.location.href = '/login.html';
+                    return;
+                }
+                const userData = localStorage.getItem('user');
+                if (userData) setUser(JSON.parse(userData));
+            }, []);
+
+            const handleLogout = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = '/login.html';
+            };
+
+            const set = (k, v) => { setForm({ ...form, [k]: v }); setMessage(null); };
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setMessage(null);
+                if (form.nouveau.length < 10) {
+                    setMessage({ type: 'error', text: 'Le nouveau mot de passe doit contenir au moins 10 caractères' });
+                    return;
+                }
+                if (form.nouveau !== form.confirmation) {
+                    setMessage({ type: 'error', text: 'Les nouveaux mots de passe ne correspondent pas' });
+                    return;
+                }
+                setSaving(true);
+                try {
+                    const response = await fetch(`${API_URL}/auth/change-password`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        },
+                        body: JSON.stringify({ current_password: form.actuel, new_password: form.nouveau })
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (response.ok) {
+                        // Les autres appareils sont déconnectés ; celui-ci reçoit un jeton neuf.
+                        localStorage.setItem('token', data.token);
+                        setForm(VIDE);
+                        setMessage({ type: 'success', text: 'Mot de passe modifié. Les autres appareils connectés ont été déconnectés.' });
+                    } else if (response.status === 401) {
+                        handleLogout();
+                    } else if (response.status === 429) {
+                        setMessage({ type: 'error', text: 'Trop de tentatives. Réessayez dans quelques minutes.' });
+                    } else {
+                        setMessage({ type: 'error', text: data.message || 'Modification impossible' });
+                    }
+                } catch (error) {
+                    setMessage({ type: 'error', text: 'Serveur injoignable : ' + error.message });
+                } finally {
+                    setSaving(false);
+                }
+            };
+
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo">ZELYRO</div>
+                            <nav>
+                                <a href="/index.html">Leads</a>
+                                <a href="/biens.html">Biens</a>
+                                <a href="/matching.html">Matching</a>
+                                <a href="/dashboard.html">Dashboard</a>
+                                <a href="/compte.html" className="active">Compte</a>
+                            </nav>
+                            <div className="user-info">
+                                {user && <span className="user-email">{user.email}</span>}
+                                <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="container">
+                        <div className="titre-ligne">
+                            <div>
+                                <h1 className="page-title">Mon compte</h1>
+                                <p className="page-subtitle">Vos informations et l'accès à votre espace.</p>
+                            </div>
+                        </div>
+
+                        <div className="account-grid">
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Informations</h2>
+                                </div>
+                                <dl className="info-list">
+                                    <dt>Email</dt>
+                                    <dd>{user ? user.email : '…'}</dd>
+                                    {user && user.first_name && (<><dt>Prénom</dt><dd>{user.first_name}</dd></>)}
+                                    {user && user.company_name && (<><dt>Agence</dt><dd>{user.company_name}</dd></>)}
+                                </dl>
+                            </div>
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Changer le mot de passe</h2>
+                                </div>
+                                <p className="panel-note">
+                                    Choisissez un mot de passe d'au moins 10 caractères, que vous n'utilisez nulle part ailleurs.
+                                </p>
+
+                                {message && (
+                                    <div className={message.type === 'error' ? 'error' : 'success'}>
+                                        {message.text}
+                                    </div>
+                                )}
+
+                                <form onSubmit={handleSubmit}>
+                                    <div className="form-group">
+                                        <label>Mot de passe actuel</label>
+                                        <input type="password" value={form.actuel}
+                                            onChange={(e) => set('actuel', e.target.value)}
+                                            autoComplete="current-password" required disabled={saving} />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Nouveau mot de passe</label>
+                                        <input type="password" value={form.nouveau}
+                                            onChange={(e) => set('nouveau', e.target.value)}
+                                            autoComplete="new-password" minLength={10} required disabled={saving} />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Confirmer le nouveau mot de passe</label>
+                                        <input type="password" value={form.confirmation}
+                                            onChange={(e) => set('confirmation', e.target.value)}
+                                            autoComplete="new-password" required disabled={saving} />
+                                    </div>
+                                    <button type="submit" className="btn" disabled={saving}>
+                                        {saving ? 'Enregistrement…' : 'Modifier le mot de passe'}
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
