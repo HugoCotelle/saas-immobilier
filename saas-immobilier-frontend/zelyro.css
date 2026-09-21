@@ -734,6 +734,43 @@ body.auth {
 .envoye-item .envoye-sujet { color: var(--ink-2); font-size: 14px; margin-top: 2px; word-break: break-word; }
 .envoye-item .envoye-date { color: var(--ink-3); font-size: 12px; margin-top: 6px; }
 
+/* Administration et forfaits */
+.admin-pile { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; }
+.admin-pile > * { min-width: 0; }
+.admin-pile .panel { margin-bottom: 0; }
+.table-scroll { overflow-x: auto; }
+.admin-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.admin-table th { text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em; color: var(--ink-3); padding: 0 14px 10px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.admin-table td { padding: 12px 14px 12px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.admin-table tr:last-child td { border-bottom: none; }
+.admin-table input[type=number] { width: 110px; padding: 8px 10px; }
+.admin-table input[type=text] { padding: 8px 10px; }
+.admin-table select { padding: 8px 10px; width: auto; }
+.cellule-nom small { display: block; color: var(--ink-3); font-size: 12px; word-break: break-all; }
+.usage { min-width: 104px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.usage-piste { height: 5px; background: var(--surface-2); border-radius: 3px; margin-top: 5px; overflow: hidden; }
+.usage-barre { height: 100%; background: var(--sage-600); border-radius: 3px; }
+.usage-barre.proche { background: #B8902F; }
+.usage-barre.plein { background: var(--danger); }
+.pastille { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--sage-50); color: var(--sage-700); white-space: nowrap; }
+.pastille.off { background: var(--danger-bg); color: var(--danger); }
+.pastille.admin { background: var(--surface-2); color: var(--ink-2); }
+.inviter-ligne { display: grid; grid-template-columns: 1fr 180px 1fr auto; gap: 12px; align-items: end; }
+.cle-creee { background: var(--sage-50); border-left: 3px solid var(--sage-600); border-radius: var(--radius-sm); padding: 16px 18px; margin-bottom: 20px; }
+.cle-creee-titre { font-size: 13px; font-weight: 600; color: var(--sage-700); margin-bottom: 10px; }
+.cle-valeur, .cle-masquee { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.06em; }
+.cle-valeur { font-size: 18px !important; color: var(--ink) !important; background: var(--surface) !important; }
+.cle-masquee { font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+.cle-alerte { color: var(--danger); }
+.lien-bouton { background: none; border: none; padding: 0; font: inherit; color: var(--sage-700); text-decoration: underline; cursor: pointer; }
+.gris { color: var(--ink-3); }
+.petit-texte { font-size: 12px; }
+@media (max-width: 900px) { .inviter-ligne { grid-template-columns: 1fr 1fr; } .inviter-ligne .btn { grid-column: 1 / -1; } }
+@media (max-width: 560px) { .inviter-ligne { grid-template-columns: 1fr; } }
+.forfait-ligne { margin-bottom: 18px; }
+.forfait-libelle { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
+.forfait-chiffres { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
 /* ---------- Petits écrans ---------- */
 @media (max-width: 760px) {
     header { padding: 12px 0; }

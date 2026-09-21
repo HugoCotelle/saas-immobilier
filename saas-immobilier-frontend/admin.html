@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZELYRO - Administration</title>
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <meta name="robots" content="noindex">
+    <link rel="stylesheet" href="zelyro.css">
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+
+        const fmt = (n) => Number(n).toLocaleString('fr-FR');
+        const date = (iso) => {
+            const d = new Date(iso);
+            return isNaN(d) ? '' : d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+        };
+        const dateHeure = (iso) => {
+            const d = new Date(iso);
+            return isNaN(d) ? '' : d.toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        };
+
+        const COLONNES = [
+            ['max_leads', 'Prospects'],
+            ['max_properties', 'Biens'],
+            ['max_mails_month', 'E-mails / mois'],
+            ['max_extractions_month', 'Extractions IA / mois'],
+        ];
+
+        function Usage({ n, max }) {
+            const ratio = max ? n / max : 0;
+            return (
+                <div className="usage">
+                    <span>{fmt(n)} / {max == null ? '∞' : fmt(max)}</span>
+                    {max != null && max > 0 && (
+                        <div className="usage-piste">
+                            <div className={`usage-barre ${ratio >= 1 ? 'plein' : ratio >= 0.8 ? 'proche' : ''}`}
+                                style={{ width: Math.min(100, ratio * 100) + '%' }}></div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function AdminApp() {
+            const [data, setData] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [refuse, setRefuse] = useState(false);
+            const [user, setUser] = useState(null);
+            const [inv, setInv] = useState({ email: '', label: '', plan: 'essentiel' });
+            const [bilanInv, setBilanInv] = useState(null);
+            const [message, setMessage] = useState(null);
+            const [confirmerSusp, setConfirmerSusp] = useState(null);
+            const [limites, setLimites] = useState({});
+            const [occupe, setOccupe] = useState(false);
+
+            const handleLogout = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.replace('/login.html');
+            };
+
+            const appel = async (chemin, options = {}) => {
+                const r = await fetch(`${API_URL}${chemin}`, {
+                    ...options,
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                });
+                if (r.status === 401) { handleLogout(); throw new Error('Session expirée'); }
+                const corps = await r.json().catch(() => ({}));
+                if (r.status === 404 && chemin === '/admin/overview') { const e = new Error('refus'); e.refus = true; throw e; }
+                if (!r.ok) throw new Error(corps.message || `Erreur ${r.status}`);
+                return corps;
+            };
+
+            const charger = async () => {
+                try {
+                    const d = await appel('/admin/overview');
+                    setData(d);
+                    setError(null);
+                    // Les limites affichées dans le tableau des forfaits (vide = illimité).
+                    const l = {};
+                    d.plans.forEach((p) => {
+                        l[p.code] = { label: p.label };
+                        COLONNES.forEach(([k]) => { l[p.code][k] = p[k] == null ? '' : String(p[k]); });
+                    });
+                    setLimites(l);
+                    setInv((v) => (d.plans.some((p) => p.code === v.plan) ? v : { ...v, plan: d.plans[0] ? d.plans[0].code : '' }));
+                } catch (e) {
+                    if (e.refus) setRefuse(true); else setError(e.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            useEffect(() => {
+                if (!localStorage.getItem('token')) { window.location.replace('/login.html'); return; }
+                const userData = localStorage.getItem('user');
+                if (userData) setUser(JSON.parse(userData));
+                charger();
+            }, []);
+
+            const agir = async (fonction, succes) => {
+                setOccupe(true);
+                setMessage(null);
+                try {
+                    await fonction();
+                    if (succes) setMessage({ type: 'success', text: succes });
+                    await charger();
+                } catch (e) {
+                    setMessage({ type: 'error', text: e.message });
+                } finally {
+                    setOccupe(false);
+                }
+            };
+
+            const creerCle = async (email, plan, label) => {
+                setOccupe(true);
+                setBilanInv(null);
+                setMessage(null);
+                try {
+                    const r = await appel('/admin/invitations', { method: 'POST', body: JSON.stringify({ email, plan, label }) });
+                    setBilanInv(r);
+                    setInv({ email: '', label: '', plan });
+                    await charger();
+                } catch (e) {
+                    setMessage({ type: 'error', text: e.message });
+                } finally {
+                    setOccupe(false);
+                }
+            };
+
+            const copier = async (texte) => {
+                try {
+                    await navigator.clipboard.writeText(texte);
+                    setMessage({ type: 'success', text: 'Copié.' });
+                } catch (e) {
+                    setMessage({ type: 'error', text: "Copie automatique impossible : sélectionnez le texte et copiez-le avec Ctrl+C." });
+                }
+            };
+
+            const enregistrerForfait = (code) => {
+                const l = limites[code];
+                const corps = { label: l.label };
+                COLONNES.forEach(([k]) => { corps[k] = String(l[k]).trim() === '' ? null : Number(l[k]); });
+                return agir(() => appel(`/admin/plans/${code}`, { method: 'PUT', body: JSON.stringify(corps) }), `Forfait « ${l.label} » mis à jour.`);
+            };
+
+            const nomForfait = (code) => { const p = data && data.plans.find((x) => x.code === code); return p ? p.label : code; };
+
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo">ZELYRO</div>
+                            <nav>
+                                <a href="/prospects.html">Leads</a>
+                                <a href="/biens.html">Biens</a>
+                                <a href="/matching.html">Matching</a>
+                                <a href="/propositions.html">Propositions</a>
+                                <a href="/dashboard.html">Dashboard</a>
+                                <a href="/compte.html">Compte</a>
+                                <a href="/admin.html" className="active">Admin</a>
+                            </nav>
+                            <div className="user-info">
+                                {user && <span className="user-email">{user.email}</span>}
+                                <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="container">
+                        <h1 className="page-title">Administration</h1>
+                        <p className="page-subtitle">Qui a le droit d'utiliser Zelyro, avec quel forfait, et ce que chaque agence consomme.</p>
+
+                        {error && <div className="error">Erreur: {error}</div>}
+                        {message && <div className={message.type === 'error' ? 'error' : 'success'}>{message.text}</div>}
+
+                        {loading ? (
+                            <div className="loading"><div className="loader"></div></div>
+                        ) : refuse ? (
+                            <div className="panel">
+                                <div className="empty-state">Cette page est réservée à l'équipe Zelyro.<br /><a href="/prospects.html" style={{ color: 'var(--sage-700)' }}>Retour à mes prospects</a></div>
+                            </div>
+                        ) : data && (
+                            <div className="admin-pile">
+                                <div className="panel">
+                                    <div className="panel-header"><h2 className="panel-title">Créer une clé d'activation</h2></div>
+                                    <p className="panel-note">
+                                        Vous remettez la clé à l'agence (message, téléphone, e-mail). Elle la saisit en bas du formulaire de
+                                        création de compte. Une clé ne sert qu'une fois, reste valable {data.invitation_days} jours et donne
+                                        le forfait choisi. Sans clé, personne ne peut s'inscrire.
+                                    </p>
+                                    {bilanInv && (
+                                        <div className="cle-creee">
+                                            <div className="cle-creee-titre">
+                                                Clé créée{bilanInv.label ? ` pour ${bilanInv.label}` : (bilanInv.email ? ` pour ${bilanInv.email}` : '')}
+                                                {' '}· forfait {nomForfait(bilanInv.plan)}
+                                            </div>
+                                            <div className="copie-ligne">
+                                                <input type="text" className="cle-valeur" readOnly value={bilanInv.key} onFocus={(e) => e.target.select()} aria-label="Clé d'activation" />
+                                                <button className="btn" onClick={() => copier(bilanInv.key)}>Copier la clé</button>
+                                            </div>
+                                            <p className="field-hint" style={{ marginTop: '10px' }}>
+                                                Notez-la maintenant : pour des raisons de sécurité, elle ne sera plus affichée ensuite.
+                                                {bilanInv.link && <>{' '}<button type="button" className="lien-bouton" onClick={() => copier(bilanInv.link)}>Copier plutôt un lien qui remplit la clé tout seul</button>.</>}
+                                            </p>
+                                            {bilanInv.email && (
+                                                <p className={bilanInv.mail_sent ? 'field-hint' : 'field-hint cle-alerte'} style={{ marginTop: '6px' }}>
+                                                    {bilanInv.mail_sent
+                                                        ? `La clé a aussi été envoyée par e-mail à ${bilanInv.email}.`
+                                                        : `L'e-mail n'a pas pu être envoyé à ${bilanInv.email} : transmettez-lui la clé vous-même.`}
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
+                                    <form className="inviter-ligne" onSubmit={(e) => { e.preventDefault(); creerCle(inv.email.trim(), inv.plan, inv.label.trim()); }}>
+                                        <div className="form-group" style={{ marginBottom: 0 }}>
+                                            <label htmlFor="inv-label">Pour qui (facultatif)</label>
+                                            <input id="inv-label" type="text" maxLength={120} value={inv.label} placeholder="Agence Dupont, Lille"
+                                                onChange={(e) => setInv({ ...inv, label: e.target.value })} disabled={occupe} />
+                                        </div>
+                                        <div className="form-group" style={{ marginBottom: 0 }}>
+                                            <label htmlFor="inv-plan">Forfait</label>
+                                            <select id="inv-plan" value={inv.plan} onChange={(e) => setInv({ ...inv, plan: e.target.value })} disabled={occupe}>
+                                                {data.plans.map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="form-group" style={{ marginBottom: 0 }}>
+                                            <label htmlFor="inv-email">Adresse e-mail (facultatif)</label>
+                                            <input id="inv-email" type="email" value={inv.email} placeholder="prenom@agence.fr"
+                                                onChange={(e) => setInv({ ...inv, email: e.target.value })} disabled={occupe} />
+                                        </div>
+                                        <button type="submit" className="btn" disabled={occupe}>Générer la clé</button>
+                                    </form>
+                                    <p className="field-hint" style={{ marginTop: '12px' }}>
+                                        Si vous renseignez une adresse, la clé ne fonctionne qu'avec elle et lui est envoyée par e-mail.
+                                        Sans adresse, la clé fonctionne pour n'importe quelle adresse : à réserver aux personnes à qui vous la remettez vous-même.
+                                    </p>
+                                </div>
+
+                                <div className="panel">
+                                    <div className="panel-header">
+                                        <h2 className="panel-title">Clés d'activation</h2>
+                                        <span className="panel-count">{data.invitations.filter((i) => !i.used && !i.expired).length} en attente</span>
+                                    </div>
+                                    {data.invitations.length === 0 ? (
+                                        <div className="empty-state">Aucune clé pour l'instant.</div>
+                                    ) : (
+                                        <div className="table-scroll">
+                                            <table className="admin-table">
+                                                <thead><tr><th>Clé</th><th>Pour qui</th><th>Forfait</th><th>Créée le</th><th>État</th><th></th></tr></thead>
+                                                <tbody>
+                                                    {data.invitations.map((i) => (
+                                                        <tr key={i.id}>
+                                                            <td><span className="cle-masquee">ZLY-••••-••••-{i.key_hint || '••••'}</span></td>
+                                                            <td>
+                                                                {i.label || i.email || <span className="gris">n'importe quelle adresse</span>}
+                                                                {i.label && i.email && <div className="gris petit-texte">{i.email}</div>}
+                                                            </td>
+                                                            <td>{nomForfait(i.plan)}</td>
+                                                            <td>{date(i.created_at)}</td>
+                                                            <td>
+                                                                {i.used
+                                                                    ? <><span className="pastille">Utilisée</span><div className="gris petit-texte">le {date(i.used_at)} par {i.used_email}</div></>
+                                                                    : i.expired ? <span className="pastille off">Expirée</span> : `jusqu'au ${date(i.expires_at)}`}
+                                                            </td>
+                                                            <td>
+                                                                {!i.used && (
+                                                                    <div className="btn-ligne">
+                                                                        {i.email && <button className="btn secondary petit" disabled={occupe} onClick={() => creerCle(i.email, i.plan, i.label || '')}>Nouvelle clé</button>}
+                                                                        <button className="btn danger petit" disabled={occupe}
+                                                                            onClick={() => agir(() => appel(`/admin/invitations/${i.id}`, { method: 'DELETE' }), 'Clé annulée.')}>Annuler</button>
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                    <p className="stat-note" style={{ marginTop: '12px' }}>Seule la fin de chaque clé est conservée : perdue, une clé se remplace par une nouvelle (annulez l'ancienne).</p>
+                                </div>
+
+                                <div className="panel">
+                                    <div className="panel-header">
+                                        <h2 className="panel-title">Comptes</h2>
+                                        <span className="panel-count">{data.users.length}</span>
+                                    </div>
+                                    <div className="table-scroll">
+                                        <table className="admin-table">
+                                            <thead>
+                                                <tr><th>Agence</th><th>Forfait</th><th>Prospects</th><th>Biens</th><th>E-mails (mois)</th><th>IA (mois)</th><th>Statut</th><th></th></tr>
+                                            </thead>
+                                            <tbody>
+                                                {data.users.map((u) => {
+                                                    const p = data.plans.find((x) => x.code === u.plan) || {};
+                                                    return (
+                                                        <tr key={u.id}>
+                                                            <td className="cellule-nom">
+                                                                {u.company_name || u.first_name || '—'}
+                                                                <small>{u.email}</small>
+                                                            </td>
+                                                            <td>
+                                                                <select value={u.plan} disabled={occupe} aria-label={`Forfait de ${u.email}`}
+                                                                    onChange={(e) => agir(() => appel(`/admin/users/${u.id}`, { method: 'PUT', body: JSON.stringify({ plan: e.target.value }) }), `Forfait de ${u.email} : ${nomForfait(e.target.value)}.`)}>
+                                                                    {data.plans.map((x) => <option key={x.code} value={x.code}>{x.label}</option>)}
+                                                                </select>
+                                                            </td>
+                                                            <td><Usage n={u.leads} max={p.max_leads} /></td>
+                                                            <td><Usage n={u.properties} max={p.max_properties} /></td>
+                                                            <td><Usage n={u.mails} max={p.max_mails_month} /></td>
+                                                            <td><Usage n={u.extractions} max={p.max_extractions_month} /></td>
+                                                            <td>
+                                                                {u.is_admin ? <span className="pastille admin">Admin</span>
+                                                                    : u.is_active ? <span className="pastille">Actif</span>
+                                                                    : <span className="pastille off">Suspendu</span>}
+                                                            </td>
+                                                            <td>
+                                                                {u.is_admin ? null : u.is_active ? (
+                                                                    confirmerSusp === u.id ? (
+                                                                        <div className="btn-ligne">
+                                                                            <button className="btn danger plein petit" disabled={occupe}
+                                                                                onClick={() => { setConfirmerSusp(null); agir(() => appel(`/admin/users/${u.id}`, { method: 'PUT', body: JSON.stringify({ is_active: false }) }), `${u.email} est suspendu.`); }}>Confirmer</button>
+                                                                            <button className="btn secondary petit" onClick={() => setConfirmerSusp(null)}>Annuler</button>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <button className="btn danger petit" disabled={occupe} onClick={() => setConfirmerSusp(u.id)}>Suspendre</button>
+                                                                    )
+                                                                ) : (
+                                                                    <button className="btn secondary petit" disabled={occupe}
+                                                                        onClick={() => agir(() => appel(`/admin/users/${u.id}`, { method: 'PUT', body: JSON.stringify({ is_active: true }) }), `${u.email} est réactivé.`)}>Réactiver</button>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <p className="field-hint">
+                                        Une suspension coupe aussitôt les sessions ouvertes et le formulaire de contact du compte. Les données sont conservées.
+                                    </p>
+                                </div>
+
+                                <div className="panel">
+                                    <div className="panel-header"><h2 className="panel-title">Forfaits</h2></div>
+                                    <p className="panel-note">
+                                        Les limites s'appliquent tout de suite à tous les comptes du forfait. Laissez une case vide pour « illimité ».
+                                        Quand une limite est atteinte, l'agence ne peut plus rien ajouter mais garde l'accès à ses données.
+                                    </p>
+                                    <div className="table-scroll">
+                                        <table className="admin-table">
+                                            <thead><tr><th>Forfait</th>{COLONNES.map(([k, l]) => <th key={k}>{l}</th>)}<th></th></tr></thead>
+                                            <tbody>
+                                                {data.plans.map((p) => {
+                                                    const l = limites[p.code];
+                                                    if (!l) return null;
+                                                    const fige = p.code === 'illimite';
+                                                    return (
+                                                        <tr key={p.code}>
+                                                            <td>
+                                                                <input type="text" value={l.label} maxLength={50} disabled={fige || occupe} style={{ width: '150px' }}
+                                                                    aria-label={`Nom du forfait ${p.code}`}
+                                                                    onChange={(e) => setLimites({ ...limites, [p.code]: { ...l, label: e.target.value } })} />
+                                                            </td>
+                                                            {COLONNES.map(([k, libelle]) => (
+                                                                <td key={k}>
+                                                                    <input type="number" min="0" step="1" value={l[k]} placeholder="illimité" disabled={fige || occupe}
+                                                                        aria-label={`${libelle}, forfait ${p.label}`}
+                                                                        onChange={(e) => setLimites({ ...limites, [p.code]: { ...l, [k]: e.target.value } })} />
+                                                                </td>
+                                                            ))}
+                                                            <td>{fige ? <span className="pastille admin">Équipe Zelyro</span>
+                                                                : <button className="btn secondary petit" disabled={occupe} onClick={() => enregistrerForfait(p.code)}>Enregistrer</button>}</td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <div className="panel">
+                                    <div className="panel-header"><h2 className="panel-title">Journal</h2></div>
+                                    {data.log.length === 0 ? (
+                                        <div className="empty-state">Aucune action pour le moment.</div>
+                                    ) : (
+                                        <div className="table-scroll">
+                                            <table className="admin-table">
+                                                <thead><tr><th>Quand</th><th>Qui</th><th>Action</th><th>Concerne</th><th>Détail</th></tr></thead>
+                                                <tbody>
+                                                    {data.log.map((j, i) => (
+                                                        <tr key={i}>
+                                                            <td style={{ whiteSpace: 'nowrap' }}>{dateHeure(j.created_at)}</td>
+                                                            <td>{j.admin_email}</td>
+                                                            <td>{j.action}</td>
+                                                            <td>{j.target || ''}</td>
+                                                            <td>{j.detail || ''}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </>
+            );
+        }
+
+        ReactDOM.render(<AdminApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>

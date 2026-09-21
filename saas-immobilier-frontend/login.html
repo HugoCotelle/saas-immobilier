@@ -9,6 +9,10 @@
     <script src="vendor/babel.min.js"></script>
     <meta name="theme-color" content="#F6F2EA">
     <link rel="stylesheet" href="zelyro.css">
+    <style>
+        .champ-cle { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.06em; text-transform: uppercase; }
+        .champ-cle::placeholder { text-transform: none; }
+    </style>
 </head>
 <body class="auth">
     <div id="root"></div>
@@ -18,17 +22,21 @@
         const API_URL = 'https://saas-immobilier-921a.onrender.com';
 
         function AuthApp() {
-            const [activeTab, setActiveTab] = useState(window.location.hash === '#inscription' ? 'signup' : 'login');
+            // Un lien d'activation (login.html#cle=ZLY-XXXX-XXXX-XXXX) remplit la clé tout seul.
+            // La clé est après le # : elle n'est jamais envoyée au serveur du site.
+            const cleDuLien = (window.location.hash.match(/^#(?:cle|invitation)=([A-Za-z0-9_-]{8,64})$/) || [])[1] || '';
+            const [activeTab, setActiveTab] = useState(
+                (window.location.hash === '#inscription' || cleDuLien) ? 'signup' : 'login');
             const [loading, setLoading] = useState(false);
             const [message, setMessage] = useState(null);
             const [loginData, setLoginData] = useState({ email: '', password: '' });
             const [signupData, setSignupData] = useState({
-                email: '', password: '', confirmPassword: '', firstName: '', companyName: ''
+                email: '', password: '', confirmPassword: '', firstName: '', companyName: '', cle: cleDuLien
             });
 
             useEffect(() => {
                 const token = localStorage.getItem('token');
-                if (token) window.location.replace('/prospects.html');
+                if (token && !cleDuLien) window.location.replace('/prospects.html');
             }, []);
 
             const handleLogin = async (e) => {
@@ -71,6 +79,7 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             email: signupData.email,
+                            invitation: signupData.cle,
                             password: signupData.password,
                             first_name: signupData.firstName,
                             company_name: signupData.companyName
@@ -80,6 +89,7 @@
                     if (response.ok) {
                         localStorage.setItem('token', data.token);
                         localStorage.setItem('user', JSON.stringify(data.user));
+                        window.history.replaceState(null, '', window.location.pathname);
                         setMessage({ type: 'success', text: 'Compte créé, redirection…' });
                         setTimeout(() => { window.location.replace('/prospects.html'); }, 1000);
                     } else {
@@ -165,6 +175,18 @@
                                 <input type="password" value={signupData.confirmPassword}
                                     onChange={(e) => setSignupData({ ...signupData, confirmPassword: e.target.value })}
                                     placeholder="••••••••" autoComplete="new-password" required disabled={loading} />
+                            </div>
+                            <div className="form-group">
+                                <label>Clé d'activation</label>
+                                <input type="text" className="champ-cle" value={signupData.cle}
+                                    onChange={(e) => setSignupData({ ...signupData, cle: e.target.value })}
+                                    placeholder="ZLY-XXXX-XXXX-XXXX" autoComplete="off" autoCapitalize="characters"
+                                    spellCheck={false} maxLength={64} required disabled={loading} />
+                                <p className="field-hint">
+                                    Zelyro est accessible sur invitation : la clé d'activation vous est remise par l'équipe Zelyro.
+                                    Pas encore de clé ? Écrivez-nous à{' '}
+                                    <a href="mailto:tb@zelyro.fr?subject=Demande%20de%20cl%C3%A9%20Zelyro" style={{ color: 'inherit' }}>tb@zelyro.fr</a>.
+                                </p>
                             </div>
                             <button type="submit" disabled={loading}>
                                 {loading ? 'Création…' : "S'inscrire"}
