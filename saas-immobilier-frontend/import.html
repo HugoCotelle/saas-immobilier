@@ -217,7 +217,7 @@
             const importer = async () => {
                 const token = localStorage.getItem('token');
                 const lignes = analyse.prospects;
-                const total = { imported: 0, duplicates: 0, invalid: [], invalidCount: 0 };
+                const total = { imported: 0, duplicates: 0, invalid: [], invalidCount: 0, overQuota: 0, quotaMessage: null };
                 setErreur(null); setResultat(null);
                 try {
                     for (let debut = 0; debut < lignes.length; debut += PAQUET) {
@@ -230,7 +230,15 @@
                         });
                         if (r.status === 401) { handleLogout(); return; }
                         const d = await r.json().catch(() => ({}));
+                        if (r.status === 403 && d.code === 'quota') {
+                            // Forfait plein : on s'arrête, sans perdre ce qui a déjà été importé.
+                            total.overQuota += lignes.length - debut;
+                            total.quotaMessage = d.message;
+                            break;
+                        }
                         if (!r.ok) throw new Error(d.message || `Erreur ${r.status}`);
+                        total.overQuota += d.over_quota || 0;
+                        if (d.quota_message) total.quotaMessage = d.quota_message;
                         total.imported += d.imported;
                         total.duplicates += d.duplicates;
                         total.invalidCount += d.invalid_count;
@@ -260,6 +268,7 @@
                                 <a href="/propositions.html">Propositions</a>
                                 <a href="/dashboard.html">Dashboard</a>
                                 <a href="/compte.html">Compte</a>
+                                {user && user.is_admin && <a href="/admin.html">Admin</a>}
                             </nav>
                             <div className="user-info">
                                 {user && <span className="user-email">{user.email}</span>}
@@ -286,7 +295,15 @@
                                     <div className="stat-card"><div className="stat-value">{resultat.imported}</div><div className="stat-label">Importés</div></div>
                                     <div className="stat-card"><div className="stat-value">{resultat.duplicates}</div><div className="stat-label">Déjà présents</div></div>
                                     <div className="stat-card"><div className="stat-value">{resultat.invalidCount}</div><div className="stat-label">Lignes refusées</div></div>
+                                    {resultat.overQuota > 0 && (
+                                        <div className="stat-card"><div className="stat-value">{resultat.overQuota}</div><div className="stat-label">Hors forfait</div></div>
+                                    )}
                                 </div>
+                                {resultat.quotaMessage && (
+                                    <div className="error">
+                                        {resultat.quotaMessage} Contactez Zelyro pour passer au forfait supérieur : les lignes restantes pourront alors être importées.
+                                    </div>
+                                )}
                                 {resultat.invalid.length > 0 && (
                                     <div className="liste-lignes" style={{ marginBottom: '22px' }}>
                                         {resultat.invalid.map((l, i) => <div key={i}>Ligne {l.ligne} : {l.raison}</div>)}

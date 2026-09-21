@@ -28,6 +28,7 @@
             const [lien, setLien] = useState(null);
             const [messageLien, setMessageLien] = useState(null);
             const [confirmerLien, setConfirmerLien] = useState(false);
+            const [forfait, setForfait] = useState(null);
 
             const appel = async (chemin, options = {}) => {
                 const r = await fetch(`${API_URL}${chemin}`, {
@@ -47,7 +48,17 @@
                 }
                 const userData = localStorage.getItem('user');
                 if (userData) setUser(JSON.parse(userData));
-                appel('/auth/profile').then((p) => setAlertes(p.alerts_enabled !== false)).catch(() => {});
+                appel('/auth/profile').then((p) => {
+                    setAlertes(p.alerts_enabled !== false);
+                    // Met à jour ce que le navigateur sait du compte (forfait, droits d'administration).
+                    try {
+                        const u = JSON.parse(localStorage.getItem('user') || '{}');
+                        const maj = { ...u, plan: p.plan, is_admin: p.is_admin === true };
+                        localStorage.setItem('user', JSON.stringify(maj));
+                        setUser(maj);
+                    } catch (e) { /* sans importance */ }
+                }).catch(() => {});
+                appel('/api/v1/plan').then(setForfait).catch(() => {});
                 appel('/api/v1/capture-link').then(setLien).catch((e) => setMessageLien({ type: 'error', text: e.message }));
             }, []);
 
@@ -144,6 +155,7 @@
                                 <a href="/propositions.html">Propositions</a>
                                 <a href="/dashboard.html">Dashboard</a>
                                 <a href="/compte.html" className="active">Compte</a>
+                                {user && user.is_admin && <a href="/admin.html">Admin</a>}
                             </nav>
                             <div className="user-info">
                                 {user && <span className="user-email">{user.email}</span>}
@@ -172,6 +184,38 @@
                                     {user && user.company_name && (<><dt>Agence</dt><dd>{user.company_name}</dd></>)}
                                 </dl>
                             </div>
+
+                            {forfait && (
+                                <div className="panel">
+                                    <div className="panel-header">
+                                        <h2 className="panel-title">Mon forfait</h2>
+                                        <span className="pastille">{forfait.plan.label}</span>
+                                    </div>
+                                    <p className="panel-note">
+                                        Ce que votre forfait autorise, et ce que vous avez déjà utilisé. Les compteurs mensuels
+                                        repartent à zéro le 1er de chaque mois. Pour changer de forfait, écrivez à{' '}
+                                        <a href="mailto:contact@zelyro.fr?subject=Changement%20de%20forfait%20Zelyro" style={{ color: 'var(--sage-700)' }}>contact@zelyro.fr</a>.
+                                    </p>
+                                    {[['leads', 'Prospects'], ['properties', 'Biens'], ['mails', 'E-mails envoyés ce mois-ci'], ['extractions', 'Extractions IA ce mois-ci']].map(([k, libelle]) => {
+                                        const n = forfait.usage[k], max = forfait.limits[k];
+                                        const ratio = max ? n / max : 0;
+                                        return (
+                                            <div key={k} className="forfait-ligne">
+                                                <div className="forfait-libelle">
+                                                    <span>{libelle}</span>
+                                                    <span className="forfait-chiffres">{n.toLocaleString('fr-FR')} / {max == null ? 'illimité' : max.toLocaleString('fr-FR')}</span>
+                                                </div>
+                                                {max != null && max > 0 && (
+                                                    <div className="usage-piste">
+                                                        <div className={`usage-barre ${ratio >= 1 ? 'plein' : ratio >= 0.8 ? 'proche' : ''}`}
+                                                            style={{ width: Math.min(100, ratio * 100) + '%' }}></div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
 
                             <div className="panel">
                                 <div className="panel-header">

@@ -184,6 +184,7 @@
                                 <a href="/propositions.html">Propositions</a>
                                 <a href="/dashboard.html">Dashboard</a>
                                 <a href="/compte.html">Compte</a>
+                                {user && user.is_admin && <a href="/admin.html">Admin</a>}
                             </nav>
                             <div className="user-info">
                                 {user && <span className="user-email">{user.email}</span>}
