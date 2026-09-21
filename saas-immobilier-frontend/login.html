@@ -18,7 +18,7 @@
         const API_URL = 'https://saas-immobilier-921a.onrender.com';
 
         function AuthApp() {
-            const [activeTab, setActiveTab] = useState('login');
+            const [activeTab, setActiveTab] = useState(window.location.hash === '#inscription' ? 'signup' : 'login');
             const [loading, setLoading] = useState(false);
             const [message, setMessage] = useState(null);
             const [loginData, setLoginData] = useState({ email: '', password: '' });
@@ -28,7 +28,7 @@
 
             useEffect(() => {
                 const token = localStorage.getItem('token');
-                if (token) window.location.href = '/index.html';
+                if (token) window.location.href = '/prospects.html';
             }, []);
 
             const handleLogin = async (e) => {
@@ -46,7 +46,7 @@
                         localStorage.setItem('token', data.token);
                         localStorage.setItem('user', JSON.stringify(data.user));
                         setMessage({ type: 'success', text: 'Connexion réussie, redirection…' });
-                        setTimeout(() => { window.location.href = '/index.html'; }, 1000);
+                        setTimeout(() => { window.location.href = '/prospects.html'; }, 1000);
                     } else {
                         setMessage({ type: 'error', text: data.message || 'Identifiants incorrects' });
                     }
@@ -81,7 +81,7 @@
                         localStorage.setItem('token', data.token);
                         localStorage.setItem('user', JSON.stringify(data.user));
                         setMessage({ type: 'success', text: 'Compte créé, redirection…' });
-                        setTimeout(() => { window.location.href = '/index.html'; }, 1000);
+                        setTimeout(() => { window.location.href = '/prospects.html'; }, 1000);
                     } else {
                         setMessage({ type: 'error', text: data.message || 'Inscription impossible' });
                     }
@@ -169,8 +169,16 @@
                             <button type="submit" disabled={loading}>
                                 {loading ? 'Création…' : "S'inscrire"}
                             </button>
+                            <p className="field-hint" style={{ textAlign: 'center', marginTop: '14px' }}>
+                                En vous inscrivant, vous acceptez les <a href="/cgu.html" style={{ color: 'inherit' }}>conditions d'utilisation</a> et
+                                la <a href="/confidentialite.html" style={{ color: 'inherit' }}>politique de confidentialité</a>.
+                            </p>
                         </form>
                     )}
+
+                    <div className="auth-footer">
+                        <a href="/">Accueil</a> · <a href="/mentions-legales.html">Mentions légales</a> · <a href="/confidentialite.html">Confidentialité</a> · <a href="/cgu.html">CGU</a>
+                    </div>
                 </div>
             );
         }

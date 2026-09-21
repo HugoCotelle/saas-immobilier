@@ -7,29 +7,70 @@
     <script src="vendor/react.production.min.js"></script>
     <script src="vendor/react-dom.production.min.js"></script>
     <script src="vendor/babel.min.js"></script>
-    <script src="vendor/chart.min.js"></script>
     <meta name="theme-color" content="#F6F2EA">
     <link rel="stylesheet" href="zelyro.css">
     <style>
-        .content-grid { grid-template-columns: 1fr 1.3fr; }
+        .content-grid { grid-template-columns: 1fr 1fr; }
+        .stats-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+        .stat-value { font-size: 42px; }
     </style>
 </head>
 <body>
     <div id="root"></div>
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect } = React;
 
         const API_URL = 'https://saas-immobilier-921a.onrender.com';
 
+        const STATUTS = [
+            ['nouveau', 'Nouveau'], ['contacte', 'Contacté'], ['visite', 'Visite'],
+            ['offre', 'Offre'], ['signe', 'Signé'], ['perdu', 'Perdu']
+        ];
+        const QUALITES = [['hot', 'Acheteur actif'], ['warm', 'Projet en cours'], ['cold', 'Premier contact']];
+        const SOURCES = [
+            ['manuel', 'Saisie à la main'], ['import', 'Import de fichier'],
+            ['formulaire', 'Formulaire de contact'], ['extraction', "Extrait d'un message"]
+        ];
+
+        const dateCourte = (iso) => {
+            const [a, m, j] = iso.split('-').map(Number);
+            return new Date(a, m - 1, j).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+        };
+        const duree = (heures) => {
+            if (heures === null || heures === undefined) return '—';
+            if (heures < 1) return "< 1 h";
+            if (heures < 48) return `${Math.round(heures)} h`;
+            return `${(heures / 24).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} j`;
+        };
+
+        // Une ligne par catégorie : le nom, une barre proportionnelle au plus grand
+        // effectif, et le nombre.
+        function Barres({ lignes, classe }) {
+            const maxi = Math.max(1, ...lignes.map((l) => l[2]));
+            return (
+                <div className="barres">
+                    {lignes.map(([cle, nom, n]) => (
+                        <div key={cle} className="barre-ligne">
+                            <div className="barre-nom">{nom}</div>
+                            <div className="barre-piste" role="img" aria-label={`${nom} : ${n}`}>
+                                <div className={`barre-remplie ${cle === 'perdu' ? 'perdu' : classe || ''}`}
+                                    style={{ width: `${(100 * n) / maxi}%` }}></div>
+                            </div>
+                            <div className="barre-nombre">{n}</div>
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+
         function DashboardApp() {
             const [stats, setStats] = useState(null);
+            const [rappels, setRappels] = useState([]);
             const [biens, setBiens] = useState([]);
             const [filtre, setFiltre] = useState('');
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
             const [user, setUser] = useState(null);
-            const chartRef = useRef(null);
-            const chartInstance = useRef(null);
 
             useEffect(() => {
                 const token = localStorage.getItem('token');
@@ -50,12 +91,13 @@
                     // Les deux appels partent ensemble : les enchaîner
                     // doublerait le temps d'attente sur un serveur qui sort
                     // de veille.
-                    const [rStats, rBiens] = await Promise.all([
-                        fetch(`${API_URL}/api/v1/stats`, { headers: entetes }),
-                        fetch(`${API_URL}/api/v1/properties`, { headers: entetes })
+                    const [rStats, rBiens, rRappels] = await Promise.all([
+                        fetch(`${API_URL}/api/v1/dashboard`, { headers: entetes }),
+                        fetch(`${API_URL}/api/v1/properties`, { headers: entetes }),
+                        fetch(`${API_URL}/api/v1/reminders`, { headers: entetes })
                     ]);
 
-                    if (rStats.status === 401 || rBiens.status === 401) {
+                    if (rStats.status === 401 || rBiens.status === 401 || rRappels.status === 401) {
                         localStorage.removeItem('token');
                         localStorage.removeItem('user');
                         window.location.href = '/login.html';
@@ -63,42 +105,17 @@
                     }
                     if (!rStats.ok) throw new Error(`Erreur API: ${rStats.status}`);
                     if (!rBiens.ok) throw new Error(`Erreur API: ${rBiens.status}`);
+                    if (!rRappels.ok) throw new Error(`Erreur API: ${rRappels.status}`);
 
-                    const dStats = await rStats.json();
-                    const dBiens = await rBiens.json();
-                    setStats(dStats);
-                    setBiens(dBiens);
+                    setStats(await rStats.json());
+                    setBiens(await rBiens.json());
+                    setRappels(await rRappels.json());
                     setError(null);
-                    setTimeout(() => { initChart(dStats); }, 100);
                 } catch (err) {
                     setError(err.message);
                 } finally {
                     setLoading(false);
                 }
-            };
-
-            const initChart = (statsData) => {
-                if (!chartRef.current) return;
-                if (chartInstance.current) chartInstance.current.destroy();
-                const ctx = chartRef.current.getContext('2d');
-                chartInstance.current = new Chart(ctx, {
-                    type: 'doughnut',
-                    data: {
-                        labels: ['Prospects', 'Biens'],
-                        datasets: [{
-                            data: [statsData.total_leads || 0, statsData.total_properties || 0],
-                            backgroundColor: ['#4F6353', '#CDBB98'],
-                            borderColor: '#FFFDF9',
-                            borderWidth: 3
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        cutout: '68%',
-                        plugins: { legend: { position: 'bottom', labels: { font: { size: 13, family: "'Inter', sans-serif" }, color: '#465149', padding: 20, usePointStyle: true, pointStyle: 'circle' } } }
-                    }
-                });
             };
 
             const handleLogout = () => {
@@ -121,7 +138,7 @@
                         <div className="header-content">
                             <div className="logo">ZELYRO</div>
                             <nav>
-                                <a href="/index.html">Leads</a>
+                                <a href="/prospects.html">Leads</a>
                                 <a href="/biens.html">Biens</a>
                                 <a href="/matching.html">Matching</a>
                                 <a href="/dashboard.html" className="active">Dashboard</a>
@@ -148,37 +165,106 @@
                         ) : (
                             <>
                                 {stats && (
+                                    <>
                                     <div className="stats-grid">
                                         <div className="stat-card">
-                                            <div className="stat-value">{stats.total_leads || 0}</div>
+                                            <div className="stat-value">{stats.total_leads}</div>
                                             <div className="stat-label">Prospects</div>
+                                            <div className="stat-note">{stats.new_last_30_days} nouveau{stats.new_last_30_days > 1 ? 'x' : ''} ces 30 derniers jours</div>
                                         </div>
                                         <div className="stat-card">
-                                            <div className="stat-value">{stats.total_properties || 0}</div>
+                                            <div className="stat-value">{stats.to_contact}</div>
+                                            <div className="stat-label">À contacter</div>
+                                            <div className="stat-note">Nouveaux depuis plus de 2 jours, jamais contactés</div>
+                                        </div>
+                                        <div className="stat-card">
+                                            <div className="stat-value">{duree(stats.avg_first_response_hours)}</div>
+                                            <div className="stat-label">Délai de réponse</div>
+                                            <div className="stat-note">Entre l'arrivée d'un prospect et son premier contact</div>
+                                        </div>
+                                        <div className="stat-card">
+                                            <div className="stat-value">{stats.conversion_rate === null ? '—' : `${stats.conversion_rate} %`}</div>
+                                            <div className="stat-label">Taux de signature</div>
+                                            <div className="stat-note">Prospects signés sur l'ensemble</div>
+                                        </div>
+                                        <div className="stat-card">
+                                            <div className="stat-value">{stats.total_properties}</div>
                                             <div className="stat-label">Biens au portefeuille</div>
                                         </div>
-                                        <div className="stat-card">
-                                            <div className="stat-value">{stats.unique_leads || 0}</div>
-                                            <div className="stat-label">Prospects uniques</div>
+                                    </div>
+
+                                    <div className="content-grid">
+                                        <div className="panel">
+                                            <div className="panel-header">
+                                                <div className="panel-title">À faire</div>
+                                                <div className="panel-count">{rappels.length} relance{rappels.length > 1 ? 's' : ''}</div>
+                                            </div>
+                                            <div className="chips-relances">
+                                                <span className={`chip${stats.reminders.overdue ? ' retard' : ''}`}>{stats.reminders.overdue} en retard</span>
+                                                <span className="chip">{stats.reminders.today} aujourd'hui</span>
+                                                <span className="chip">{stats.reminders.this_week} cette semaine</span>
+                                            </div>
+                                            {rappels.length === 0 ? (
+                                                <div className="empty-state">
+                                                    Aucune relance en attente.<br />
+                                                    Depuis la fiche d'un prospect, fixez une date de relance : elle apparaîtra ici.
+                                                </div>
+                                            ) : (
+                                                <div>
+                                                    {rappels.slice(0, 8).map((r) => (
+                                                        <div key={r.id} className="afaire-item">
+                                                            <div className="afaire-quoi">
+                                                                <a href={`/leads-profile.html?id=${r.lead_id}`}>{r.lead_name}</a>
+                                                                <small>{r.label}</small>
+                                                            </div>
+                                                            <div className={`rappel-date${r.en_retard ? ' retard' : ''}`}
+                                                                style={r.en_retard ? { color: 'var(--danger)', fontWeight: 600 } : undefined}>
+                                                                {r.en_retard ? 'En retard · ' : ''}{dateCourte(r.due_date)}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                    {rappels.length > 8 && (
+                                                        <div className="stat-note">… et {rappels.length - 8} autre{rappels.length - 8 > 1 ? 's' : ''}.</div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="panel">
+                                            <div className="panel-header">
+                                                <div className="panel-title">Parcours</div>
+                                                <div className="panel-count">{stats.total_leads} prospect{stats.total_leads > 1 ? 's' : ''}</div>
+                                            </div>
+                                            <div className="panel-note">
+                                                Où en sont vos prospects. Un gros tas à « Nouveau » signale des
+                                                demandes qui attendent d'être contactées.
+                                            </div>
+                                            <Barres lignes={STATUTS.map(([c, n]) => [c, n, stats.pipeline[c] || 0])} />
                                         </div>
                                     </div>
+
+                                    <div className="content-grid">
+                                        <div className="panel">
+                                            <div className="panel-title">Origine des prospects</div>
+                                            <div className="panel-note">
+                                                D'où viennent-ils : saisis à la main, importés d'un fichier ou
+                                                arrivés par votre formulaire de contact.
+                                            </div>
+                                            <Barres classe="source" lignes={SOURCES.map(([c, n]) => [c, n, stats.sources[c] || 0])} />
+                                        </div>
+                                        <div className="panel">
+                                            <div className="panel-title">Classement</div>
+                                            <div className="panel-note">
+                                                Prospects en cours (hors signés et perdus), classés d'après leur
+                                                financement, leur échéance et la précision de leur besoin.
+                                            </div>
+                                            <Barres lignes={QUALITES.map(([c, n]) => [c, n, stats.quality[c] || 0])} />
+                                        </div>
+                                    </div>
+                                    </>
                                 )}
 
-                                <div className="content-grid">
-                                    <div className="panel">
-                                        <div className="panel-header">
-                                            <div className="panel-title">Répartition</div>
-                                        </div>
-                                        <div className="panel-note">
-                                            Le rapport entre vos prospects et vos biens. Un déséquilibre
-                                            marqué dans un sens ou dans l'autre explique souvent un
-                                            faible nombre de correspondances.
-                                        </div>
-                                        <div className="chart-wrapper">
-                                            <canvas ref={chartRef}></canvas>
-                                        </div>
-                                    </div>
-
+                                <div className="content-grid" style={{ gridTemplateColumns: '1fr' }}>
                                     <div className="panel">
                                         <div className="panel-header">
                                             <div className="panel-title">Portefeuille</div>

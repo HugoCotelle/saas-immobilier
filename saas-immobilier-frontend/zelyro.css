@@ -582,6 +582,139 @@ body.auth {
 .info-list dd { color: var(--ink); word-break: break-word; }
 .panel form .btn { margin-top: 6px; }
 
+/* ---------- Suivi des prospects ---------- */
+.statut-badge {
+    display: inline-block;
+    padding: 3px 11px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    white-space: nowrap;
+}
+.statut-contacte { background: var(--sage-100); color: var(--sage-700); }
+.statut-visite { background: #DCE8E4; color: #2F5D58; }
+.statut-offre { background: #EADFC9; color: #6B4F12; }
+.statut-signe { background: var(--sage-600); color: #fff; }
+.statut-perdu { background: var(--cold-bg); color: var(--ink-3); text-decoration: line-through; }
+
+/* Parcours d'un prospect : une pastille par étape, cliquable */
+.pipeline { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.etape {
+    padding: 8px 13px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    background: transparent;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink-2);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.etape:hover { border-color: var(--sage-600); color: var(--sage-700); }
+.etape.passee { background: var(--sage-50); border-color: var(--sage-300); color: var(--sage-700); }
+.etape.active { background: var(--sage-600); border-color: var(--sage-600); color: #fff; }
+.etape.active.perdu { background: var(--ink-3); border-color: var(--ink-3); }
+.etape:disabled { opacity: 0.6; cursor: default; }
+
+.btn.petit { padding: 8px 14px; font-size: 13px; }
+.btn.danger { background: transparent; color: var(--danger); border-color: var(--danger-line); }
+.btn.danger:hover { background: var(--danger-bg); border-color: var(--danger); }
+.btn.danger.plein { background: var(--danger); color: #fff; border-color: var(--danger); }
+.btn.danger.plein:hover { background: #7A3123; }
+.btn-ligne { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.btn-ligne .btn.secondary { margin-left: 0; }
+
+/* Relances */
+.rappel { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.rappel:last-of-type { border-bottom: none; }
+.rappel-case {
+    flex: none;
+    width: 22px; height: 22px;
+    border: 1.5px solid var(--line-strong);
+    border-radius: 6px;
+    background: var(--surface);
+    cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #fff;
+    font-size: 13px; line-height: 1;
+    padding: 0;
+}
+.rappel-case:hover { border-color: var(--sage-600); }
+.rappel.faite .rappel-case { background: var(--sage-600); border-color: var(--sage-600); }
+.rappel-texte { flex: 1; min-width: 0; word-break: break-word; }
+.rappel.faite .rappel-texte { text-decoration: line-through; color: var(--ink-3); }
+.rappel-date { flex: none; font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.rappel.retard .rappel-date { color: var(--danger); font-weight: 600; }
+.rappel-suppr { flex: none; background: none; border: none; color: var(--ink-3); cursor: pointer; font-size: 18px; line-height: 1; padding: 2px 6px; border-radius: 6px; }
+.rappel-suppr:hover { color: var(--danger); background: var(--danger-bg); }
+.rappel-ajout { display: grid; grid-template-columns: 150px 1fr auto; gap: 10px; margin-top: 16px; align-items: start; }
+.rappel-ajout input { padding: 9px 12px; }
+.raccourcis { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.raccourci {
+    background: var(--surface-2); border: none; border-radius: 999px; padding: 4px 11px;
+    font-family: inherit; font-size: 12px; color: var(--ink-2); cursor: pointer;
+}
+.raccourci:hover { background: var(--sage-100); color: var(--sage-700); }
+@media (max-width: 560px) { .rappel-ajout { grid-template-columns: 1fr; } }
+
+/* Historique */
+.historique { margin-top: 22px; }
+.hist-item { position: relative; padding: 0 0 18px 22px; border-left: 2px solid var(--line); margin-left: 5px; }
+.hist-item:last-child { padding-bottom: 0; }
+.hist-item::before {
+    content: ""; position: absolute; left: -6px; top: 3px;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--sage-600); border: 2px solid var(--surface);
+}
+.hist-item.statut::before { background: var(--line-strong); }
+.hist-date { font-size: 12px; color: var(--ink-3); margin-bottom: 3px; font-variant-numeric: tabular-nums; }
+.hist-texte { font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.hist-item.statut .hist-texte { color: var(--ink-2); font-style: italic; }
+.hist-suppr { background: none; border: none; color: var(--ink-3); font-size: 12px; cursor: pointer; margin-left: 10px; font-family: inherit; }
+.hist-suppr:hover { color: var(--danger); text-decoration: underline; }
+
+/* Raisons d'une correspondance */
+.raisons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.raison {
+    font-size: 12px; line-height: 1.4; color: var(--sage-700); background: var(--sage-50);
+    border: 1px solid var(--sage-100); padding: 3px 10px; border-radius: 999px;
+}
+.raison.neg { color: var(--danger); background: var(--danger-bg); border-color: var(--danger-line); }
+
+/* Liste des prospects : étiquettes et relances */
+.lead-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 12px; }
+.tag-relance { font-size: 12px; font-weight: 600; color: var(--sage-700); }
+.tag-relance.retard { color: var(--danger); }
+
+/* Tableau de bord : parcours, sources, à faire */
+.barres { display: grid; gap: 12px; }
+.barre-ligne { display: grid; grid-template-columns: 96px 1fr 34px; gap: 12px; align-items: center; font-size: 14px; }
+.barre-nom { color: var(--ink-2); }
+.barre-piste { height: 10px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
+.barre-remplie { height: 100%; background: var(--sage-600); border-radius: 999px; min-width: 0; transition: width 0.4s ease; }
+.barre-remplie.perdu { background: #B7B5AA; }
+.barre-remplie.source { background: #CDBB98; }
+.barre-nombre { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 600; }
+.stat-note { font-size: 12px; color: var(--ink-3); margin-top: 10px; line-height: 1.5; }
+.afaire-item { display: flex; gap: 12px; align-items: center; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.afaire-item:last-child { border-bottom: none; }
+.afaire-item a { color: var(--ink); text-decoration: none; font-weight: 500; }
+.afaire-item a:hover { color: var(--sage-700); text-decoration: underline; text-underline-offset: 3px; }
+.afaire-quoi { flex: 1; min-width: 0; }
+.afaire-quoi small { display: block; color: var(--ink-3); font-size: 12px; font-weight: 400; }
+.chips-relances { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.chip { padding: 5px 12px; border-radius: 999px; background: var(--surface-2); font-size: 13px; color: var(--ink-2); }
+.chip.retard { background: var(--danger-bg); color: var(--danger); font-weight: 600; }
+
+/* Compte : alertes et formulaire de contact */
+.copie-ligne { display: flex; gap: 10px; }
+.copie-ligne input { font-size: 13px; color: var(--ink-2); background: var(--surface-2); }
+.interrupteur { display: flex; align-items: flex-start; gap: 12px; cursor: pointer; text-transform: none; letter-spacing: 0; font-size: 14px; font-weight: 400; color: var(--ink); margin-bottom: 0; }
+.interrupteur input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--sage-600); flex: none; padding: 0; }
+
 /* ---------- Petits écrans ---------- */
 @media (max-width: 760px) {
     header { padding: 12px 0; }

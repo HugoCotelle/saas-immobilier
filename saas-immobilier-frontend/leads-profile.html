@@ -58,6 +58,33 @@
             cold: 'Premier contact'
         };
 
+        // Les valeurs sont celles du serveur (leads.status).
+        const STATUTS = [
+            ['nouveau', 'Nouveau'], ['contacte', 'Contacté'], ['visite', 'Visite'],
+            ['offre', 'Offre'], ['signe', 'Signé'], ['perdu', 'Perdu']
+        ];
+        const SOURCES = {
+            manuel: 'Ajouté à la main',
+            import: 'Import de fichier',
+            formulaire: 'Formulaire de contact',
+            extraction: "Extrait d'un message"
+        };
+
+        const deuxChiffres = (n) => String(n).padStart(2, '0');
+        // Date du jour dans le fuseau de l'agent, au format AAAA-MM-JJ.
+        const jourLocal = (decalage = 0) => {
+            const d = new Date();
+            d.setDate(d.getDate() + decalage);
+            return `${d.getFullYear()}-${deuxChiffres(d.getMonth() + 1)}-${deuxChiffres(d.getDate())}`;
+        };
+        // « 2026-09-21 » -> 21 sept. 2026, sans passer par UTC (qui décalerait d'un jour).
+        const dateCourte = (iso) => {
+            const [a, m, j] = iso.split('-').map(Number);
+            return new Date(a, m - 1, j).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+        };
+        const dateHeure = (iso) => new Date(iso).toLocaleString('fr-FR',
+            { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
         function LeadProfile() {
             const [lead, setLead] = useState(null);
             const [form, setForm] = useState(null);
@@ -66,6 +93,14 @@
             const [error, setError] = useState(null);
             const [saved, setSaved] = useState(false);
             const [user, setUser] = useState(null);
+            const [notes, setNotes] = useState([]);
+            const [rappels, setRappels] = useState([]);
+            const [nouvelleNote, setNouvelleNote] = useState('');
+            const [rappelDate, setRappelDate] = useState('');
+            const [rappelTexte, setRappelTexte] = useState('');
+            const [occupe, setOccupe] = useState(false);
+            const [erreurSuivi, setErreurSuivi] = useState(null);
+            const [confirmerSuppression, setConfirmerSuppression] = useState(false);
 
             const leadId = new URLSearchParams(window.location.search).get('id');
 
@@ -83,7 +118,92 @@
                     return;
                 }
                 fetchLead(token);
+                chargerSuivi();
             }, []);
+
+            const deconnecter = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = '/login.html';
+            };
+
+            // Appel authentifié : renvoie le JSON, ou lève une erreur avec le
+            // message du serveur.
+            const appel = async (chemin, options = {}) => {
+                const r = await fetch(`${API_URL}${chemin}`, {
+                    ...options,
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}`, 'Content-Type': 'application/json' }
+                });
+                if (r.status === 401) { deconnecter(); throw new Error('Session expirée'); }
+                if (!r.ok) {
+                    let message = `Erreur ${r.status}`;
+                    try { const j = await r.json(); if (j.message) message = j.message; } catch (e) { /* corps vide */ }
+                    throw new Error(message);
+                }
+                return r.json();
+            };
+
+            const chargerSuivi = async () => {
+                try {
+                    const [n, r] = await Promise.all([
+                        appel(`/api/v1/leads/${leadId}/notes`),
+                        appel(`/api/v1/leads/${leadId}/reminders`)
+                    ]);
+                    setNotes(n);
+                    setRappels(r);
+                } catch (err) {
+                    setErreurSuivi(err.message);
+                }
+            };
+
+            // Chaque action du suivi suit le même chemin : on l'exécute, on
+            // recharge, et une erreur s'affiche au lieu de disparaître.
+            const agir = async (action) => {
+                setOccupe(true);
+                setErreurSuivi(null);
+                try { await action(); await chargerSuivi(); }
+                catch (err) { setErreurSuivi(err.message); }
+                finally { setOccupe(false); }
+            };
+
+            const changerStatut = (statut) => agir(async () => {
+                await appel(`/api/v1/leads/${leadId}/status`, { method: 'PUT', body: JSON.stringify({ status: statut }) });
+                setLead((l) => ({ ...l, status: statut }));
+            });
+
+            const ajouterNote = () => agir(async () => {
+                if (!nouvelleNote.trim()) return;
+                await appel(`/api/v1/leads/${leadId}/notes`, { method: 'POST', body: JSON.stringify({ body: nouvelleNote }) });
+                setNouvelleNote('');
+            });
+
+            const supprimerNote = (id) => agir(() => appel(`/api/v1/leads/${leadId}/notes/${id}`, { method: 'DELETE' }));
+
+            const ajouterRappel = () => agir(async () => {
+                if (!rappelDate) throw new Error('Choisissez une date de relance.');
+                await appel(`/api/v1/leads/${leadId}/reminders`, {
+                    method: 'POST', body: JSON.stringify({ due_date: rappelDate, label: rappelTexte })
+                });
+                setRappelDate('');
+                setRappelTexte('');
+            });
+
+            const basculerRappel = (r) => agir(() => appel(`/api/v1/reminders/${r.id}`, {
+                method: 'PUT', body: JSON.stringify({ done: !r.done_at })
+            }));
+
+            const supprimerRappel = (id) => agir(() => appel(`/api/v1/reminders/${id}`, { method: 'DELETE' }));
+
+            const supprimerProspect = async () => {
+                setOccupe(true);
+                try {
+                    await appel(`/api/v1/leads/${leadId}`, { method: 'DELETE' });
+                    window.location.href = '/prospects.html';
+                } catch (err) {
+                    setErreurSuivi(err.message);
+                    setOccupe(false);
+                }
+            };
 
             const fetchLead = async (token) => {
                 try {
@@ -173,7 +293,7 @@
                         <div className="header-content">
                             <div className="logo">ZELYRO</div>
                             <nav>
-                                <a href="/index.html">Leads</a>
+                                <a href="/prospects.html">Leads</a>
                                 <a href="/biens.html">Biens</a>
                                 <a href="/matching.html">Matching</a>
                                 <a href="/dashboard.html">Dashboard</a>
@@ -187,7 +307,7 @@
                     </header>
 
                     <div className="container">
-                        <a href="/matching.html" className="back-link">← Retour au matching</a>
+                        <a href="/prospects.html" className="back-link">← Retour aux prospects</a>
 
                         {loading ? (
                             <div className="loading">
@@ -286,7 +406,7 @@
                                             </div>
 
                                             <div className="form-group">
-                                                <label>Notes</label>
+                                                <label>Notes sur le projet</label>
                                                 <textarea value={form.notes}
                                                     onChange={(e) => set('notes', e.target.value)}
                                                     placeholder="Ce que le prospect a dit, ce qu'il faut retenir pour le prochain appel..."></textarea>
@@ -301,6 +421,96 @@
                                     </div>
 
                                     <div>
+                                        <div className="panel">
+                                            <div className="panel-title">Suivi</div>
+                                            <div className="panel-note">
+                                                Où en est ce prospect ? Cliquez sur l'étape atteinte : le
+                                                changement est daté dans l'historique.
+                                            </div>
+                                            <div className="pipeline" role="group" aria-label="Étape du suivi">
+                                                {STATUTS.map(([valeur, libelle], i) => {
+                                                    const actuel = lead.status || 'nouveau';
+                                                    const iActuel = STATUTS.findIndex((x) => x[0] === actuel);
+                                                    const classes = ['etape'];
+                                                    if (valeur === actuel) classes.push('active', valeur);
+                                                    else if (actuel !== 'perdu' && valeur !== 'perdu' && i < iActuel) classes.push('passee');
+                                                    return (
+                                                        <button key={valeur} className={classes.join(' ')} disabled={occupe}
+                                                            aria-pressed={valeur === actuel}
+                                                            onClick={() => valeur !== actuel && changerStatut(valeur)}>
+                                                            {libelle}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                            {erreurSuivi && <div className="error" style={{ marginTop: '16px', marginBottom: 0 }}>{erreurSuivi}</div>}
+
+                                            <div className="section-divider"></div>
+                                            <div className="panel-title" style={{ fontSize: '17px' }}>Relances</div>
+                                            {rappels.length === 0 && (
+                                                <div className="panel-note" style={{ marginBottom: 0 }}>
+                                                    Aucune relance prévue. Fixez une date pour ne pas laisser ce prospect refroidir.
+                                                </div>
+                                            )}
+                                            {rappels.map((r) => {
+                                                const enRetard = !r.done_at && r.due_date < jourLocal();
+                                                return (
+                                                    <div key={r.id} className={`rappel${r.done_at ? ' faite' : ''}${enRetard ? ' retard' : ''}`}>
+                                                        <button className="rappel-case" disabled={occupe}
+                                                            aria-label={r.done_at ? 'Rouvrir la relance' : 'Marquer la relance comme faite'}
+                                                            onClick={() => basculerRappel(r)}>{r.done_at ? '✓' : ''}</button>
+                                                        <div className="rappel-texte">{r.label}</div>
+                                                        <div className="rappel-date">{enRetard ? 'En retard · ' : ''}{dateCourte(r.due_date)}</div>
+                                                        <button className="rappel-suppr" disabled={occupe} aria-label="Supprimer la relance"
+                                                            onClick={() => supprimerRappel(r.id)}>×</button>
+                                                    </div>
+                                                );
+                                            })}
+                                            <div className="rappel-ajout">
+                                                <input type="date" value={rappelDate} min={jourLocal()}
+                                                    onChange={(e) => setRappelDate(e.target.value)} aria-label="Date de la relance" />
+                                                <input type="text" value={rappelTexte} maxLength={255}
+                                                    onChange={(e) => setRappelTexte(e.target.value)}
+                                                    placeholder="Relancer, envoyer le dossier..." aria-label="Objet de la relance" />
+                                                <button className="btn petit" disabled={occupe || !rappelDate} onClick={ajouterRappel}>Ajouter</button>
+                                            </div>
+                                            <div className="raccourcis">
+                                                {[['Demain', 1], ['Dans 3 jours', 3], ['Dans 1 semaine', 7], ['Dans 1 mois', 30]].map(([nom, n]) => (
+                                                    <button key={nom} className="raccourci" onClick={() => setRappelDate(jourLocal(n))}>{nom}</button>
+                                                ))}
+                                            </div>
+
+                                            <div className="section-divider"></div>
+                                            <div className="panel-title" style={{ fontSize: '17px' }}>Historique</div>
+                                            <div className="form-group" style={{ marginTop: '10px', marginBottom: '10px' }}>
+                                                <textarea value={nouvelleNote} maxLength={2000}
+                                                    onChange={(e) => setNouvelleNote(e.target.value)}
+                                                    style={{ minHeight: '72px' }}
+                                                    placeholder="Ajouter une note datée : appel, visite, ce qu'il a dit..."
+                                                    aria-label="Nouvelle note"></textarea>
+                                            </div>
+                                            <button className="btn petit" disabled={occupe || !nouvelleNote.trim()} onClick={ajouterNote}>
+                                                Ajouter la note
+                                            </button>
+                                            <div className="historique">
+                                                {notes.length === 0 && (
+                                                    <div className="panel-note" style={{ marginBottom: 0 }}>Rien pour l'instant.</div>
+                                                )}
+                                                {notes.map((n) => (
+                                                    <div key={n.id} className={`hist-item ${n.kind === 'statut' ? 'statut' : ''}`}>
+                                                        <div className="hist-date">
+                                                            {dateHeure(n.created_at)}
+                                                            {n.kind === 'note' && (
+                                                                <button className="hist-suppr" disabled={occupe}
+                                                                    onClick={() => supprimerNote(n.id)}>Supprimer</button>
+                                                            )}
+                                                        </div>
+                                                        <div className="hist-texte">{n.kind === 'statut' ? `Statut : ${n.body}` : n.body}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
                                         <div className="panel">
                                             <div className="panel-title">Classement</div>
                                             <div className="panel-note">
@@ -339,8 +549,22 @@
                                             <div className="panel-title">Fiche</div>
                                             <div className="detail-block">
                                                 <div className="detail-label">Statut</div>
-                                                <div className="detail-value">{lead.status || 'Non défini'}</div>
+                                                <div className="detail-value">
+                                                    <span className={`statut-badge statut-${lead.status || 'nouveau'}`}>
+                                                        {(STATUTS.find((x) => x[0] === (lead.status || 'nouveau')) || STATUTS[0])[1]}
+                                                    </span>
+                                                </div>
                                             </div>
+                                            <div className="detail-block">
+                                                <div className="detail-label">Origine</div>
+                                                <div className="detail-value">{SOURCES[lead.source] || SOURCES.manuel}</div>
+                                            </div>
+                                            {lead.consent_at && (
+                                                <div className="detail-block">
+                                                    <div className="detail-label">Consentement à être recontacté</div>
+                                                    <div className="detail-value">{dateHeure(lead.consent_at)}</div>
+                                                </div>
+                                            )}
                                             <div className="detail-block">
                                                 <div className="detail-label">Créé le</div>
                                                 <div className="detail-value">
@@ -354,6 +578,29 @@
                                                 <div className="detail-label">Référence</div>
                                                 <div className="detail-value">Lead #{lead.id}</div>
                                             </div>
+                                        </div>
+
+                                        <div className="panel">
+                                            <div className="panel-title">Supprimer ce prospect</div>
+                                            <div className="panel-note">
+                                                Efface définitivement la fiche, ses notes, ses relances et son
+                                                historique. À utiliser pour une demande d'effacement de ses données
+                                                ou pour retirer un doublon. Cette action est irréversible.
+                                            </div>
+                                            {!confirmerSuppression ? (
+                                                <button className="btn danger petit" onClick={() => setConfirmerSuppression(true)}>
+                                                    Supprimer ce prospect
+                                                </button>
+                                            ) : (
+                                                <div className="btn-ligne">
+                                                    <button className="btn danger plein petit" disabled={occupe} onClick={supprimerProspect}>
+                                                        Oui, supprimer définitivement
+                                                    </button>
+                                                    <button className="btn secondary petit" onClick={() => setConfirmerSuppression(false)}>
+                                                        Annuler
+                                                    </button>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </div>

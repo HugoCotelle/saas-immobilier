@@ -145,7 +145,7 @@
                         <div className="header-content">
                             <div className="logo">ZELYRO</div>
                             <nav>
-                                <a href="/index.html">Leads</a>
+                                <a href="/prospects.html">Leads</a>
                                 <a href="/biens.html">Biens</a>
                                 <a href="/matching.html" className="active">Matching</a>
                                 <a href="/dashboard.html">Dashboard</a>
@@ -306,6 +306,13 @@
                                                             <div className="match-price">
                                                                 {match.price ? `${match.price.toLocaleString('fr-FR')} €` : 'Prix non renseigné'}
                                                             </div>
+                                                            {match.reasons && match.reasons.length > 0 && (
+                                                                <div className="raisons" aria-label="Pourquoi ce bien correspond">
+                                                                    {match.reasons.map((raison, i) => (
+                                                                        <span key={i} className="raison">{raison}</span>
+                                                                    ))}
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     ))
                                                 ) : (

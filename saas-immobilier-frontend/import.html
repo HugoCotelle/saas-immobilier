@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZELYRO - Importer des prospects</title>
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="stylesheet" href="zelyro.css">
+    <style>
+        .apercu { overflow-x: auto; margin: 4px 0 22px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+        .apercu table { border-collapse: collapse; width: 100%; font-size: 13px; }
+        .apercu th { text-align: left; background: var(--surface-2); color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; padding: 10px 12px; white-space: nowrap; }
+        .apercu td { padding: 9px 12px; border-top: 1px solid var(--line); white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+        .apercu td.vide { color: var(--ink-3); }
+        .colonnes { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+        .fichier-zone {
+            border: 1.5px dashed var(--line-strong); border-radius: var(--radius); padding: 34px 24px;
+            text-align: center; background: var(--surface-2); color: var(--ink-2);
+        }
+        .fichier-zone input[type=file] { display: none; }
+        .resultat { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 22px; }
+        .liste-lignes { font-size: 13px; color: var(--ink-2); line-height: 1.8; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+        const PAQUET = 300;          // lignes par envoi (limite du serveur)
+        const MAX_LIGNES = 3000;
+        const MAX_OCTETS = 2 * 1024 * 1024;
+
+        const normaliser = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+        // En-têtes reconnus (après suppression des accents et de la ponctuation).
+        const COLONNES = {
+            name: ['nom', 'nom complet', 'name', 'prospect', 'client', 'contact', 'nom prenom', 'nom et prenom'],
+            prenom: ['prenom', 'first name', 'firstname'],
+            nomfamille: ['nom de famille', 'last name', 'lastname'],
+            email: ['email', 'e mail', 'mail', 'courriel', 'adresse mail', 'adresse email'],
+            phone: ['telephone', 'tel', 'mobile', 'portable', 'phone', 'numero', 'numero de telephone'],
+            budget: ['budget', 'budget max', 'prix max', 'budget maximum'],
+            location: ['secteur', 'ville', 'localisation', 'zone', 'location', 'secteur recherche'],
+            property_type: ['type', 'type de bien', 'bien', 'property type', 'type de bien recherche'],
+            financing_status: ['financement', 'financing', 'statut financement'],
+            purchase_urgency: ['echeance', 'urgence', 'delai', 'echeance d achat', 'delai d achat']
+        };
+        const NOMS_COLONNES = {
+            name: 'Nom', email: 'E-mail', phone: 'Téléphone', budget: 'Budget', location: 'Secteur',
+            property_type: 'Type de bien', financing_status: 'Financement', purchase_urgency: 'Échéance'
+        };
+        const TYPES = ['Appartement', 'Maison', 'Villa', 'Studio', 'Penthouse', 'Terrain'];
+
+        // Lit un fichier CSV : séparateur virgule, point-virgule ou tabulation,
+        // guillemets, retours à la ligne dans un champ.
+        function lireCsv(texte) {
+            texte = texte.replace(/^\uFEFF/, '');
+            const premiere = texte.split(/\r?\n/)[0] || '';
+            const sep = [';', '\t', ','].map((c) => [c, premiere.split(c).length]).sort((a, b) => b[1] - a[1])[0][0];
+            const lignes = [];
+            let ligne = [], champ = '', guillemets = false;
+            for (let i = 0; i < texte.length; i++) {
+                const c = texte[i];
+                if (guillemets) {
+                    if (c === '"' && texte[i + 1] === '"') { champ += '"'; i++; }
+                    else if (c === '"') guillemets = false;
+                    else champ += c;
+                } else if (c === '"') guillemets = true;
+                else if (c === sep) { ligne.push(champ); champ = ''; }
+                else if (c === '\n' || c === '\r') {
+                    if (c === '\r' && texte[i + 1] === '\n') i++;
+                    ligne.push(champ); champ = '';
+                    if (ligne.some((x) => x.trim() !== '')) lignes.push(ligne);
+                    ligne = [];
+                } else champ += c;
+            }
+            ligne.push(champ);
+            if (ligne.some((x) => x.trim() !== '')) lignes.push(ligne);
+            return lignes;
+        }
+
+        function versBudget(v) {
+            let t = String(v || '').toLowerCase().replace(/[€\s\u00a0]/g, '');
+            if (!t) return null;
+            const mult = /k$/.test(t) ? 1000 : /m$/.test(t) ? 1000000 : 1;
+            t = t.replace(/[km]$/, '').replace(',', '.');
+            if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, '');   // 250.000
+            const n = Math.round(parseFloat(t) * mult);
+            return Number.isFinite(n) && n >= 0 ? n : null;
+        }
+        function versType(v) {
+            const t = normaliser(v);
+            if (!t) return null;
+            const trouve = TYPES.find((x) => normaliser(x) === t || (t.length >= 3 && normaliser(x).startsWith(t)));
+            return trouve || (String(v).trim().charAt(0).toUpperCase() + String(v).trim().slice(1));
+        }
+        function versFinancement(v) {
+            const t = normaliser(v);
+            if (!t) return 'unknown';
+            if (/(accord|obtenu|valide|approuve|oui)/.test(t)) return 'approved';
+            if (/(en cours|demarche|instruction)/.test(t)) return 'in_progress';
+            if (/(attente|pending)/.test(t)) return 'pending';
+            return 'unknown';
+        }
+        function versEcheance(v) {
+            const t = normaliser(v);
+            if (!t) return 'unknown';
+            if (/(immediat|tout de suite|urgent)/.test(t)) return 'immediate';
+            if (/(1 a 3|1 3|3 mois|trimestre)/.test(t)) return '1-3_months';
+            if (/(3 a 6|3 6|6 mois|semestre)/.test(t)) return '3-6_months';
+            if (/(plus de 6|6 mois et plus|annee|1 an|long)/.test(t)) return '6plus_months';
+            return 'unknown';
+        }
+
+        // Transforme les lignes du fichier en prospects, avec le repérage des colonnes.
+        function analyser(lignes) {
+            const entetes = lignes[0].map(normaliser);
+            const indice = {};
+            Object.entries(COLONNES).forEach(([cle, noms]) => {
+                const i = entetes.findIndex((h) => noms.includes(h));
+                if (i >= 0) indice[cle] = i;
+            });
+            // « Prénom » et « Nom » en deux colonnes : on les réunit en « Prénom Nom ».
+            const deuxColonnes = indice.prenom !== undefined && (indice.nomfamille !== undefined || indice.name !== undefined);
+            if (deuxColonnes && indice.nomfamille === undefined) { indice.nomfamille = indice.name; }
+            const lu = (ligne, cle) => (indice[cle] === undefined ? '' : String(ligne[indice[cle]] || '').trim());
+
+            const prospects = lignes.slice(1).map((ligne, n) => {
+                const nom = deuxColonnes ? `${lu(ligne, 'prenom')} ${lu(ligne, 'nomfamille')}`.trim() : lu(ligne, 'name');
+                return {
+                    ligne: n + 2,
+                    name: nom,
+                    email: lu(ligne, 'email'),
+                    phone: lu(ligne, 'phone'),
+                    budget: versBudget(lu(ligne, 'budget')),
+                    location: lu(ligne, 'location'),
+                    property_type: versType(lu(ligne, 'property_type')),
+                    financing_status: versFinancement(lu(ligne, 'financing_status')),
+                    purchase_urgency: versEcheance(lu(ligne, 'purchase_urgency'))
+                };
+            });
+            const reconnues = ['name', 'email', 'phone', 'budget', 'location', 'property_type', 'financing_status', 'purchase_urgency']
+                .filter((c) => (c === 'name' ? (indice.name !== undefined || deuxColonnes) : indice[c] !== undefined));
+            return { prospects, reconnues, nomTrouve: indice.name !== undefined || deuxColonnes };
+        }
+
+        function decoder(buffer) {
+            try { return new TextDecoder('utf-8', { fatal: true }).decode(buffer); }
+            catch (e) { return new TextDecoder('windows-1252').decode(buffer); }   // Excel français
+        }
+
+        const MODELE = 'Nom;E-mail;Téléphone;Budget;Secteur;Type de bien;Financement;Échéance\r\n' +
+            'Marie Le Gall;marie@exemple.fr;0612345678;280000;Lille;Appartement;accord obtenu;immédiate\r\n' +
+            'Thomas Martin;thomas@exemple.fr;0698765432;350000;Lyon;Maison;en cours;3 à 6 mois\r\n';
+
+        function ImportApp() {
+            const [user, setUser] = useState(null);
+            const [analyse, setAnalyse] = useState(null);
+            const [nomFichier, setNomFichier] = useState('');
+            const [erreur, setErreur] = useState(null);
+            const [envoi, setEnvoi] = useState(null);       // { fait, total }
+            const [resultat, setResultat] = useState(null);
+
+            useEffect(() => {
+                const token = localStorage.getItem('token');
+                const userData = localStorage.getItem('user');
+                if (!token) { window.location.href = '/login.html'; return; }
+                if (userData) setUser(JSON.parse(userData));
+            }, []);
+
+            const handleLogout = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = '/login.html';
+            };
+
+            const choisir = async (e) => {
+                const fichier = e.target.files[0];
+                e.target.value = '';
+                setErreur(null); setResultat(null); setAnalyse(null);
+                if (!fichier) return;
+                if (fichier.size > MAX_OCTETS) { setErreur('Ce fichier dépasse 2 Mo. Découpez-le en plusieurs fichiers.'); return; }
+                if (/\.xlsx?$/i.test(fichier.name)) {
+                    setErreur('Ce format n\'est pas lu directement. Dans Excel : Fichier > Enregistrer sous > CSV UTF-8, puis importez ce fichier.');
+                    return;
+                }
+                try {
+                    const lignes = lireCsv(decoder(await fichier.arrayBuffer()));
+                    if (lignes.length < 2) { setErreur('Le fichier ne contient aucune ligne de prospect.'); return; }
+                    const a = analyser(lignes);
+                    if (!a.nomTrouve) {
+                        setErreur('Aucune colonne « Nom » trouvée. La première ligne du fichier doit contenir les titres des colonnes (Nom, E-mail, Téléphone...).');
+                        return;
+                    }
+                    if (a.prospects.length > MAX_LIGNES) { setErreur(`Ce fichier contient plus de ${MAX_LIGNES} lignes. Découpez-le en plusieurs fichiers.`); return; }
+                    setNomFichier(fichier.name);
+                    setAnalyse(a);
+                } catch (err) {
+                    setErreur('Ce fichier est illisible. Vérifiez qu\'il s\'agit bien d\'un CSV.');
+                }
+            };
+
+            const telechargerModele = () => {
+                const lien = document.createElement('a');
+                lien.href = URL.createObjectURL(new Blob(['\uFEFF' + MODELE], { type: 'text/csv;charset=utf-8' }));
+                lien.download = 'modele-import-zelyro.csv';
+                document.body.appendChild(lien); lien.click(); lien.remove();
+                setTimeout(() => URL.revokeObjectURL(lien.href), 1000);
+            };
+
+            const importer = async () => {
+                const token = localStorage.getItem('token');
+                const lignes = analyse.prospects;
+                const total = { imported: 0, duplicates: 0, invalid: [], invalidCount: 0 };
+                setErreur(null); setResultat(null);
+                try {
+                    for (let debut = 0; debut < lignes.length; debut += PAQUET) {
+                        setEnvoi({ fait: debut, total: lignes.length });
+                        const paquet = lignes.slice(debut, debut + PAQUET).map(({ ligne, ...reste }) => reste);
+                        const r = await fetch(`${API_URL}/api/v1/leads/import`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ rows: paquet, offset: debut + 1 })   // +1 : la ligne 1 est l'en-tête
+                        });
+                        if (r.status === 401) { handleLogout(); return; }
+                        const d = await r.json().catch(() => ({}));
+                        if (!r.ok) throw new Error(d.message || `Erreur ${r.status}`);
+                        total.imported += d.imported;
+                        total.duplicates += d.duplicates;
+                        total.invalidCount += d.invalid_count;
+                        total.invalid.push(...d.invalid);
+                    }
+                    setResultat(total);
+                    setAnalyse(null);
+                } catch (err) {
+                    setErreur(err.message + (total.imported ? ` (${total.imported} prospects avaient déjà été importés avant l'incident.)` : ''));
+                    if (total.imported) setResultat(total);
+                } finally {
+                    setEnvoi(null);
+                }
+            };
+
+            const sansNom = analyse ? analyse.prospects.filter((p) => !p.name).length : 0;
+
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo">ZELYRO</div>
+                            <nav>
+                                <a href="/prospects.html" className="active">Leads</a>
+                                <a href="/biens.html">Biens</a>
+                                <a href="/matching.html">Matching</a>
+                                <a href="/dashboard.html">Dashboard</a>
+                                <a href="/compte.html">Compte</a>
+                            </nav>
+                            <div className="user-info">
+                                {user && <span className="user-email">{user.email}</span>}
+                                <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="container">
+                        <a href="/prospects.html" className="back-link">← Retour aux prospects</a>
+                        <h1 className="page-title">Importer des prospects</h1>
+                        <p className="page-subtitle">
+                            Reprenez votre fichier existant (export de votre ancien outil, tableur Excel...).
+                            Les prospects déjà présents (même e-mail ou même téléphone) sont ignorés :
+                            vous pouvez réimporter un fichier sans créer de doublons.
+                        </p>
+
+                        {erreur && <div className="error">{erreur}</div>}
+
+                        {resultat && (
+                            <div className="panel">
+                                <div className="panel-title">Import terminé</div>
+                                <div className="resultat">
+                                    <div className="stat-card"><div className="stat-value">{resultat.imported}</div><div className="stat-label">Importés</div></div>
+                                    <div className="stat-card"><div className="stat-value">{resultat.duplicates}</div><div className="stat-label">Déjà présents</div></div>
+                                    <div className="stat-card"><div className="stat-value">{resultat.invalidCount}</div><div className="stat-label">Lignes refusées</div></div>
+                                </div>
+                                {resultat.invalid.length > 0 && (
+                                    <div className="liste-lignes" style={{ marginBottom: '22px' }}>
+                                        {resultat.invalid.map((l, i) => <div key={i}>Ligne {l.ligne} : {l.raison}</div>)}
+                                        {resultat.invalidCount > resultat.invalid.length && <div>… et {resultat.invalidCount - resultat.invalid.length} autres.</div>}
+                                    </div>
+                                )}
+                                <a className="btn" href="/prospects.html">Voir mes prospects</a>
+                            </div>
+                        )}
+
+                        {!analyse && !envoi && (
+                            <div className="panel">
+                                <div className="panel-title">1. Choisir le fichier</div>
+                                <div className="panel-note">
+                                    Un fichier CSV avec une ligne de titres : Nom, E-mail, Téléphone, Budget,
+                                    Secteur, Type de bien, Financement, Échéance. Seul le nom est indispensable ;
+                                    les colonnes absentes sont simplement laissées vides. Depuis Excel : Fichier,
+                                    Enregistrer sous, CSV UTF-8. Maximum {MAX_LIGNES} prospects et 2 Mo par fichier.
+                                </div>
+                                <label className="fichier-zone" style={{ cursor: 'pointer', textTransform: 'none', letterSpacing: 0, fontSize: '14px', fontWeight: 500 }}>
+                                    <input type="file" accept=".csv,.txt,text/csv" onChange={choisir} />
+                                    Cliquez ici pour choisir un fichier
+                                </label>
+                                <div style={{ marginTop: '16px' }}>
+                                    <button className="btn secondary petit" style={{ marginLeft: 0 }} onClick={telechargerModele}>
+                                        Télécharger un fichier modèle
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {analyse && !envoi && (
+                            <div className="panel">
+                                <div className="panel-title">2. Vérifier et importer</div>
+                                <div className="panel-note">
+                                    Fichier « {nomFichier} » : {analyse.prospects.length} ligne{analyse.prospects.length > 1 ? 's' : ''} lue{analyse.prospects.length > 1 ? 's' : ''}.
+                                    {sansNom > 0 && ` ${sansNom} sans nom seront refusée${sansNom > 1 ? 's' : ''}.`}
+                                </div>
+                                <div className="colonnes">
+                                    {analyse.reconnues.map((c) => <span key={c} className="statut-badge statut-contacte">{NOMS_COLONNES[c]}</span>)}
+                                </div>
+                                <div className="apercu">
+                                    <table>
+                                        <thead><tr><th>Nom</th><th>E-mail</th><th>Téléphone</th><th>Budget</th><th>Secteur</th><th>Type</th></tr></thead>
+                                        <tbody>
+                                            {analyse.prospects.slice(0, 5).map((p) => (
+                                                <tr key={p.ligne}>
+                                                    <td className={p.name ? '' : 'vide'}>{p.name || 'manquant'}</td>
+                                                    <td className={p.email ? '' : 'vide'}>{p.email || '—'}</td>
+                                                    <td className={p.phone ? '' : 'vide'}>{p.phone || '—'}</td>
+                                                    <td className={p.budget ? '' : 'vide'}>{p.budget ? `${p.budget.toLocaleString('fr-FR')} €` : '—'}</td>
+                                                    <td className={p.location ? '' : 'vide'}>{p.location || '—'}</td>
+                                                    <td className={p.property_type ? '' : 'vide'}>{p.property_type || '—'}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div className="btn-ligne">
+                                    <button className="btn" onClick={importer}>Importer {analyse.prospects.length - sansNom} prospect{analyse.prospects.length - sansNom > 1 ? 's' : ''}</button>
+                                    <button className="btn secondary" onClick={() => setAnalyse(null)}>Choisir un autre fichier</button>
+                                </div>
+                            </div>
+                        )}
+
+                        {envoi && (
+                            <div className="loading">
+                                <div className="loader"></div>
+                                <p style={{ marginTop: '20px' }}>Import en cours : {Math.min(envoi.fait + PAQUET, envoi.total)} sur {envoi.total}...</p>
+                            </div>
+                        )}
+                    </div>
+                </>
+            );
+        }
+
+        ReactDOM.render(<ImportApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>

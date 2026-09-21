@@ -23,6 +23,22 @@
             const [form, setForm] = useState(VIDE);
             const [saving, setSaving] = useState(false);
             const [message, setMessage] = useState(null);
+            const [alertes, setAlertes] = useState(null);      // null tant que non chargé
+            const [messageAlertes, setMessageAlertes] = useState(null);
+            const [lien, setLien] = useState(null);
+            const [messageLien, setMessageLien] = useState(null);
+            const [confirmerLien, setConfirmerLien] = useState(false);
+
+            const appel = async (chemin, options = {}) => {
+                const r = await fetch(`${API_URL}${chemin}`, {
+                    ...options,
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                });
+                if (r.status === 401) { handleLogout(); throw new Error('Session expirée'); }
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(data.message || `Erreur ${r.status}`);
+                return data;
+            };
 
             useEffect(() => {
                 if (!localStorage.getItem('token')) {
@@ -31,7 +47,41 @@
                 }
                 const userData = localStorage.getItem('user');
                 if (userData) setUser(JSON.parse(userData));
+                appel('/auth/profile').then((p) => setAlertes(p.alerts_enabled !== false)).catch(() => {});
+                appel('/api/v1/capture-link').then(setLien).catch((e) => setMessageLien({ type: 'error', text: e.message }));
             }, []);
+
+            const changerAlertes = async (valeur) => {
+                setAlertes(valeur);
+                setMessageAlertes(null);
+                try {
+                    await appel('/auth/preferences', { method: 'PUT', body: JSON.stringify({ alerts_enabled: valeur }) });
+                    setMessageAlertes({ type: 'success', text: valeur ? 'Alertes activées.' : 'Alertes désactivées.' });
+                } catch (e) {
+                    setAlertes(!valeur);
+                    setMessageAlertes({ type: 'error', text: e.message });
+                }
+            };
+
+            const copier = async () => {
+                try {
+                    await navigator.clipboard.writeText(lien.url);
+                    setMessageLien({ type: 'success', text: 'Adresse copiée.' });
+                } catch (e) {
+                    document.getElementById('champ-lien').select();
+                    setMessageLien({ type: 'error', text: 'Copie automatique impossible : l\'adresse est sélectionnée, copiez-la avec Ctrl+C.' });
+                }
+            };
+
+            const nouveauLien = async () => {
+                setConfirmerLien(false);
+                try {
+                    setLien(await appel('/api/v1/capture-link/regenerate', { method: 'POST' }));
+                    setMessageLien({ type: 'success', text: 'Nouvelle adresse créée. L\'ancienne ne fonctionne plus.' });
+                } catch (e) {
+                    setMessageLien({ type: 'error', text: e.message });
+                }
+            };
 
             const handleLogout = () => {
                 localStorage.removeItem('token');
@@ -88,7 +138,7 @@
                         <div className="header-content">
                             <div className="logo">ZELYRO</div>
                             <nav>
-                                <a href="/index.html">Leads</a>
+                                <a href="/prospects.html">Leads</a>
                                 <a href="/biens.html">Biens</a>
                                 <a href="/matching.html">Matching</a>
                                 <a href="/dashboard.html">Dashboard</a>
@@ -159,6 +209,64 @@
                                         {saving ? 'Enregistrement…' : 'Modifier le mot de passe'}
                                     </button>
                                 </form>
+                            </div>
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Alertes e-mail</h2>
+                                </div>
+                                <p className="panel-note">
+                                    Recevez un e-mail quand un bien correspond à un prospect (score de 70 sur 100
+                                    ou plus), quand un import ajoute des prospects qui correspondent à vos biens,
+                                    et quand quelqu'un remplit votre formulaire de contact. Une même
+                                    correspondance n'est signalée qu'une fois.
+                                </p>
+                                {messageAlertes && (
+                                    <div className={messageAlertes.type === 'error' ? 'error' : 'success'}>{messageAlertes.text}</div>
+                                )}
+                                <label className="interrupteur">
+                                    <input type="checkbox" checked={alertes === true} disabled={alertes === null}
+                                        onChange={(e) => changerAlertes(e.target.checked)} />
+                                    <span>Me prévenir par e-mail à l'adresse {user ? user.email : 'de mon compte'}</span>
+                                </label>
+                            </div>
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Formulaire de contact</h2>
+                                </div>
+                                <p className="panel-note">
+                                    Placez ce lien sur le site de votre agence, dans vos e-mails ou sur vos réseaux :
+                                    les personnes qui remplissent le formulaire arrivent directement dans votre
+                                    liste de prospects, avec la trace de leur consentement à être recontactées.
+                                </p>
+                                {messageLien && (
+                                    <div className={messageLien.type === 'error' ? 'error' : 'success'}>{messageLien.text}</div>
+                                )}
+                                {lien && lien.url ? (
+                                    <>
+                                        <div className="copie-ligne">
+                                            <input id="champ-lien" type="text" readOnly value={lien.url}
+                                                onFocus={(e) => e.target.select()} aria-label="Adresse du formulaire" />
+                                            <button className="btn" onClick={copier}>Copier</button>
+                                        </div>
+                                        <div className="btn-ligne" style={{ marginTop: '14px' }}>
+                                            <a className="btn secondary petit" href={lien.url} target="_blank" rel="noopener">Voir le formulaire</a>
+                                            {!confirmerLien ? (
+                                                <button className="btn secondary petit" onClick={() => setConfirmerLien(true)}>Créer une nouvelle adresse</button>
+                                            ) : (
+                                                <>
+                                                    <button className="btn danger plein petit" onClick={nouveauLien}>Confirmer : l'ancienne adresse cessera de fonctionner</button>
+                                                    <button className="btn secondary petit" onClick={() => setConfirmerLien(false)}>Annuler</button>
+                                                </>
+                                            )}
+                                        </div>
+                                        <p className="field-hint">
+                                            Une nouvelle adresse est utile en cas de messages indésirables :
+                                            l'ancienne est aussitôt désactivée.
+                                        </p>
+                                    </>
+                                ) : !messageLien && <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}
                             </div>
                         </div>
                     </div>
