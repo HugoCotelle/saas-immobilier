@@ -23,8 +23,21 @@
             cold: ['badge-cold', 'Premier contact']
         };
 
-        // Tri alphabétique (sans tenir compte des accents ni des majuscules).
-        const parNom = (a, b) => (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' });
+        // Tri alphabétique sur le nom de famille (le nom est saisi « Prénom Nom »),
+        // sans tenir compte des accents ni des majuscules. Le nom de famille est le
+        // dernier mot, précédé de ses particules : « Marie Le Gall » se classe à L,
+        // « Charles de Gaulle » à G (de, du et des sont ignorés). À nom égal, on
+        // départage par le prénom.
+        const PARTICULES = ['de', 'du', 'des', 'le', 'la', 'les', 'van', 'von', 'der', 'den', 'di', 'da', 'del'];
+        const cleNom = (nom) => {
+            const mots = String(nom || '').trim().split(/\s+/).filter(Boolean);
+            if (mots.length <= 1) return mots.join(' ');
+            let debut = mots.length - 1;
+            while (debut > 0 && PARTICULES.includes(mots[debut - 1].toLowerCase())) debut--;
+            const famille = mots.slice(debut).join(' ').replace(/^(de|du|des)\s+/i, '');
+            return famille + ' ' + mots.slice(0, debut).join(' ');
+        };
+        const parNom = (a, b) => cleNom(a.name).localeCompare(cleNom(b.name), 'fr', { sensitivity: 'base' });
 
         const VIDE = {
             name: '', email: '', phone: '', budget: '',
