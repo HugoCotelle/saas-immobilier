@@ -286,6 +286,76 @@ _DDL_SUIVI = (
     )""",
     "CREATE INDEX IF NOT EXISTS lead_mails_lead_idx ON lead_mails (lead_id, sent_at)",
 )
+
+# Les forfaits : code, nom, prospects, biens, e-mails par mois, extractions IA
+# par mois (None = illimité), ordre d'affichage. Ces valeurs ne servent qu'à
+# remplir la table « plans » la première fois : ensuite, les limites se règlent
+# depuis la page d'administration. « illimite » est réservé à l'équipe Zelyro.
+PLANS_PAR_DEFAUT = (
+    ('essentiel', 'Essentiel', 300, 100, 200, 100, 1),
+    ('agence', 'Agence', 1500, 400, 1000, 500, 2),
+    ('reseau', 'Réseau', 6000, 1500, 4000, 2000, 3),
+    ('illimite', 'Illimité', None, None, None, None, 9),
+)
+
+
+def _sql_plan(p):
+    def v(x):
+        return 'NULL' if x is None else str(int(x))
+    return ("INSERT INTO plans (code, label, max_leads, max_properties, max_mails_month, "
+            "max_extractions_month, sort_order) VALUES ('%s', '%s', %s, %s, %s, %s, %s) "
+            "ON CONFLICT (code) DO NOTHING" % (p[0], p[1], v(p[2]), v(p[3]), v(p[4]), v(p[5]), int(p[6])))
+
+
+# Accès sur invitation, forfaits et administration. Les comptes qui existent
+# déjà passent en « illimité » (ils appartiennent à l'équipe) ; les suivants
+# reçoivent le forfait de leur invitation.
+_DDL_ACCES = (
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'illimite'",
+    "ALTER TABLE users ALTER COLUMN plan SET DEFAULT 'essentiel'",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE",
+    """CREATE TABLE IF NOT EXISTS plans (
+        code VARCHAR(20) PRIMARY KEY,
+        label VARCHAR(50) NOT NULL,
+        max_leads INTEGER,
+        max_properties INTEGER,
+        max_mails_month INTEGER,
+        max_extractions_month INTEGER,
+        sort_order INTEGER NOT NULL DEFAULT 0
+    )""",
+) + tuple(_sql_plan(p) for p in PLANS_PAR_DEFAUT) + (
+    """CREATE TABLE IF NOT EXISTS invitations (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255),
+        plan VARCHAR(20) NOT NULL,
+        token_hash CHAR(64) UNIQUE NOT NULL,
+        invited_by VARCHAR(255),
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        expires_at TIMESTAMP NOT NULL,
+        used_at TIMESTAMP,
+        revoked_at TIMESTAMP
+    )""",
+    "ALTER TABLE invitations ALTER COLUMN email DROP NOT NULL",
+    "ALTER TABLE invitations ADD COLUMN IF NOT EXISTS label VARCHAR(120)",
+    "ALTER TABLE invitations ADD COLUMN IF NOT EXISTS key_hint VARCHAR(8)",
+    "ALTER TABLE invitations ADD COLUMN IF NOT EXISTS used_email VARCHAR(255)",
+    "CREATE INDEX IF NOT EXISTS invitations_email_idx ON invitations (lower(email))",
+    """CREATE TABLE IF NOT EXISTS usage_counters (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        period CHAR(7) NOT NULL,
+        metric VARCHAR(30) NOT NULL,
+        n INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (user_id, period, metric)
+    )""",
+    """CREATE TABLE IF NOT EXISTS admin_log (
+        id SERIAL PRIMARY KEY,
+        admin_email VARCHAR(255) NOT NULL,
+        action VARCHAR(40) NOT NULL,
+        target VARCHAR(255),
+        detail TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )""",
+)
 _schema_pret = False
 _schema_verrou = threading.Lock()
 
@@ -312,11 +382,19 @@ def _assurer_schema():
                        to_regclass('lead_notes') IS NOT NULL,
                        to_regclass('lead_reminders') IS NOT NULL,
                        to_regclass('match_alerts') IS NOT NULL,
-                       to_regclass('lead_mails') IS NOT NULL
+                       to_regclass('lead_mails') IS NOT NULL,
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'users' AND column_name = 'plan'),
+                       to_regclass('plans') IS NOT NULL,
+                       to_regclass('invitations') IS NOT NULL,
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'invitations' AND column_name = 'key_hint'),
+                       to_regclass('usage_counters') IS NOT NULL,
+                       to_regclass('admin_log') IS NOT NULL
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
-                for ddl in _DDL_COMPTES + _DDL_SUIVI:
+                for ddl in _DDL_COMPTES + _DDL_SUIVI + _DDL_ACCES:
                     cur.execute(ddl)
             conn.commit()
             _schema_pret = True
@@ -361,7 +439,7 @@ def token_required(f):
             conn = get_db_connection()
             try:
                 cur = conn.cursor()
-                cur.execute("SELECT token_version FROM users WHERE id = %s", (current_user_id,))
+                cur.execute("SELECT token_version, is_active, email FROM users WHERE id = %s", (current_user_id,))
                 ligne = cur.fetchone()
             finally:
                 conn.close()
@@ -369,10 +447,31 @@ def token_required(f):
             return erreur_interne()
         if ligne is None:
             return jsonify({"message": "Invalid token"}), 401
-        if int(data.get('v', 0)) != ligne[0]:
+        if int(data.get('v', 0)) != ligne[0] or not ligne[1]:
             return jsonify({"message": "Invalid token"}), 401
+        request.user_email = ligne[2]
         return f(*args, **kwargs)
     return decorated
+
+
+def _admins():
+    """Les adresses des administrateurs (équipe Zelyro), fixées par la variable
+    ADMIN_EMAILS de l'hébergeur : on ne devient pas administrateur depuis le site."""
+    return {e.strip().lower() for e in (os.getenv("ADMIN_EMAILS") or "").split(",") if e.strip()}
+
+
+def _est_admin(email):
+    return (email or '').strip().lower() in _admins()
+
+
+def admin_required(f):
+    """Réservé aux administrateurs. Pour tous les autres, la page n'existe pas."""
+    @wraps(f)
+    def verifie(*args, **kwargs):
+        if not _est_admin(getattr(request, 'user_email', '')):
+            return jsonify({"message": "Not found"}), 404
+        return f(*args, **kwargs)
+    return token_required(verifie)
 
 def init_database(demo=False):
     """Créer les tables qui n'existent pas encore.
@@ -442,7 +541,7 @@ def init_database(demo=False):
             "CREATE INDEX IF NOT EXISTS properties_user_id_idx ON properties (user_id)",
         ):
             cursor.execute(ddl)
-        for ddl in _DDL_COMPTES + _DDL_SUIVI:
+        for ddl in _DDL_COMPTES + _DDL_SUIVI + _DDL_ACCES:
             cursor.execute(ddl)
 
         # Vérifier si vide
@@ -542,16 +641,60 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _HASH_FACTICE = generate_password_hash(secrets.token_urlsafe(16), method='pbkdf2:sha256')
 
 
+MESSAGE_INVITATION = ("Une clé d'activation est nécessaire pour créer un compte. "
+                      "Écrivez à tb@zelyro.fr pour en obtenir une.")
+LIEN_INVITATION_INVALIDE = ("Clé d'activation invalide ou expirée. Vérifiez-la, ou demandez-en une nouvelle "
+                            "à l'équipe Zelyro.")
+MESSAGE_CLE_AUTRE_ADRESSE = "Cette clé d'activation est réservée à une autre adresse e-mail."
+
+# Clé d'activation : ZLY-XXXX-XXXX-XXXX. L'alphabet exclut I, O, 0 et 1, qu'on
+# confond à la lecture ou au téléphone ; 12 caractères tirés au hasard font
+# 60 bits, hors de portée d'un essai systématique (l'inscription est limitée
+# à 10 essais par heure et par adresse IP).
+ALPHABET_CLE = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def _nouvelle_cle():
+    brut = ''.join(secrets.choice(ALPHABET_CLE) for _ in range(12))
+    return f"ZLY-{brut[0:4]}-{brut[4:8]}-{brut[8:12]}"
+
+
+def _empreinte_cle(saisie):
+    """L'empreinte à chercher en base pour ce que la personne a saisi :
+    majuscules, tirets et espaces sans importance. Un ancien lien
+    d'invitation (long jeton) est encore reconnu tel quel. Renvoie None si
+    la saisie ne peut pas être une clé."""
+    saisie = str(saisie or '').strip()
+    if re.fullmatch(r'[A-Za-z0-9_-]{32,64}', saisie):
+        return _hash_jeton(saisie)
+    brut = re.sub(r'[^A-Za-z0-9]', '', saisie).upper()
+    if brut.startswith('ZLY'):
+        brut = brut[3:]
+    if len(brut) != 12 or any(ch not in ALPHABET_CLE for ch in brut):
+        return None
+    return _hash_jeton(brut)
+
+
 @app.route('/auth/register', methods=['POST'])
 @limiter.limit("10 per hour")
 def register():
-    """Enregistrer un nouvel utilisateur"""
+    """Créer un compte.
+
+    L'inscription est fermée : il faut une clé d'activation donnée par
+    l'équipe Zelyro. Le forfait vient de la clé, jamais du navigateur. Si la
+    clé a été créée pour une adresse précise, elle ne marche qu'avec celle-ci.
+    OPEN_REGISTRATION=1 rouvre l'inscription libre : réservé aux tests, à ne
+    jamais activer en production.
+    """
     data = request.get_json(silent=True) or {}
-    email = str(data.get('email') or '').strip().lower()
+    cle = str(data.get('invitation') or '').strip()
+    if not cle and os.getenv("OPEN_REGISTRATION") != "1":
+        return jsonify({"message": MESSAGE_INVITATION, "code": "invitation_required"}), 403
     password = data.get('password')
     first_name = str(data.get('first_name') or '').strip()[:100]
     company_name = str(data.get('company_name') or '').strip()[:255]
 
+    email = str(data.get('email') or '').strip().lower()
     if not email or not password:
         return jsonify({"message": "Email and password required"}), 400
     if len(email) > 255 or not EMAIL_RE.match(email):
@@ -560,29 +703,47 @@ def register():
         return jsonify({"message": "Le mot de passe doit contenir au moins 10 caractères"}), 400
     if len(password) > 128:
         return jsonify({"message": "Mot de passe trop long (128 caractères maximum)"}), 400
+    empreinte = None
+    if cle:
+        empreinte = _empreinte_cle(cle)
+        if not empreinte:
+            return jsonify({"message": LIEN_INVITATION_INVALIDE}), 400
 
     try:
+        _assurer_schema()
         conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id FROM users WHERE lower(email) = %s", (email,))
-        if cur.fetchone():
-            cur.close()
-            conn.close()
-            return jsonify({"message": "User already exists"}), 409
+        try:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            plan, inv_id = 'essentiel', None
+            if empreinte:
+                cur.execute("""SELECT id, email, plan FROM invitations
+                               WHERE token_hash = %s AND used_at IS NULL AND revoked_at IS NULL
+                                 AND expires_at > %s FOR UPDATE""", (empreinte, _maintenant()))
+                inv = cur.fetchone()
+                if not inv:
+                    return jsonify({"message": LIEN_INVITATION_INVALIDE}), 400
+                if inv['email'] and inv['email'].strip().lower() != email:
+                    return jsonify({"message": MESSAGE_CLE_AUTRE_ADRESSE}), 400
+                plan, inv_id = inv['plan'], inv['id']
 
-        password_hash = generate_password_hash(password, method='pbkdf2:sha256')
-        cur.execute(
-            "INSERT INTO users (email, password_hash, first_name, company_name) VALUES (%s, %s, %s, %s) RETURNING id",
-            (email, password_hash, first_name, company_name)
-        )
-        user_id = cur.fetchone()['id']
-        conn.commit()
+            cur.execute("SELECT id FROM users WHERE lower(email) = %s", (email,))
+            if cur.fetchone():
+                return jsonify({"message": "User already exists"}), 409
+
+            password_hash = generate_password_hash(password, method='pbkdf2:sha256')
+            cur.execute(
+                "INSERT INTO users (email, password_hash, first_name, company_name, plan) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                (email, password_hash, first_name, company_name, plan)
+            )
+            user_id = cur.fetchone()['id']
+            if inv_id:
+                cur.execute("UPDATE invitations SET used_at = %s, used_email = %s WHERE id = %s",
+                            (_maintenant(), email, inv_id))
+            conn.commit()
+        finally:
+            conn.close()
 
         token = create_access_token(identity={'id': user_id, 'email': email}, expires=timedelta(hours=TOKEN_LIFETIME_HOURS))
-
-        cur.close()
-        conn.close()
-
         return jsonify({
             "message": "User created successfully",
             "token": token,
@@ -590,7 +751,9 @@ def register():
                 "id": user_id,
                 "email": email,
                 "first_name": first_name,
-                "company_name": company_name
+                "company_name": company_name,
+                "plan": plan,
+                "is_admin": _est_admin(email)
             }
         }), 201
     except psycopg2.errors.UniqueViolation:
@@ -617,7 +780,7 @@ def login():
         _assurer_schema()
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, email, password_hash, first_name, company_name, token_version FROM users WHERE lower(email) = %s", (email,))
+        cur.execute("SELECT id, email, password_hash, first_name, company_name, token_version, is_active, plan FROM users WHERE lower(email) = %s", (email,))
         user = cur.fetchone()
         cur.close()
         conn.close()
@@ -630,6 +793,9 @@ def login():
 
         if not valide:
             return jsonify({"message": "Invalid credentials"}), 401
+        if not user['is_active']:
+            # Après la vérification du mot de passe : seul le titulaire du compte l'apprend.
+            return jsonify({"message": "Ce compte est suspendu. Contactez l'équipe Zelyro.", "code": "suspended"}), 403
 
         token = create_access_token(identity={'id': user['id'], 'email': user['email'], 'v': user['token_version']}, expires=timedelta(hours=TOKEN_LIFETIME_HOURS))
 
@@ -640,7 +806,9 @@ def login():
                 "id": user['id'],
                 "email": user['email'],
                 "first_name": user['first_name'],
-                "company_name": user['company_name']
+                "company_name": user['company_name'],
+                "plan": user['plan'],
+                "is_admin": _est_admin(user['email'])
             }
         }), 200
     except Exception:
@@ -743,7 +911,7 @@ def _traiter_oubli(email):
         conn = get_db_connection()
         try:
             cur = conn.cursor()
-            cur.execute("SELECT id, email FROM users WHERE lower(email) = %s", (email,))
+            cur.execute("SELECT id, email FROM users WHERE lower(email) = %s AND is_active", (email,))
             user = cur.fetchone()
             if not user:
                 return
@@ -911,7 +1079,7 @@ def get_profile():
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, email, first_name, company_name, created_at, alerts_enabled FROM users WHERE id = %s", (request.user_id,))
+        cur.execute("SELECT id, email, first_name, company_name, created_at, alerts_enabled, plan FROM users WHERE id = %s", (request.user_id,))
         user = cur.fetchone()
         cur.close()
         conn.close()
@@ -919,6 +1087,7 @@ def get_profile():
         if not user:
             return jsonify({"message": "User not found"}), 404
 
+        user['is_admin'] = _est_admin(user['email'])
         return jsonify(user), 200
     except Exception:
         return erreur_interne()
@@ -1174,6 +1343,10 @@ def create_lead():
 
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
+        reste, forfait = _reste(cur, request.user_id, 'leads')
+        if reste == 0:
+            conn.close()
+            return _refus_quota('leads', forfait)
         cur.execute("""
             INSERT INTO leads
                 (user_id, name, email, phone, budget, location, property_type,
@@ -1243,6 +1416,10 @@ def create_property():
 
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
+        reste, forfait = _reste(cur, request.user_id, 'properties')
+        if reste == 0:
+            conn.close()
+            return _refus_quota('properties', forfait)
         cur.execute("""
             INSERT INTO properties
                 (user_id, title, address, price, size, rooms, property_type, description)
@@ -1726,8 +1903,11 @@ def import_leads():
             return jsonify({"message": f"{MAX_LIGNES_IMPORT} lignes maximum par envoi"}), 400
         decalage = data.get('offset') if isinstance(data.get('offset'), int) and 0 <= data.get('offset') < 1_000_000 else 0
 
-        importes, doublons, invalides, ids = 0, 0, [], []
+        importes, doublons, invalides, ids, hors_forfait = 0, 0, [], [], 0
         with _base() as (conn, cur):
+            reste, forfait = _reste(cur, request.user_id, 'leads')
+            if reste == 0:
+                return _refus_quota('leads', forfait)
             cur.execute("SELECT lower(email) AS e, phone, lower(name) AS n FROM leads WHERE user_id = %s",
                         (request.user_id,))
             emails, telephones, noms_seuls = set(), set(), set()
@@ -1759,6 +1939,9 @@ def import_leads():
                         or (sans_contact and nom.lower() in noms_seuls)):
                     doublons += 1
                     continue
+                if reste is not None and importes >= reste:
+                    hors_forfait += 1
+                    continue
                 cur.execute("""
                     INSERT INTO leads (user_id, name, email, phone, budget, location, property_type,
                                        status, financing_status, purchase_urgency, source)
@@ -1784,7 +1967,9 @@ def import_leads():
             # Un seul e-mail récapitulatif pour tout l'import.
             _lancer_en_arriere_plan(_alertes_matching, request.user_id, ids, None)
         return jsonify({"imported": importes, "duplicates": doublons, "invalid": invalides[:50],
-                        "invalid_count": len(invalides)}), 200
+                        "invalid_count": len(invalides), "over_quota": hors_forfait,
+                        "quota_message": (f"Limite du forfait {forfait['label']} atteinte ({_nombre(forfait['limits']['leads'])} prospects) : "
+                                          f"{hors_forfait} ligne(s) n'ont pas été importées.") if hors_forfait else None}), 200
     except Exception:
         return erreur_interne()
 
@@ -1843,7 +2028,7 @@ def capture_info(token):
             return jsonify({"message": "Not found"}), 404
         _assurer_schema()
         with _base() as (conn, cur):
-            cur.execute("SELECT company_name FROM users WHERE capture_token = %s", (token,))
+            cur.execute("SELECT company_name FROM users WHERE capture_token = %s AND is_active", (token,))
             ligne = cur.fetchone()
         if not ligne:
             return jsonify({"message": "Not found"}), 404
@@ -1890,10 +2075,14 @@ def capture_lead(token):
 
         _assurer_schema()
         with _base() as (conn, cur):
-            cur.execute("SELECT id FROM users WHERE capture_token = %s", (token,))
+            cur.execute("SELECT id FROM users WHERE capture_token = %s AND is_active", (token,))
             agence = cur.fetchone()
             if not agence:
                 return jsonify({"message": "Not found"}), 404
+            reste, _ = _reste(cur, agence['id'], 'leads')
+            if reste == 0:
+                return jsonify({"message": "Ce formulaire n'est pas disponible pour le moment. "
+                                           "Merci de contacter directement l'agence."}), 503
             maintenant = _maintenant()
             cur.execute("""
                 INSERT INTO leads (user_id, name, email, phone, budget, location, property_type,
@@ -2009,6 +2198,319 @@ def _alertes_matching(user_id, lead_ids=None, property_ids=None, origine=None):
                 conn.commit()
     except Exception:
         app.logger.exception("Alertes de correspondance impossibles")
+
+
+# ===== ACCÈS SUR INVITATION, FORFAITS ET ADMINISTRATION =====
+
+INVITATION_JOURS = 14
+_METRIQUES = {
+    # métrique : (limite du forfait, ce qu'on compte)
+    'leads': ('max_leads', 'prospects'),
+    'properties': ('max_properties', 'biens'),
+    'mails': ('max_mails_month', 'e-mails par mois'),
+    'extractions': ('max_extractions_month', 'extractions par mois'),
+}
+_LIMITES_PLAN = ('max_leads', 'max_properties', 'max_mails_month', 'max_extractions_month')
+
+
+def _nombre(n):
+    return f"{n:,}".replace(",", " ")
+
+
+def _debut_mois():
+    m = _maintenant()
+    return datetime(m.year, m.month, 1)
+
+
+def _periode():
+    return _maintenant().strftime('%Y-%m')
+
+
+def _forfait(cur, user_id):
+    """Le forfait du compte et ses limites (None = illimité). Un forfait
+    inconnu retombe sur le plus petit : mieux vaut trop limiter que pas assez."""
+    cur.execute("""SELECT u.plan, p.label, p.max_leads, p.max_properties,
+                          p.max_mails_month, p.max_extractions_month
+                   FROM users u LEFT JOIN plans p ON p.code = u.plan WHERE u.id = %s""", (user_id,))
+    r = cur.fetchone()
+    if not r or r['label'] is None:
+        code, label, a, b, c, d = PLANS_PAR_DEFAUT[0][:6]
+        r = {'plan': code, 'label': label, 'max_leads': a, 'max_properties': b,
+             'max_mails_month': c, 'max_extractions_month': d}
+    return {"code": r['plan'], "label": r['label'],
+            "limits": {m: r[col] for m, (col, _) in _METRIQUES.items()}}
+
+
+def _compter(cur, user_id, metrique):
+    if metrique == 'leads':
+        cur.execute("SELECT count(*) AS n FROM leads WHERE user_id = %s", (user_id,))
+    elif metrique == 'properties':
+        cur.execute("SELECT count(*) AS n FROM properties WHERE user_id = %s", (user_id,))
+    elif metrique == 'mails':
+        cur.execute("SELECT count(*) AS n FROM lead_mails WHERE user_id = %s AND sent_at >= %s",
+                    (user_id, _debut_mois()))
+    else:
+        cur.execute("""SELECT n FROM usage_counters
+                       WHERE user_id = %s AND period = %s AND metric = 'extractions'""", (user_id, _periode()))
+        ligne = cur.fetchone()
+        return ligne['n'] if ligne else 0
+    return cur.fetchone()['n']
+
+
+def _reste(cur, user_id, metrique, verrouiller=True):
+    """(reste, forfait) : combien d'éléments le forfait autorise encore (None
+    si illimité). Avec verrouiller, les ajouts simultanés d'une même agence
+    passent les uns après les autres jusqu'à la fin de la transaction, pour
+    qu'un lot de requêtes parallèles ne dépasse pas la limite. Le curseur doit
+    renvoyer des dictionnaires."""
+    if verrouiller:
+        cur.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (user_id,))
+    f = _forfait(cur, user_id)
+    limite = f['limits'][metrique]
+    if limite is None:
+        return None, f
+    return max(0, limite - _compter(cur, user_id, metrique)), f
+
+
+def _refus_quota(metrique, forfait):
+    limite = forfait['limits'][metrique]
+    nom = _METRIQUES[metrique][1]
+    return jsonify({
+        "message": (f"Votre forfait {forfait['label']} est limité à {_nombre(limite)} {nom}. "
+                    "Contactez Zelyro pour passer au forfait supérieur."),
+        "code": "quota", "metric": metrique, "limit": limite,
+    }), 403
+
+
+def _compter_extraction(user_id):
+    try:
+        with _base() as (conn, cur):
+            cur.execute("""INSERT INTO usage_counters (user_id, period, metric, n)
+                           VALUES (%s, %s, 'extractions', 1)
+                           ON CONFLICT (user_id, period, metric)
+                           DO UPDATE SET n = usage_counters.n + 1""", (user_id, _periode()))
+            conn.commit()
+    except Exception:
+        app.logger.exception("Compteur d'extractions non mis à jour")
+
+
+@app.route('/api/v1/plan', methods=['GET'])
+@token_required
+def get_plan():
+    """Le forfait du compte et ce qui en est déjà consommé."""
+    try:
+        with _base() as (conn, cur):
+            f = _forfait(cur, request.user_id)
+            usage = {m: _compter(cur, request.user_id, m) for m in _METRIQUES}
+        return jsonify({"plan": {"code": f['code'], "label": f['label']},
+                        "limits": f['limits'], "usage": usage}), 200
+    except Exception:
+        return erreur_interne()
+
+
+def _journal(cur, action, cible=None, detail=None):
+    cur.execute("""INSERT INTO admin_log (admin_email, action, target, detail, created_at)
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (request.user_email, action, cible, detail, _maintenant()))
+
+
+@app.route('/admin/overview', methods=['GET'])
+@limiter.limit("240 per hour", key_func=_cle_utilisateur)
+@admin_required
+def admin_overview():
+    """Tout ce qu'il faut à la page d'administration : forfaits, comptes et
+    leur consommation, invitations en attente, dernières actions."""
+    try:
+        with _base() as (conn, cur):
+            cur.execute("""SELECT code, label, max_leads, max_properties, max_mails_month,
+                                  max_extractions_month FROM plans ORDER BY sort_order, code""")
+            plans = cur.fetchall()
+            cur.execute("""
+                SELECT u.id, u.email, u.first_name, u.company_name, u.plan, u.is_active, u.created_at,
+                       (SELECT count(*) FROM leads l WHERE l.user_id = u.id) AS leads,
+                       (SELECT count(*) FROM properties p WHERE p.user_id = u.id) AS properties,
+                       (SELECT count(*) FROM lead_mails m WHERE m.user_id = u.id AND m.sent_at >= %s) AS mails,
+                       COALESCE((SELECT c.n FROM usage_counters c WHERE c.user_id = u.id
+                                 AND c.period = %s AND c.metric = 'extractions'), 0) AS extractions
+                FROM users u ORDER BY u.created_at DESC, u.id DESC
+            """, (_debut_mois(), _periode()))
+            comptes = cur.fetchall()
+            maintenant = _maintenant()
+            cur.execute("""SELECT id, email, label, plan, key_hint, invited_by, created_at, expires_at,
+                                  used_at, used_email FROM invitations
+                           WHERE revoked_at IS NULL
+                           ORDER BY created_at DESC, id DESC LIMIT 100""")
+            invitations = cur.fetchall()
+            cur.execute("""SELECT admin_email, action, target, detail, created_at FROM admin_log
+                           ORDER BY id DESC LIMIT 40""")
+            journal = cur.fetchall()
+        for c in comptes:
+            c['created_at'] = _iso(c['created_at'])
+            c['is_admin'] = _est_admin(c['email'])
+        for i in invitations:
+            i['expired'] = i['used_at'] is None and i['expires_at'] <= maintenant
+            i['used'] = i['used_at'] is not None
+            i['created_at'], i['expires_at'], i['used_at'] = _iso(i['created_at']), _iso(i['expires_at']), _iso(i['used_at'])
+        for j in journal:
+            j['created_at'] = _iso(j['created_at'])
+        return jsonify({"plans": plans, "users": comptes, "invitations": invitations, "log": journal,
+                        "mail_possible": bool(_mail_configure() and _site_url()),
+                        "invitation_days": INVITATION_JOURS}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/admin/invitations', methods=['POST'])
+@limiter.limit("60 per day", key_func=_cle_utilisateur)
+@admin_required
+def admin_inviter():
+    """Crée une clé d'activation (à usage unique) pour un forfait donné. La clé
+    n'est montrée qu'une fois : seule son empreinte est conservée. L'adresse
+    e-mail est facultative : si elle est renseignée, la clé ne marche qu'avec
+    elle et lui est envoyée par e-mail ; on annule alors sa clé précédente."""
+    try:
+        data = request.get_json(silent=True) or {}
+        email = str(data.get('email') or '').strip().lower()
+        label = str(data.get('label') or '').strip()[:120]
+        plan = str(data.get('plan') or '')
+        if email and (len(email) > 255 or not EMAIL_RE.match(email)):
+            return jsonify({"message": "Adresse e-mail invalide"}), 400
+        with _base() as (conn, cur):
+            cur.execute("SELECT label FROM plans WHERE code = %s", (plan,))
+            ligne = cur.fetchone()
+            if not ligne:
+                return jsonify({"message": "Forfait inconnu"}), 400
+            forfait = ligne['label']
+            maintenant = _maintenant()
+            if email:
+                cur.execute("SELECT 1 FROM users WHERE lower(email) = %s", (email,))
+                if cur.fetchone():
+                    return jsonify({"message": "Un compte existe déjà pour cette adresse"}), 409
+                cur.execute("""UPDATE invitations SET revoked_at = %s
+                               WHERE lower(email) = %s AND used_at IS NULL AND revoked_at IS NULL""",
+                            (maintenant, email))
+            cle = _nouvelle_cle()
+            expire = maintenant + timedelta(days=INVITATION_JOURS)
+            cur.execute("""INSERT INTO invitations (email, label, plan, token_hash, key_hint, invited_by,
+                                                    created_at, expires_at)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                        (email or None, label or None, plan, _empreinte_cle(cle), cle[-4:],
+                         request.user_email, maintenant, expire))
+            inv_id = cur.fetchone()['id']
+            _journal(cur, 'clé créée', email or label or None, plan)
+            conn.commit()
+
+        site = _site_url()
+        # La clé est placée après le # : elle n'est ni envoyée au serveur du site ni journalisée.
+        lien = f"{site}/login.html#cle={cle}" if site else None
+        envoye = False
+        if email and _mail_configure():
+            paragraphes = ["Bonjour,",
+                           "Vous avez été invité(e) à utiliser Zelyro, l'outil qui rapproche vos prospects et vos biens.",
+                           f"Votre forfait : {forfait}.",
+                           f"Votre clé d'activation : {cle}",
+                           f"Elle est personnelle, valable {INVITATION_JOURS} jours et ne sert qu'une fois : "
+                           "saisissez-la en bas du formulaire de création de compte, avec cette adresse e-mail."]
+            texte, html = _gabarit_email("Votre clé d'activation Zelyro", paragraphes,
+                                         ("Créer mon compte", lien) if lien else None)
+            envoye = _envoyer_email(email, "Votre clé d'activation Zelyro", texte, html)
+        return jsonify({"id": inv_id, "key": cle, "email": email or None, "label": label or None, "plan": plan,
+                        "expires_at": _iso(expire), "link": lien, "mail_sent": envoye}), 201
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/admin/invitations/<int:inv_id>', methods=['DELETE'])
+@limiter.limit("120 per hour", key_func=_cle_utilisateur)
+@admin_required
+def admin_annuler_invitation(inv_id):
+    try:
+        with _base() as (conn, cur):
+            cur.execute("""UPDATE invitations SET revoked_at = %s
+                           WHERE id = %s AND used_at IS NULL AND revoked_at IS NULL RETURNING email, label""",
+                        (_maintenant(), inv_id))
+            ligne = cur.fetchone()
+            if not ligne:
+                return jsonify({"message": "Clé introuvable"}), 404
+            _journal(cur, 'clé annulée', ligne['email'] or ligne['label'])
+            conn.commit()
+        return jsonify({"message": "Clé annulée"}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/admin/users/<int:user_id>', methods=['PUT'])
+@limiter.limit("120 per hour", key_func=_cle_utilisateur)
+@admin_required
+def admin_modifier_compte(user_id):
+    """Change le forfait d'un compte, le suspend ou le réactive. Une
+    suspension coupe aussi les sessions ouvertes (et le formulaire de contact)."""
+    try:
+        data = request.get_json(silent=True) or {}
+        with _base() as (conn, cur):
+            cur.execute("SELECT id, email, plan, is_active FROM users WHERE id = %s FOR UPDATE", (user_id,))
+            compte = cur.fetchone()
+            if not compte:
+                return jsonify({"message": "Compte introuvable"}), 404
+            plan, actif = compte['plan'], compte['is_active']
+            if 'plan' in data:
+                cur.execute("SELECT 1 FROM plans WHERE code = %s", (data['plan'],))
+                if not isinstance(data['plan'], str) or not cur.fetchone():
+                    return jsonify({"message": "Forfait inconnu"}), 400
+                plan = data['plan']
+            if 'is_active' in data:
+                if not isinstance(data['is_active'], bool):
+                    return jsonify({"message": "« is_active » doit être true ou false"}), 400
+                if not data['is_active'] and _est_admin(compte['email']):
+                    return jsonify({"message": "Un compte administrateur ne peut pas être suspendu"}), 400
+                actif = data['is_active']
+            cur.execute("""UPDATE users SET plan = %s, is_active = %s,
+                               token_version = token_version + %s WHERE id = %s""",
+                        (plan, actif, 1 if (compte['is_active'] and not actif) else 0, user_id))
+            if plan != compte['plan']:
+                _journal(cur, 'forfait', compte['email'], f"{compte['plan']} → {plan}")
+            if actif != compte['is_active']:
+                _journal(cur, 'compte réactivé' if actif else 'compte suspendu', compte['email'])
+            conn.commit()
+        return jsonify({"id": user_id, "plan": plan, "is_active": actif}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/admin/plans/<code>', methods=['PUT'])
+@limiter.limit("120 per hour", key_func=_cle_utilisateur)
+@admin_required
+def admin_modifier_forfait(code):
+    """Règle les limites d'un forfait (null = illimité). Effet immédiat."""
+    try:
+        data = request.get_json(silent=True) or {}
+        sets, valeurs = [], []
+        for col in _LIMITES_PLAN:
+            if col in data:
+                v = data[col]
+                if v is not None and (isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 10_000_000):
+                    return jsonify({"message": "Chaque limite est un nombre entier positif, ou vide pour illimité"}), 400
+                sets.append(f"{col} = %s")
+                valeurs.append(v)
+        if 'label' in data:
+            libelle = _texte_court(data['label'], 50)
+            if not libelle:
+                return jsonify({"message": "Le nom du forfait ne peut pas être vide"}), 400
+            sets.append("label = %s")
+            valeurs.append(libelle)
+        if not sets:
+            return jsonify({"message": "Rien à modifier"}), 400
+        if code == 'illimite':
+            return jsonify({"message": "Le forfait Illimité n'est pas modifiable"}), 400
+        with _base() as (conn, cur):
+            cur.execute(f"UPDATE plans SET {', '.join(sets)} WHERE code = %s RETURNING code", valeurs + [code])
+            if not cur.fetchone():
+                return jsonify({"message": "Forfait introuvable"}), 404
+            _journal(cur, 'forfait modifié', code, ", ".join(f"{k}={data[k]}" for k in list(_LIMITES_PLAN) + ['label'] if k in data))
+            conn.commit()
+        return jsonify({"message": "Forfait mis à jour"}), 200
+    except Exception:
+        return erreur_interne()
 
 
 # ===== PROPOSITIONS DE BIENS PAR E-MAIL =====
@@ -2175,6 +2677,9 @@ def send_lead_mail(lead_id):
                         (lead_id, _maintenant() - timedelta(hours=MAIL_DELAI_HEURES)))
             if cur.fetchone():
                 return jsonify({"message": f"Un e-mail a déjà été envoyé à ce prospect il y a moins de {MAIL_DELAI_HEURES} h"}), 409
+            reste, forfait = _reste(cur, request.user_id, 'mails', verrouiller=False)
+            if reste == 0:
+                return _refus_quota('mails', forfait)
             cur.execute("SELECT email, first_name, company_name FROM users WHERE id = %s", (request.user_id,))
             agent = cur.fetchone()
 
@@ -2427,6 +2932,14 @@ def extract_message():
         return jsonify({"message": "Message trop court pour être analysé"}), 400
     message = message[:8000]
 
+    try:
+        with _base() as (conn, cur):
+            reste, forfait = _reste(cur, request.user_id, 'extractions', verrouiller=False)
+        if reste == 0:
+            return _refus_quota('extractions', forfait)
+    except Exception:
+        return erreur_interne()
+
     consigne = CONSIGNE.format(
         date=datetime.utcnow().strftime('%Y-%m-%d'),
         types=', '.join(TYPES_BIEN),
@@ -2483,6 +2996,7 @@ def extract_message():
         return erreur_interne()
 
     champs = _valider(brut)
+    _compter_extraction(request.user_id)
 
     # Les secteurs qui ne tiennent pas dans la fiche rejoignent les notes :
     # un agent doit pouvoir voir que le prospect cherche aussi ailleurs.
