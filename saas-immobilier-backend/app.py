@@ -877,7 +877,9 @@ def _valider(brut):
 @token_required
 def extract_message():
     """Extraire des critères d'un message écrit en langage naturel."""
-    cle = os.getenv('ANTHROPIC_API_KEY')
+        # Une clé collée dans une interface web emporte souvent un espace ou
+    # un retour à la ligne invisible, que l'API rejette avec un 401.
+    cle = (os.getenv('ANTHROPIC_API_KEY') or '').strip()
     if not cle:
         return jsonify({"message": "Extraction non configurée sur le serveur"}), 503
 
