@@ -23,6 +23,9 @@
             cold: ['badge-cold', 'Premier contact']
         };
 
+        // Tri alphabétique (sans tenir compte des accents ni des majuscules).
+        const parNom = (a, b) => (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' });
+
         const VIDE = {
             name: '', email: '', phone: '', budget: '',
             location: '', property_type: '',
@@ -262,7 +265,7 @@
                             </div>
                         ) : (
                             <div className="leads-grid">
-                                {leads.map((lead) => {
+                                {[...leads].sort(parNom).map((lead) => {
                                     const q = lead.lead_quality || 'cold';
                                     const [cls, libelle] = BADGES[q] || BADGES.cold;
                                     return (

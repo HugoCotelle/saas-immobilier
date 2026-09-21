@@ -25,10 +25,25 @@
         // du serveur change.
         const API_URL = 'https://saas-immobilier-921a.onrender.com';
 
+        // Tri alphabétique (sans tenir compte des accents ni des majuscules).
+        const parNom = (a, b) => (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' });
+
+        // Recherche : chaque mot saisi doit se retrouver dans le nom, l'e-mail,
+        // le téléphone, le secteur ou le type de bien (accents et majuscules ignorés).
+        const normaliser = (s) => String(s == null ? '' : s)
+            .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+        const correspond = (lead, recherche) => {
+            const termes = normaliser(recherche).split(/\s+/).filter(Boolean);
+            if (termes.length === 0) return true;
+            const texte = normaliser([lead.name, lead.email, lead.phone, lead.location, lead.property_type].join(' '));
+            return termes.every((t) => texte.includes(t));
+        };
+
         function MatchingApp() {
             const [leads, setLeads] = useState([]);
             const [selectedLeadId, setSelectedLeadId] = useState(null);
             const [qualityFilter, setQualityFilter] = useState('all');
+            const [recherche, setRecherche] = useState('');
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
             const [user, setUser] = useState(null);
@@ -61,7 +76,7 @@
                     }
                     const data = await response.json();
                     setLeads(data);
-                    if (data.length > 0) setSelectedLeadId(data[0].id);
+                    if (data.length > 0) setSelectedLeadId([...data].sort(parNom)[0].id);
                     setError(null);
                 } catch (err) {
                     setError(err.message);
@@ -99,11 +114,17 @@
                 unknown: 'Non renseigné'
             }[urgency] || urgency);
 
-            const filteredLeads = leads.filter(lead =>
-                qualityFilter === 'all' ? true : lead.lead_quality === qualityFilter
-            );
-            const selectedLead = leads.find(l => l.id === selectedLeadId);
-            const count = (q) => leads.filter(l => l.lead_quality === q).length;
+            const parRecherche = leads.filter(lead => correspond(lead, recherche));
+            const filteredLeads = parRecherche
+                .filter(lead => qualityFilter === 'all' ? true : lead.lead_quality === qualityFilter)
+                .sort(parNom);
+            // Si le prospect sélectionné n'est plus dans la liste (filtre ou recherche),
+            // on affiche le premier de la liste plutôt qu'une fiche hors liste.
+            const idAffiche = filteredLeads.some(l => l.id === selectedLeadId)
+                ? selectedLeadId
+                : (filteredLeads[0] ? filteredLeads[0].id : null);
+            const selectedLead = leads.find(l => l.id === idAffiche);
+            const count = (q) => parRecherche.filter(l => l.lead_quality === q).length;
 
             return (
                 <>
@@ -143,11 +164,15 @@
                             </div>
                         ) : (
                             <>
+                                <input className="recherche" type="text" value={recherche}
+                                    onChange={(e) => setRecherche(e.target.value)}
+                                    placeholder="Rechercher un prospect (nom, secteur, e-mail...)" />
+
                                 <div className="filters">
                                     <button
                                         className={`filter-button ${qualityFilter === 'all' ? 'active' : ''}`}
                                         onClick={() => setQualityFilter('all')}>
-                                        Tous ({leads.length})
+                                        Tous ({parRecherche.length})
                                     </button>
                                     <button
                                         className={`filter-button ${qualityFilter === 'hot' ? 'active' : ''}`}
@@ -170,12 +195,16 @@
                                     <div className="panel leads-panel">
                                         <div className="panel-title">Prospects</div>
                                         {filteredLeads.length === 0 ? (
-                                            <div className="empty-state">Aucun prospect dans cette catégorie</div>
+                                            <div className="empty-state">
+                                                {recherche.trim()
+                                                    ? `Aucun prospect ne correspond à « ${recherche.trim()} »`
+                                                    : 'Aucun prospect dans cette catégorie'}
+                                            </div>
                                         ) : (
                                             filteredLeads.map(lead => (
                                                 <div
                                                     key={lead.id}
-                                                    className={`lead-item ${lead.lead_quality || ''} ${selectedLeadId === lead.id ? 'selected' : ''}`}
+                                                    className={`lead-item ${lead.lead_quality || ''} ${idAffiche === lead.id ? 'selected' : ''}`}
                                                     onClick={() => setSelectedLeadId(lead.id)}>
                                                     <div className="lead-name">{lead.name}</div>
                                                     <div className="lead-field">
