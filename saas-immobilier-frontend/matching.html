@@ -7,74 +7,15 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400..600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="zelyro.css">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto'; background: #f5f7fa; }
-        header { background: white; border-bottom: 1px solid #e0e0e0; padding: 20px 0; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); position: sticky; top: 0; z-index: 1000; }
-        .header-content { max-width: 1200px; margin: 0 auto; padding: 0 20px; display: flex; justify-content: space-between; align-items: center; }
-        .logo { font-size: 20px; font-weight: 700; color: #333; }
-        nav { display: flex; gap: 30px; align-items: center; }
-        nav a { color: #666; text-decoration: none; font-weight: 500; transition: color 0.3s ease; cursor: pointer; }
-        nav a:hover { color: #667eea; }
-        nav a.active { color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 5px; }
-        .user-info { display: flex; align-items: center; gap: 15px; }
-        .user-email { font-size: 14px; color: #666; }
-        .logout-btn { background: #ff6b6b; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-weight: 500; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 40px 20px; }
-        .page-title { color: #333; font-size: 32px; margin-bottom: 10px; }
-        .page-subtitle { color: #999; font-size: 16px; margin-bottom: 40px; }
-
-        .filters { background: white; border-radius: 10px; padding: 20px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); display: flex; gap: 15px; flex-wrap: wrap; }
-        .filter-button { padding: 10px 20px; border: 2px solid #e0e0e0; border-radius: 25px; cursor: pointer; background: white; font-weight: 600; font-size: 14px; color: #666; transition: all 0.3s ease; }
-        .filter-button:hover { border-color: #667eea; color: #667eea; }
-        .filter-button.active { background: #667eea; color: white; border-color: #667eea; }
-
-        .content-wrapper { display: grid; grid-template-columns: 1fr 1.2fr; gap: 30px; align-items: start; }
-        @media (max-width: 900px) { .content-wrapper { grid-template-columns: 1fr; } }
-
-        .panel { background: white; border-radius: 10px; padding: 25px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); }
-        .panel-title { font-size: 18px; font-weight: 700; color: #333; margin-bottom: 20px; }
-        .leads-panel { max-height: 640px; overflow-y: auto; }
-
-        .lead-item { background: white; border: 1px solid #e0e0e0; border-left: 4px solid #667eea; border-radius: 10px; padding: 20px; margin-bottom: 15px; cursor: pointer; transition: all 0.3s ease; }
-        .lead-item:hover { box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12); transform: translateY(-2px); }
-        .lead-item.selected { background: #f5f7fa; border-color: #667eea; }
-        .lead-item.hot { border-left-color: #c33; }
-        .lead-item.warm { border-left-color: #d97706; }
-        .lead-item.cold { border-left-color: #999; }
-        .lead-name { font-size: 18px; font-weight: 700; color: #333; margin-bottom: 12px; }
-        .lead-field { display: flex; margin-bottom: 10px; font-size: 14px; }
-        .lead-label { color: #999; font-weight: 500; width: 90px; }
-        .lead-value { color: #333; flex: 1; word-break: break-all; }
-        .lead-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; margin-top: 10px; }
-        .badge-hot { background: #ffe8e8; color: #c33; }
-        .badge-warm { background: #fff4e6; color: #d97706; }
-        .badge-cold { background: #f0f0f0; color: #666; }
-
-        .detail-block { background: #f9fafc; border-radius: 8px; padding: 15px; margin-bottom: 12px; }
-        .detail-label { color: #999; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
-        .detail-value { color: #333; font-weight: 600; font-size: 15px; }
-        .info-box { background: #e8f0fe; border-left: 3px solid #667eea; padding: 15px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
-        .info-item { color: #333; margin-bottom: 6px; }
-        .info-item:last-child { margin-bottom: 0; }
-        .edit-button { display: inline-block; background: #667eea; color: white; padding: 10px 18px; border-radius: 5px; text-decoration: none; font-weight: 600; font-size: 14px; margin-top: 10px; border: none; cursor: pointer; transition: background 0.3s ease; }
-        .edit-button:hover { background: #5568d3; }
-
-        .section-divider { border-top: 1px solid #e0e0e0; margin: 25px 0 20px; }
-        .match-card { background: white; border: 1px solid #e0e0e0; border-left: 4px solid #667eea; border-radius: 10px; padding: 20px; margin-bottom: 15px; transition: all 0.3s ease; }
-        .match-card:hover { box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12); transform: translateY(-2px); }
-        .match-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 15px; margin-bottom: 12px; }
-        .match-title { font-size: 16px; font-weight: 700; color: #333; margin-bottom: 4px; }
-        .match-address { font-size: 13px; color: #999; }
-        .match-score { background: #667eea; color: white; padding: 6px 14px; border-radius: 20px; font-weight: 700; font-size: 13px; white-space: nowrap; }
-        .match-field { font-size: 14px; color: #666; margin-bottom: 6px; }
-        .match-price { font-size: 16px; font-weight: 700; color: #333; margin-top: 10px; }
-
-        .loading { text-align: center; padding: 40px; color: #999; }
-        .loader { display: inline-block; width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top-color: #667eea; border-radius: 50%; animation: spin 0.8s linear infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .error { background: #fee; color: #c33; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 30px; }
-        .empty-state { text-align: center; padding: 40px 20px; color: #999; font-size: 15px; }
+        .content-wrapper { grid-template-columns: 1fr 1.2fr; }
+        .panel { margin-bottom: 0; }
+        .panel-title { margin-bottom: 18px; }
     </style>
 </head>
 <body>
@@ -140,25 +81,25 @@
 
             const qualityBadge = (quality) => {
                 const classes = { hot: 'badge-hot', warm: 'badge-warm', cold: 'badge-cold' };
-                const labels = { hot: '🔥 Chaud', warm: '🌤️ Tiède', cold: '❄️ Froid' };
+                const labels = { hot: 'Chaud', warm: 'Tiède', cold: 'Froid' };
                 if (!labels[quality]) return null;
                 return <span className={`lead-badge ${classes[quality]}`}>{labels[quality]}</span>;
             };
 
             const financingLabel = (status) => ({
-                approved: '✅ Approuvé',
-                in_progress: '🔄 En cours',
-                pending: '⏳ En attente',
-                rejected: '❌ Rejeté',
-                unknown: '❓ Non renseigné'
+                approved: 'Approuvé',
+                in_progress: 'En cours',
+                pending: 'En attente',
+                rejected: 'Rejeté',
+                unknown: 'Non renseigné'
             }[status] || status);
 
             const urgencyLabel = (urgency) => ({
-                immediate: '🔥 Immédiat',
-                '1-3_months': '📅 1 à 3 mois',
-                '3-6_months': '📅 3 à 6 mois',
-                '6plus_months': '📅 Plus de 6 mois',
-                unknown: '❓ Non renseigné'
+                immediate: 'Immédiat',
+                '1-3_months': '1 à 3 mois',
+                '3-6_months': '3 à 6 mois',
+                '6plus_months': 'Plus de 6 mois',
+                unknown: 'Non renseigné'
             }[urgency] || urgency);
 
             const filteredLeads = leads.filter(lead =>
@@ -180,18 +121,18 @@
                             </nav>
                             <div className="user-info">
                                 {user && <span className="user-email">{user.email}</span>}
-                                <button className="logout-btn" onClick={handleLogout}>Logout</button>
+                                <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
                             </div>
                         </div>
                     </header>
 
                     <div className="container">
-                        <h1 className="page-title">🎯 Matching</h1>
+                        <h1 className="page-title">Matching</h1>
                         <p className="page-subtitle">
                             Les meilleures correspondances pour chacun de vos {leads.length} prospects
                         </p>
 
-                        {error && <div className="error">❌ Erreur: {error}</div>}
+                        {error && <div className="error">Erreur: {error}</div>}
 
                         {loading ? (
                             <div className="loading">
@@ -213,23 +154,23 @@
                                     <button
                                         className={`filter-button ${qualityFilter === 'hot' ? 'active' : ''}`}
                                         onClick={() => setQualityFilter('hot')}>
-                                        🔥 Chauds ({count('hot')})
+                                        Chauds ({count('hot')})
                                     </button>
                                     <button
                                         className={`filter-button ${qualityFilter === 'warm' ? 'active' : ''}`}
                                         onClick={() => setQualityFilter('warm')}>
-                                        🌤️ Tièdes ({count('warm')})
+                                        Tièdes ({count('warm')})
                                     </button>
                                     <button
                                         className={`filter-button ${qualityFilter === 'cold' ? 'active' : ''}`}
                                         onClick={() => setQualityFilter('cold')}>
-                                        ❄️ Froids ({count('cold')})
+                                        Froids ({count('cold')})
                                     </button>
                                 </div>
 
                                 <div className="content-wrapper">
                                     <div className="panel leads-panel">
-                                        <div className="panel-title">📋 Prospects</div>
+                                        <div className="panel-title">Prospects</div>
                                         {filteredLeads.length === 0 ? (
                                             <div className="empty-state">Aucun prospect dans cette catégorie</div>
                                         ) : (
@@ -287,22 +228,22 @@
                                                  (selectedLead.purchase_urgency && selectedLead.purchase_urgency !== 'unknown') ? (
                                                     <div className="info-box">
                                                         {selectedLead.financing_status && selectedLead.financing_status !== 'unknown' && (
-                                                            <div className="info-item">💳 {financingLabel(selectedLead.financing_status)}</div>
+                                                            <div className="info-item">Financement : {financingLabel(selectedLead.financing_status)}</div>
                                                         )}
                                                         {selectedLead.purchase_urgency && selectedLead.purchase_urgency !== 'unknown' && (
-                                                            <div className="info-item">⏱️ {urgencyLabel(selectedLead.purchase_urgency)}</div>
+                                                            <div className="info-item">Échéance : {urgencyLabel(selectedLead.purchase_urgency)}</div>
                                                         )}
                                                     </div>
                                                 ) : null}
 
                                                 <a href={`/leads-profile.html?id=${selectedLead.id}`} className="edit-button">
-                                                    ✏️ Éditer les détails
+                                                    Éditer les détails
                                                 </a>
 
                                                 <div className="section-divider"></div>
 
                                                 <div className="panel-title">
-                                                    🏠 Biens correspondants
+                                                    Biens correspondants
                                                     {selectedLead.matches && selectedLead.matches.length > 0 &&
                                                         ` (${selectedLead.matches.length})`}
                                                 </div>
@@ -313,12 +254,12 @@
                                                             <div className="match-header">
                                                                 <div>
                                                                     <div className="match-title">{match.title || match.name}</div>
-                                                                    <div className="match-address">📍 {match.address || 'Adresse non renseignée'}</div>
+                                                                    <div className="match-address">{match.address || 'Adresse non renseignée'}</div>
                                                                 </div>
                                                                 <div className="match-score">{match.score}%</div>
                                                             </div>
                                                             <div className="match-field">
-                                                                🏠 {match.type || 'N/A'}
+                                                                {match.type || 'N/A'}
                                                                 {match.rooms ? ` · ${match.rooms} pièces` : ''}
                                                                 {match.size ? ` · ${match.size} m²` : ''}
                                                             </div>
