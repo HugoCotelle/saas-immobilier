@@ -275,6 +275,16 @@ _DDL_SUIVI = (
         sent_at TIMESTAMP NOT NULL DEFAULT NOW(),
         PRIMARY KEY (lead_id, property_id)
     )""",
+    """CREATE TABLE IF NOT EXISTS lead_mails (
+        id SERIAL PRIMARY KEY,
+        lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        subject VARCHAR(255) NOT NULL,
+        body TEXT NOT NULL,
+        property_ids INTEGER[] NOT NULL DEFAULT '{}',
+        sent_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS lead_mails_lead_idx ON lead_mails (lead_id, sent_at)",
 )
 _schema_pret = False
 _schema_verrou = threading.Lock()
@@ -301,7 +311,8 @@ def _assurer_schema():
                                WHERE table_name = 'leads' AND column_name = 'consent_at'),
                        to_regclass('lead_notes') IS NOT NULL,
                        to_regclass('lead_reminders') IS NOT NULL,
-                       to_regclass('match_alerts') IS NOT NULL
+                       to_regclass('match_alerts') IS NOT NULL,
+                       to_regclass('lead_mails') IS NOT NULL
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
@@ -672,24 +683,31 @@ def _lancer_en_arriere_plan(fonction, *args):
     threading.Thread(target=fonction, args=args, daemon=True).start()
 
 
-def _envoyer_email(destinataire, sujet, texte, html):
-    """Envoie un e-mail via Brevo. Renvoie True si l'envoi est accepté."""
+def _envoyer_email(destinataire, sujet, texte, html, nom_expediteur=None, repondre_a=None):
+    """Envoie un e-mail via Brevo. Renvoie True si l'envoi est accepté.
+
+    nom_expediteur remplace le nom affiché (l'adresse d'expédition reste
+    celle du domaine authentifié) ; repondre_a est un couple (adresse, nom)
+    vers lequel partent les réponses."""
     cle = (os.getenv("BREVO_API_KEY") or "").strip()
     expediteur = (os.getenv("MAIL_FROM") or "").strip()
     if not cle or not expediteur:
         app.logger.warning("E-mail non envoyé : BREVO_API_KEY ou MAIL_FROM non défini")
         return False
     try:
+        charge = {
+            "sender": {"name": nom_expediteur or os.getenv("MAIL_FROM_NAME", "Zelyro"), "email": expediteur},
+            "to": [{"email": destinataire}],
+            "subject": sujet,
+            "textContent": texte,
+            "htmlContent": html,
+        }
+        if repondre_a and repondre_a[0]:
+            charge["replyTo"] = {"email": repondre_a[0], "name": repondre_a[1] or repondre_a[0]}
         r = requests.post(
             BREVO_URL,
             headers={"api-key": cle, "content-type": "application/json", "accept": "application/json"},
-            json={
-                "sender": {"name": os.getenv("MAIL_FROM_NAME", "Zelyro"), "email": expediteur},
-                "to": [{"email": destinataire}],
-                "subject": sujet,
-                "textContent": texte,
-                "htmlContent": html,
-            },
+            json=charge,
             timeout=15,
         )
         if r.status_code not in (200, 201, 202):
@@ -1991,6 +2009,206 @@ def _alertes_matching(user_id, lead_ids=None, property_ids=None, origine=None):
                 conn.commit()
     except Exception:
         app.logger.exception("Alertes de correspondance impossibles")
+
+
+# ===== PROPOSITIONS DE BIENS PAR E-MAIL =====
+
+# Score minimal (sur 100) pour qu'un bien soit proposé à un prospect, et
+# délai pendant lequel on n'écrit pas deux fois au même prospect.
+PROPOSITION_SCORE_MIN = int(os.getenv("PROPOSAL_MIN_SCORE", "50"))
+MAIL_DELAI_HEURES = 24
+_MAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _mail_configure():
+    """Vrai si le serveur peut envoyer un e-mail (clé Brevo et expéditeur)."""
+    return all((os.getenv(k) or "").strip() for k in ("BREVO_API_KEY", "MAIL_FROM"))
+
+
+def _prospect_complet(lead):
+    """Un prospect est prêt pour une proposition quand on peut le joindre et
+    qu'on sait ce qu'il cherche : e-mail valide, budget, et un secteur ou un
+    type de bien."""
+    email = (lead.get('email') or '').strip()
+    return bool(
+        _MAIL_RE.match(email) and len(email) <= 255 and lead.get('budget')
+        and ((lead.get('location') or '').strip() or (lead.get('property_type') or '').strip())
+    )
+
+
+def _nom_affiche(texte, defaut):
+    """Nom d'expéditeur sans caractère qui casserait un en-tête d'e-mail."""
+    propre = re.sub(r'[\r\n<>"]+', ' ', str(texte or '')).strip()[:60]
+    return propre or defaut
+
+
+def _corps_html(texte, pied):
+    """Le message de l'agent en HTML simple : un paragraphe par bloc, un
+    saut de ligne à chaque retour à la ligne, puis le pied de message."""
+    blocs = [b.strip() for b in re.split(r"\n\s*\n", texte.strip()) if b.strip()]
+    corps = "".join('<p style="margin:0 0 16px;line-height:1.6">'
+                    + _html.escape(b).replace("\n", "<br>") + "</p>" for b in blocs)
+    return ('<div style="font-family:Arial,Helvetica,sans-serif;color:#1F2A24;max-width:560px;margin:0 auto;padding:24px">'
+            + corps
+            + '<p style="margin:28px 0 0;padding-top:14px;border-top:1px solid #E3DCCC;color:#6A7168;'
+              f'font-size:12px;line-height:1.5">{_html.escape(pied)}</p></div>')
+
+
+@app.route('/api/v1/proposals', methods=['GET'])
+@token_required
+def get_proposals():
+    """Les prospects à qui l'agent peut envoyer une sélection de biens.
+
+    Un prospect est proposé quand son dossier est complet, qu'il n'est ni
+    signé ni perdu, qu'aucun e-mail ne lui a été envoyé ces dernières
+    24 heures et qu'au moins un bien qu'on ne lui a pas encore proposé lui
+    correspond. Les biens déjà envoyés ne reviennent pas : un bien qui
+    arrive plus tard refait apparaître le prospect.
+    """
+    try:
+        with _base() as (conn, cur):
+            cur.execute("SELECT first_name, company_name FROM users WHERE id = %s", (request.user_id,))
+            agent = cur.fetchone() or {}
+            cur.execute("""SELECT id, name, email, phone, budget, location, property_type,
+                                  financing_status, purchase_urgency, status
+                           FROM leads WHERE user_id = %s""", (request.user_id,))
+            prospects = [l for l in cur.fetchall()
+                         if (l['status'] or 'nouveau') not in STATUTS_CLOS and _prospect_complet(l)]
+            cur.execute("""SELECT id, title, address, price, rooms, size, property_type
+                           FROM properties WHERE user_id = %s""", (request.user_id,))
+            biens = cur.fetchall()
+            cur.execute("""SELECT m.lead_id, l.name, l.email, m.subject, m.property_ids, m.sent_at
+                           FROM lead_mails m JOIN leads l ON l.id = m.lead_id
+                           WHERE m.user_id = %s ORDER BY m.sent_at DESC, m.id DESC""", (request.user_id,))
+            mails = cur.fetchall()
+
+        limite = _maintenant() - timedelta(hours=MAIL_DELAI_HEURES)
+        deja, dernier = {}, {}
+        for m in mails:
+            deja.setdefault(m['lead_id'], set()).update(m['property_ids'] or [])
+            dernier.setdefault(m['lead_id'], m['sent_at'])
+
+        a_envoyer = []
+        for l in prospects:
+            if dernier.get(l['id']) and dernier[l['id']] > limite:
+                continue
+            candidats = []
+            for b in biens:
+                if b['id'] in deja.get(l['id'], ()):
+                    continue
+                score, raisons = _detail_score(l, b)
+                if score >= PROPOSITION_SCORE_MIN:
+                    candidats.append({"property_id": b['id'], "title": b['title'], "address": b['address'],
+                                      "type": b['property_type'], "price": b['price'], "rooms": b['rooms'],
+                                      "size": b['size'], "score": score, "reasons": raisons})
+            if not candidats:
+                continue
+            candidats.sort(key=lambda c: -c['score'])
+            a_envoyer.append({
+                "lead": {"id": l['id'], "name": l['name'], "email": l['email'], "phone": l['phone'],
+                         "budget": l['budget'], "location": l['location'], "property_type": l['property_type']},
+                "lead_quality": derive_lead_quality(l),
+                "biens": candidats[:5],
+                "deja_proposes": len(deja.get(l['id'], ())),
+            })
+        ordre = {'hot': 0, 'warm': 1, 'cold': 2}
+        a_envoyer.sort(key=lambda x: (ordre.get(x['lead_quality'], 3), -x['biens'][0]['score']))
+
+        envoyes = [{"lead_id": m['lead_id'], "name": m['name'], "email": m['email'], "subject": m['subject'],
+                    "biens": len(m['property_ids'] or []), "sent_at": _iso(m['sent_at'])} for m in mails[:20]]
+        return jsonify({
+            "envoi_possible": _mail_configure(),
+            "agent": {"first_name": agent.get('first_name') or '', "company_name": agent.get('company_name') or ''},
+            "a_envoyer": a_envoyer,
+            "envoyes": envoyes,
+        }), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/leads/<int:lead_id>/send-mail', methods=['POST'])
+@limiter.limit("30 per hour;150 per day", key_func=_cle_utilisateur)
+@token_required
+def send_lead_mail(lead_id):
+    """Envoie au prospect le message rédigé (et modifié) par l'agent.
+
+    Le destinataire est toujours l'adresse enregistrée sur la fiche du
+    prospect, jamais une adresse envoyée par le navigateur. Le message part
+    au nom de l'agence, les réponses arrivent directement à l'agent. Le
+    prospect est verrouillé pendant l'envoi : un double clic n'envoie qu'un
+    seul e-mail.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        sujet = str(data.get('subject') or '').strip()
+        corps = str(data.get('body') or '').replace('\r\n', '\n').strip()
+        ids = data.get('property_ids')
+        if not 3 <= len(sujet) <= 200 or '\n' in sujet or '\r' in sujet:
+            return jsonify({"message": "L'objet doit faire entre 3 et 200 caractères, sur une seule ligne"}), 400
+        if not 20 <= len(corps) <= 5000:
+            return jsonify({"message": "Le message doit faire entre 20 et 5000 caractères"}), 400
+        if (not isinstance(ids, list) or not 1 <= len(ids) <= 10
+                or not all(isinstance(i, int) and not isinstance(i, bool) for i in ids)):
+            return jsonify({"message": "Choisissez de 1 à 10 biens à proposer"}), 400
+        ids = sorted(set(ids))
+        if not _mail_configure():
+            return jsonify({"message": "L'envoi d'e-mails n'est pas encore configuré sur ce serveur"}), 503
+
+        with _base() as (conn, cur):
+            cur.execute("""SELECT id, name, email, status FROM leads
+                           WHERE id = %s AND user_id = %s FOR UPDATE""", (lead_id, request.user_id))
+            lead = cur.fetchone()
+            if not lead:
+                return jsonify({"message": "Lead not found"}), 404
+            statut = lead['status'] if lead['status'] in STATUTS else 'nouveau'
+            if statut in STATUTS_CLOS:
+                return jsonify({"message": "Ce prospect est clos (signé ou perdu)"}), 409
+            destinataire = (lead['email'] or '').strip()
+            if not _MAIL_RE.match(destinataire):
+                return jsonify({"message": "Ce prospect n'a pas d'adresse e-mail valide"}), 400
+            cur.execute("SELECT id, title FROM properties WHERE user_id = %s AND id = ANY(%s)",
+                        (request.user_id, ids))
+            biens = cur.fetchall()
+            if len(biens) != len(ids):
+                return jsonify({"message": "Un des biens choisis n'existe plus"}), 400
+            cur.execute("SELECT 1 FROM lead_mails WHERE lead_id = %s AND sent_at > %s LIMIT 1",
+                        (lead_id, _maintenant() - timedelta(hours=MAIL_DELAI_HEURES)))
+            if cur.fetchone():
+                return jsonify({"message": f"Un e-mail a déjà été envoyé à ce prospect il y a moins de {MAIL_DELAI_HEURES} h"}), 409
+            cur.execute("SELECT email, first_name, company_name FROM users WHERE id = %s", (request.user_id,))
+            agent = cur.fetchone()
+
+            agence = _nom_affiche(agent['company_name'] or agent['first_name'], "Votre agence")
+            pied = (f"Ce message vous est adressé par {agence} dans le cadre de votre recherche immobilière. "
+                    "Pour ne plus recevoir de propositions, répondez simplement « STOP » à ce message.")
+            texte = corps + "\n\n--\n" + pied
+            if not _envoyer_email(destinataire, sujet, texte, _corps_html(corps, pied),
+                                  nom_expediteur=agence,
+                                  repondre_a=(agent['email'], _nom_affiche(agent['first_name'] or agence, agence))):
+                return jsonify({"message": "L'envoi a échoué. Réessayez dans un instant."}), 502
+
+            maintenant = _maintenant()
+            cur.execute("""INSERT INTO lead_mails (lead_id, user_id, subject, body, property_ids, sent_at)
+                           VALUES (%s, %s, %s, %s, %s, %s)""",
+                        (lead_id, request.user_id, sujet, corps, ids, maintenant))
+            titres = ", ".join(b['title'] for b in biens)
+            cur.execute("""INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
+                           VALUES (%s, %s, 'note', %s, %s)""",
+                        (lead_id, request.user_id,
+                         f"E-mail envoyé à {destinataire} : « {sujet} ». Biens proposés : {titres}"[:2000],
+                         maintenant))
+            if statut == 'nouveau':
+                cur.execute("""UPDATE leads SET status = 'contacte', status_changed_at = NOW(),
+                                   first_contact_at = COALESCE(first_contact_at, NOW())
+                               WHERE id = %s AND user_id = %s""", (lead_id, request.user_id))
+                cur.execute("""INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
+                               VALUES (%s, %s, 'statut', %s, %s)""",
+                            (lead_id, request.user_id,
+                             f"{STATUTS_LIBELLES['nouveau']} → {STATUTS_LIBELLES['contacte']}", maintenant))
+            conn.commit()
+        return jsonify({"sent_at": _iso(maintenant), "status": 'contacte' if statut == 'nouveau' else statut}), 200
+    except Exception:
+        return erreur_interne()
 
 
 @app.route('/auth/preferences', methods=['PUT'])
