@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZELYRO - Fiche prospect</title>
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="stylesheet" href="zelyro.css">
+    <style>
+        .content-wrapper { grid-template-columns: 1.3fr 1fr; }
+        .form-row { grid-template-columns: 1fr 1fr; }
+        @media (max-width: 700px) { .form-row { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+
+        // Reproduit la logique du serveur pour expliquer le classement à
+        // l'agent. Si les seuils changent côté backend, il faut les changer
+        // ici aussi — c'est le prix de l'explication en direct.
+        function expliquerQualite(lead) {
+            const lignes = [];
+            let points = 0;
+
+            const fin = {
+                approved: [40, 'Financement approuvé'],
+                in_progress: [25, 'Financement en cours'],
+                pending: [12, 'Financement en attente']
+            }[lead.financing_status];
+            if (fin) { points += fin[0]; lignes.push(`+${fin[0]} ${fin[1]}`); }
+
+            const urg = {
+                immediate: [35, 'Achat immédiat'],
+                '1-3_months': [28, 'Achat sous 3 mois'],
+                '3-6_months': [15, 'Achat sous 6 mois'],
+                '6plus_months': [5, 'Achat au-delà de 6 mois']
+            }[lead.purchase_urgency];
+            if (urg) { points += urg[0]; lignes.push(`+${urg[0]} ${urg[1]}`); }
+
+            if (lead.budget) { points += 10; lignes.push('+10 Budget renseigné'); }
+            if (lead.location) { points += 8; lignes.push('+8 Secteur renseigné'); }
+            if (lead.property_type) { points += 7; lignes.push('+7 Type de bien renseigné'); }
+
+            const quality = points >= 80 ? 'hot' : points >= 45 ? 'warm' : 'cold';
+            return { quality, points, lignes };
+        }
+
+        const LIBELLES = {
+            hot: 'Prospect chaud',
+            warm: 'Prospect tiède',
+            cold: 'Prospect froid'
+        };
+
+        function LeadProfile() {
+            const [lead, setLead] = useState(null);
+            const [form, setForm] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [saving, setSaving] = useState(false);
+            const [error, setError] = useState(null);
+            const [saved, setSaved] = useState(false);
+            const [user, setUser] = useState(null);
+
+            const leadId = new URLSearchParams(window.location.search).get('id');
+
+            useEffect(() => {
+                const token = localStorage.getItem('token');
+                const userData = localStorage.getItem('user');
+                if (!token) {
+                    window.location.href = '/login.html';
+                    return;
+                }
+                if (userData) setUser(JSON.parse(userData));
+                if (!leadId) {
+                    setError("Aucun prospect indiqué dans l'adresse.");
+                    setLoading(false);
+                    return;
+                }
+                fetchLead(token);
+            }, []);
+
+            const fetchLead = async (token) => {
+                try {
+                    setLoading(true);
+                    const response = await fetch(`${API_URL}/api/v1/leads/${leadId}`, {
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+                    });
+                    if (!response.ok) {
+                        if (response.status === 401) {
+                            localStorage.removeItem('token');
+                            localStorage.removeItem('user');
+                            window.location.href = '/login.html';
+                            return;
+                        }
+                        if (response.status === 404) throw new Error("Ce prospect n'existe pas, ou n'appartient pas à votre agence.");
+                        throw new Error(`Erreur API: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    setLead(data);
+                    setForm({
+                        budget: data.budget ?? '',
+                        location: data.location ?? '',
+                        property_type: data.property_type ?? '',
+                        financing_status: data.financing_status ?? 'unknown',
+                        purchase_urgency: data.purchase_urgency ?? 'unknown',
+                        financing_amount: data.financing_amount ?? '',
+                        notes: data.notes ?? ''
+                    });
+                    setError(null);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleSave = async () => {
+                const token = localStorage.getItem('token');
+                setSaving(true);
+                setSaved(false);
+                try {
+                    const response = await fetch(`${API_URL}/api/v1/leads/${leadId}/update-financing`, {
+                        method: 'PUT',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            budget: form.budget === '' ? null : parseInt(form.budget, 10),
+                            location: form.location || null,
+                            property_type: form.property_type || null,
+                            financing_status: form.financing_status,
+                            purchase_urgency: form.purchase_urgency,
+                            financing_amount: form.financing_amount === '' ? null : parseInt(form.financing_amount, 10),
+                            notes: form.notes || null
+                        })
+                    });
+                    if (!response.ok) throw new Error(`Enregistrement impossible (${response.status})`);
+                    setSaved(true);
+                    setError(null);
+                    // On relit la fiche : la qualité est recalculée par le
+                    // serveur, on ne la devine pas côté navigateur.
+                    await fetchLead(token);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setSaving(false);
+                }
+            };
+
+            const handleLogout = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = '/login.html';
+            };
+
+            const set = (k, v) => { setForm({ ...form, [k]: v }); setSaved(false); };
+
+            const apercu = form ? expliquerQualite({
+                financing_status: form.financing_status,
+                purchase_urgency: form.purchase_urgency,
+                budget: form.budget,
+                location: form.location,
+                property_type: form.property_type
+            }) : null;
+
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo">ZELYRO</div>
+                            <nav>
+                                <a href="/index.html">Leads</a>
+                                <a href="/biens.html">Biens</a>
+                                <a href="/matching.html">Matching</a>
+                                <a href="/dashboard.html">Dashboard</a>
+                            </nav>
+                            <div className="user-info">
+                                {user && <span className="user-email">{user.email}</span>}
+                                <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="container">
+                        <a href="/matching.html" className="back-link">← Retour au matching</a>
+
+                        {loading ? (
+                            <div className="loading">
+                                <div className="loader"></div>
+                                <p style={{ marginTop: '20px' }}>Chargement de la fiche...</p>
+                            </div>
+                        ) : error && !lead ? (
+                            <div className="error">{error}</div>
+                        ) : lead ? (
+                            <>
+                                <h1 className="page-title">{lead.name}</h1>
+                                <p className="page-subtitle">
+                                    {lead.email || 'Email non renseigné'} · {lead.phone || 'Téléphone non renseigné'}
+                                </p>
+
+                                {error && <div className="error">{error}</div>}
+                                {saved && <div className="success">Fiche enregistrée. Le classement a été recalculé.</div>}
+
+                                <div className="content-wrapper">
+                                    <div>
+                                        <div className="panel">
+                                            <div className="panel-title">Sa recherche</div>
+                                            <div className="panel-note">
+                                                Plus ces informations sont complètes, plus le rapprochement
+                                                avec vos biens est fiable.
+                                            </div>
+
+                                            <div className="form-row">
+                                                <div className="form-group">
+                                                    <label>Budget (€)</label>
+                                                    <input type="number" value={form.budget}
+                                                        onChange={(e) => set('budget', e.target.value)}
+                                                        placeholder="Non renseigné" />
+                                                </div>
+                                                <div className="form-group">
+                                                    <label>Secteur recherché</label>
+                                                    <input type="text" value={form.location}
+                                                        onChange={(e) => set('location', e.target.value)}
+                                                        placeholder="Non renseigné" />
+                                                </div>
+                                            </div>
+
+                                            <div className="form-group">
+                                                <label>Type de bien recherché</label>
+                                                <select value={form.property_type}
+                                                    onChange={(e) => set('property_type', e.target.value)}>
+                                                    <option value="">Non renseigné</option>
+                                                    <option value="Appartement">Appartement</option>
+                                                    <option value="Maison">Maison</option>
+                                                    <option value="Villa">Villa</option>
+                                                    <option value="Studio">Studio</option>
+                                                    <option value="Penthouse">Penthouse</option>
+                                                    <option value="Terrain">Terrain</option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <div className="panel">
+                                            <div className="panel-title">Son projet</div>
+                                            <div className="panel-note">
+                                                Ces deux informations pèsent le plus lourd dans le classement.
+                                                Un prospect avec accord bancaire et projet immédiat remonte
+                                                automatiquement en tête de liste.
+                                            </div>
+
+                                            <div className="form-row">
+                                                <div className="form-group">
+                                                    <label>Financement</label>
+                                                    <select value={form.financing_status}
+                                                        onChange={(e) => set('financing_status', e.target.value)}>
+                                                        <option value="unknown">Non renseigné</option>
+                                                        <option value="approved">Accord bancaire obtenu</option>
+                                                        <option value="in_progress">Démarche en cours</option>
+                                                        <option value="pending">En attente</option>
+                                                        <option value="rejected">Refusé</option>
+                                                    </select>
+                                                </div>
+                                                <div className="form-group">
+                                                    <label>Échéance d'achat</label>
+                                                    <select value={form.purchase_urgency}
+                                                        onChange={(e) => set('purchase_urgency', e.target.value)}>
+                                                        <option value="unknown">Non renseignée</option>
+                                                        <option value="immediate">Immédiate</option>
+                                                        <option value="1-3_months">1 à 3 mois</option>
+                                                        <option value="3-6_months">3 à 6 mois</option>
+                                                        <option value="6plus_months">Plus de 6 mois</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            <div className="form-group">
+                                                <label>Montant du financement obtenu (€)</label>
+                                                <input type="number" value={form.financing_amount}
+                                                    onChange={(e) => set('financing_amount', e.target.value)}
+                                                    placeholder="Non renseigné" />
+                                            </div>
+
+                                            <div className="form-group">
+                                                <label>Notes</label>
+                                                <textarea value={form.notes}
+                                                    onChange={(e) => set('notes', e.target.value)}
+                                                    placeholder="Ce que le prospect a dit, ce qu'il faut retenir pour le prochain appel..."></textarea>
+                                            </div>
+
+                                            <button className="btn" onClick={handleSave} disabled={saving}>
+                                                {saving ? 'Enregistrement...' : 'Enregistrer'}
+                                            </button>
+                                            <a href="/matching.html" className="btn secondary"
+                                               style={{ textDecoration: 'none', display: 'inline-block' }}>Annuler</a>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div className="panel">
+                                            <div className="panel-title">Classement</div>
+                                            <div className="panel-note">
+                                                Calculé automatiquement. Vous ne le saisissez pas :
+                                                il se déduit de ce que vous renseignez à gauche.
+                                            </div>
+
+                                            <div className={`quality-box quality-${apercu.quality}`}>
+                                                <div className="quality-label">{LIBELLES[apercu.quality]}</div>
+                                                <div className="quality-explain">{apercu.points} points sur 100</div>
+                                            </div>
+
+                                            {apercu.lignes.length > 0 ? (
+                                                <div>
+                                                    {apercu.lignes.map((l, i) => (
+                                                        <div key={i} className="detail-block" style={{ padding: '10px 15px' }}>
+                                                            <div className="detail-value" style={{ fontSize: '14px' }}>{l}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <div className="info-box">
+                                                    Aucune information ne permet encore de classer ce prospect.
+                                                    Renseignez son financement et son échéance : ce sont les deux
+                                                    critères qui pèsent le plus.
+                                                </div>
+                                            )}
+
+                                            <div className="info-box" style={{ marginTop: '15px' }}>
+                                                Ce classement change dès que vous modifiez les champs.
+                                                Il n'est enregistré qu'après avoir cliqué sur Enregistrer.
+                                            </div>
+                                        </div>
+
+                                        <div className="panel">
+                                            <div className="panel-title">Fiche</div>
+                                            <div className="detail-block">
+                                                <div className="detail-label">Statut</div>
+                                                <div className="detail-value">{lead.status || 'Non défini'}</div>
+                                            </div>
+                                            <div className="detail-block">
+                                                <div className="detail-label">Créé le</div>
+                                                <div className="detail-value">
+                                                    {lead.created_at
+                                                        ? new Date(lead.created_at).toLocaleDateString('fr-FR',
+                                                            { day: 'numeric', month: 'long', year: 'numeric' })
+                                                        : 'Date inconnue'}
+                                                </div>
+                                            </div>
+                                            <div className="detail-block">
+                                                <div className="detail-label">Référence</div>
+                                                <div className="detail-value">Lead #{lead.id}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        ) : null}
+                    </div>
+                </>
+            );
+        }
+
+        ReactDOM.render(<LeadProfile />, document.getElementById('root'));
+    </script>
+</body>
+</html>

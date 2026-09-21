@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZELYRO - Leads</title>
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="stylesheet" href="zelyro.css">
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+
+        const BADGES = {
+            hot: ['badge-hot', 'Chaud'],
+            warm: ['badge-warm', 'Tiède'],
+            cold: ['badge-cold', 'Froid']
+        };
+
+        const VIDE = {
+            name: '', email: '', phone: '', budget: '',
+            location: '', property_type: '',
+            financing_status: 'unknown', purchase_urgency: 'unknown'
+        };
+
+        function App() {
+            const [leads, setLeads] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [message, setMessage] = useState(null);
+            const [user, setUser] = useState(null);
+            const [formOuvert, setFormOuvert] = useState(false);
+            const [form, setForm] = useState(VIDE);
+            const [saving, setSaving] = useState(false);
+
+            useEffect(() => {
+                const token = localStorage.getItem('token');
+                const userData = localStorage.getItem('user');
+                if (!token) {
+                    window.location.href = '/login.html';
+                    return;
+                }
+                if (userData) setUser(JSON.parse(userData));
+                fetchLeads(token);
+            }, []);
+
+            const fetchLeads = async (token) => {
+                try {
+                    setLoading(true);
+                    const response = await fetch(`${API_URL}/api/v1/leads`, {
+                        method: 'GET',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+                    });
+                    if (!response.ok) {
+                        if (response.status === 401) {
+                            localStorage.removeItem('token');
+                            localStorage.removeItem('user');
+                            window.location.href = '/login.html';
+                            return;
+                        }
+                        throw new Error(`Erreur API: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    setLeads(data);
+                    setError(null);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const creerLead = async () => {
+                if (!form.name.trim()) {
+                    setError('Le nom du prospect est obligatoire.');
+                    return;
+                }
+                const token = localStorage.getItem('token');
+                setSaving(true);
+                try {
+                    const response = await fetch(`${API_URL}/api/v1/leads`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({
+                            name: form.name.trim(),
+                            email: form.email.trim() || null,
+                            phone: form.phone.trim() || null,
+                            budget: form.budget === '' ? null : parseInt(form.budget, 10),
+                            location: form.location.trim() || null,
+                            property_type: form.property_type || null,
+                            financing_status: form.financing_status,
+                            purchase_urgency: form.purchase_urgency
+                        })
+                    });
+                    if (!response.ok) {
+                        const d = await response.json().catch(() => ({}));
+                        throw new Error(d.message || `Création impossible (${response.status})`);
+                    }
+                    setMessage(`${form.name.trim()} a été ajouté.`);
+                    setForm(VIDE);
+                    setFormOuvert(false);
+                    setError(null);
+                    await fetchLeads(token);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setSaving(false);
+                }
+            };
+
+            const handleLogout = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = '/login.html';
+            };
+
+            const set = (k, v) => { setForm({ ...form, [k]: v }); setError(null); };
+
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo">ZELYRO</div>
+                            <nav>
+                                <a href="/index.html" className="active">Leads</a>
+                                <a href="/biens.html">Biens</a>
+                                <a href="/matching.html">Matching</a>
+                                <a href="/dashboard.html">Dashboard</a>
+                            </nav>
+                            <div className="user-info">
+                                {user && <span className="user-email">{user.email}</span>}
+                                <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="container">
+                        <div className="titre-ligne">
+                            <div>
+                                <h1 className="page-title">Leads</h1>
+                                <p className="page-subtitle">
+                                    {leads.length} prospect{leads.length > 1 ? 's' : ''} dans votre portefeuille
+                                </p>
+                            </div>
+                            <button className="btn" onClick={() => { setFormOuvert(!formOuvert); setMessage(null); }}>
+                                {formOuvert ? 'Fermer' : '+ Ajouter un prospect'}
+                            </button>
+                        </div>
+
+                        {error && <div className="error">{error}</div>}
+                        {message && <div className="success">{message}</div>}
+
+                        {formOuvert && (
+                            <div className="panel">
+                                <div className="panel-title">Nouveau prospect</div>
+                                <div className="panel-note">
+                                    Seul le nom est obligatoire. Tout le reste peut être complété
+                                    plus tard depuis la fiche — mais plus vous renseignez le
+                                    financement et l'échéance, plus le classement sera juste.
+                                </div>
+
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>Nom <span className="obligatoire">*</span></label>
+                                        <input type="text" value={form.name}
+                                            onChange={(e) => set('name', e.target.value)}
+                                            placeholder="Thomas Martin" />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Email</label>
+                                        <input type="email" value={form.email}
+                                            onChange={(e) => set('email', e.target.value)}
+                                            placeholder="thomas.martin@email.fr" />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Téléphone</label>
+                                        <input type="tel" value={form.phone}
+                                            onChange={(e) => set('phone', e.target.value)}
+                                            placeholder="0612345678" />
+                                    </div>
+                                </div>
+
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>Budget (€)</label>
+                                        <input type="number" value={form.budget}
+                                            onChange={(e) => set('budget', e.target.value)}
+                                            placeholder="280000" />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Secteur recherché</label>
+                                        <input type="text" value={form.location}
+                                            onChange={(e) => set('location', e.target.value)}
+                                            placeholder="Lille" />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Type de bien</label>
+                                        <select value={form.property_type}
+                                            onChange={(e) => set('property_type', e.target.value)}>
+                                            <option value="">Non précisé</option>
+                                            <option value="Appartement">Appartement</option>
+                                            <option value="Maison">Maison</option>
+                                            <option value="Villa">Villa</option>
+                                            <option value="Studio">Studio</option>
+                                            <option value="Penthouse">Penthouse</option>
+                                            <option value="Terrain">Terrain</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>Financement</label>
+                                        <select value={form.financing_status}
+                                            onChange={(e) => set('financing_status', e.target.value)}>
+                                            <option value="unknown">Non renseigné</option>
+                                            <option value="approved">Accord bancaire obtenu</option>
+                                            <option value="in_progress">Démarche en cours</option>
+                                            <option value="pending">En attente</option>
+                                            <option value="rejected">Refusé</option>
+                                        </select>
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Échéance d'achat</label>
+                                        <select value={form.purchase_urgency}
+                                            onChange={(e) => set('purchase_urgency', e.target.value)}>
+                                            <option value="unknown">Non renseignée</option>
+                                            <option value="immediate">Immédiate</option>
+                                            <option value="1-3_months">1 à 3 mois</option>
+                                            <option value="3-6_months">3 à 6 mois</option>
+                                            <option value="6plus_months">Plus de 6 mois</option>
+                                        </select>
+                                    </div>
+                                    <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
+                                        <button className="btn" onClick={creerLead} disabled={saving}
+                                            style={{ width: '100%' }}>
+                                            {saving ? 'Enregistrement...' : 'Ajouter le prospect'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {loading ? (
+                            <div className="loading">
+                                <div className="loader"></div>
+                                <p style={{ marginTop: '20px' }}>Chargement des prospects...</p>
+                            </div>
+                        ) : leads.length === 0 ? (
+                            <div className="panel">
+                                <div className="empty-state">
+                                    Aucun prospect pour le moment.<br />
+                                    Utilisez le bouton « Ajouter un prospect » pour commencer.
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="leads-grid">
+                                {leads.map((lead) => {
+                                    const q = lead.lead_quality || 'cold';
+                                    const [cls, libelle] = BADGES[q] || BADGES.cold;
+                                    return (
+                                        <div key={lead.id} className={`lead-card ${q}`}>
+                                            <div className="lead-name">{lead.name}</div>
+                                            <div className="lead-field">
+                                                <span className="lead-label">Email :</span>
+                                                <span className="lead-value">{lead.email || 'N/A'}</span>
+                                            </div>
+                                            <div className="lead-field">
+                                                <span className="lead-label">Tél. :</span>
+                                                <span className="lead-value">{lead.phone || 'N/A'}</span>
+                                            </div>
+                                            <div className="lead-field">
+                                                <span className="lead-label">Budget :</span>
+                                                <span className="lead-value">
+                                                    {lead.budget ? `${lead.budget.toLocaleString('fr-FR')} €` : 'N/A'}
+                                                </span>
+                                            </div>
+                                            <div className="lead-field">
+                                                <span className="lead-label">Secteur :</span>
+                                                <span className="lead-value">{lead.location || 'N/A'}</span>
+                                            </div>
+                                            <div className="lead-field">
+                                                <span className="lead-label">Type :</span>
+                                                <span className="lead-value">{lead.property_type || 'N/A'}</span>
+                                            </div>
+                                            <div className="lead-footer">
+                                                <span className={`lead-badge ${cls}`}>{libelle}</span>
+                                                <a className="lien-fiche" href={`/leads-profile.html?id=${lead.id}`}>
+                                                    Ouvrir la fiche →
+                                                </a>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                </>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
