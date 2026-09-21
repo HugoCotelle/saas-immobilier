@@ -28,7 +28,7 @@
 
             useEffect(() => {
                 const token = localStorage.getItem('token');
-                if (token) window.location.href = '/prospects.html';
+                if (token) window.location.replace('/prospects.html');
             }, []);
 
             const handleLogin = async (e) => {
@@ -46,7 +46,7 @@
                         localStorage.setItem('token', data.token);
                         localStorage.setItem('user', JSON.stringify(data.user));
                         setMessage({ type: 'success', text: 'Connexion réussie, redirection…' });
-                        setTimeout(() => { window.location.href = '/prospects.html'; }, 1000);
+                        setTimeout(() => { window.location.replace('/prospects.html'); }, 1000);
                     } else {
                         setMessage({ type: 'error', text: data.message || 'Identifiants incorrects' });
                     }
@@ -81,7 +81,7 @@
                         localStorage.setItem('token', data.token);
                         localStorage.setItem('user', JSON.stringify(data.user));
                         setMessage({ type: 'success', text: 'Compte créé, redirection…' });
-                        setTimeout(() => { window.location.href = '/prospects.html'; }, 1000);
+                        setTimeout(() => { window.location.replace('/prospects.html'); }, 1000);
                     } else {
                         setMessage({ type: 'error', text: data.message || 'Inscription impossible' });
                     }

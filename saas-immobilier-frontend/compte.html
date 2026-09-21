@@ -42,7 +42,7 @@
 
             useEffect(() => {
                 if (!localStorage.getItem('token')) {
-                    window.location.href = '/login.html';
+                    window.location.replace('/login.html');
                     return;
                 }
                 const userData = localStorage.getItem('user');
@@ -86,7 +86,7 @@
             const handleLogout = () => {
                 localStorage.removeItem('token');
                 localStorage.removeItem('user');
-                window.location.href = '/login.html';
+                window.location.replace('/login.html');
             };
 
             const set = (k, v) => { setForm({ ...form, [k]: v }); setMessage(null); };
@@ -141,6 +141,7 @@
                                 <a href="/prospects.html">Leads</a>
                                 <a href="/biens.html">Biens</a>
                                 <a href="/matching.html">Matching</a>
+                                <a href="/propositions.html">Propositions</a>
                                 <a href="/dashboard.html">Dashboard</a>
                                 <a href="/compte.html" className="active">Compte</a>
                             </nav>

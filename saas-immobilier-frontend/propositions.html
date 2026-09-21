@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZELYRO - Propositions</title>
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="stylesheet" href="zelyro.css">
+    <style>
+        .content-wrapper { grid-template-columns: 1fr 1.7fr; }
+        .panel { margin-bottom: 0; }
+        .panel-title { margin-bottom: 18px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+
+        // Les espaces insécables que produit toLocaleString('fr-FR') s'affichent
+        // mal dans certains e-mails : on les remplace par des espaces normales.
+        const ESPACES = new RegExp('[' + String.fromCharCode(0x202f, 0xa0) + ']', 'g');
+        const prix = (p) => (p ? `${Number(p).toLocaleString('fr-FR')} €`.replace(ESPACES, ' ') : null);
+
+        const caracteristiques = (b) => [
+            b.type,
+            b.rooms ? `${b.rooms} pièces` : null,
+            b.size ? `${b.size} m²` : null,
+        ].filter(Boolean).join(', ');
+
+        // Le message d'origine : simple, à relire et à corriger par l'agent.
+        const composer = (item, ids, agent) => {
+            const l = item.lead;
+            const choisis = item.biens.filter((b) => ids.includes(b.property_id));
+            const criteres = [l.property_type, l.location, l.budget ? `budget ${prix(l.budget)}` : null].filter(Boolean).join(', ');
+            const n = choisis.length;
+            const lignes = choisis.map((b, i) => {
+                const detail = [caracteristiques(b), prix(b.price)].filter(Boolean).join(' · ');
+                return `${i + 1}. ${b.title}${b.address ? ' — ' + b.address : ''}` + (detail ? `\n   ${detail}` : '');
+            });
+            const signature = [agent.first_name, agent.company_name].filter(Boolean).join('\n');
+            return [
+                `Bonjour ${l.name},`,
+                `Suite à votre recherche${criteres ? ` (${criteres})` : ''}, j'ai sélectionné ${n} bien${n > 1 ? 's' : ''} qui ${n > 1 ? 'correspondent' : 'correspond'} à vos critères :`,
+                lignes.join('\n\n'),
+                "Si l'un d'eux vous intéresse, je peux organiser une visite très rapidement : dites-moi quels créneaux vous conviennent en répondant simplement à ce message.",
+                'Cordialement,' + (signature ? '\n' + signature : ''),
+            ].join('\n\n');
+        };
+
+        const objetPar = (l) => `Sélection de biens${l.location ? ' – ' + l.location : ' pour votre recherche'}`;
+
+        const dateCourte = (iso) => {
+            const d = new Date(iso);
+            return isNaN(d) ? '' : d.toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        };
+
+        function PropositionsApp() {
+            const [data, setData] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [user, setUser] = useState(null);
+            const [onglet, setOnglet] = useState('a_envoyer');
+            const [selectedId, setSelectedId] = useState(null);
+            const [brouillons, setBrouillons] = useState({});
+            const [confirmer, setConfirmer] = useState(false);
+            const [envoi, setEnvoi] = useState(false);
+            const [message, setMessage] = useState(null);   // dans l'éditeur : copie, erreurs
+            const [bilan, setBilan] = useState(null);         // en haut de page : envoi réussi
+            const editeurRef = useRef(null);
+            const idDemande = useRef(Number(new URLSearchParams(window.location.search).get('id')) || null);
+
+            const handleLogout = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.replace('/login.html');
+            };
+
+            const appel = async (chemin, options = {}) => {
+                const r = await fetch(`${API_URL}${chemin}`, {
+                    ...options,
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                });
+                if (r.status === 401) { handleLogout(); throw new Error('Session expirée'); }
+                const corps = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(corps.message || `Erreur ${r.status}`);
+                return corps;
+            };
+
+            const charger = async () => {
+                try {
+                    const d = await appel('/api/v1/proposals');
+                    setData(d);
+                    setError(null);
+                    return d;
+                } catch (e) {
+                    setError(e.message);
+                    return null;
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            useEffect(() => {
+                if (!localStorage.getItem('token')) { window.location.replace('/login.html'); return; }
+                const userData = localStorage.getItem('user');
+                if (userData) setUser(JSON.parse(userData));
+                charger().then((d) => {
+                    if (d && idDemande.current && d.a_envoyer.some((x) => x.lead.id === idDemande.current)) {
+                        setSelectedId(idDemande.current);
+                    }
+                });
+            }, []);
+
+            const liste = data ? data.a_envoyer : [];
+            const idAffiche = liste.some((x) => x.lead.id === selectedId) ? selectedId : (liste[0] ? liste[0].lead.id : null);
+            const item = liste.find((x) => x.lead.id === idAffiche) || null;
+            const agent = data ? data.agent : { first_name: '', company_name: '' };
+
+            // Brouillon du prospect affiché : celui que l'agent a commencé, sinon le message d'origine.
+            const parDefaut = (it) => {
+                const ids = it.biens.slice(0, 3).map((b) => b.property_id);
+                return { ids, objet: objetPar(it.lead), corps: composer(it, ids, agent) };
+            };
+            const brouillon = item ? (brouillons[item.lead.id] || parDefaut(item)) : null;
+            const maj = (patch) => {
+                setConfirmer(false);
+                setMessage(null);
+                setBrouillons({ ...brouillons, [item.lead.id]: { ...brouillon, ...patch } });
+            };
+
+            const choisir = (id) => {
+                setSelectedId(id);
+                setConfirmer(false);
+                setMessage(null);
+                setBilan(null);
+                if (window.innerWidth <= 900 && editeurRef.current) {
+                    setTimeout(() => editeurRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+                }
+            };
+
+            const basculer = (idBien) => {
+                const ids = brouillon.ids.includes(idBien)
+                    ? brouillon.ids.filter((i) => i !== idBien)
+                    : [...brouillon.ids, idBien];
+                maj({ ids, corps: composer(item, ids, agent) });
+            };
+
+            const retablir = () => { setConfirmer(false); setMessage(null); setBrouillons({ ...brouillons, [item.lead.id]: parDefaut(item) }); };
+
+            const copier = async () => {
+                try {
+                    await navigator.clipboard.writeText(`${brouillon.objet}\n\n${brouillon.corps}`);
+                    setMessage({ type: 'success', text: 'Message copié.' });
+                } catch (e) {
+                    setMessage({ type: 'error', text: 'Copie automatique impossible : sélectionnez le texte du message et copiez-le avec Ctrl+C.' });
+                }
+            };
+
+            const envoyer = async () => {
+                setEnvoi(true);
+                setMessage(null);
+                setBilan(null);
+                const nom = item.lead.name, adresse = item.lead.email, id = item.lead.id;
+                try {
+                    await appel(`/api/v1/leads/${id}/send-mail`, {
+                        method: 'POST',
+                        body: JSON.stringify({ subject: brouillon.objet, body: brouillon.corps, property_ids: brouillon.ids })
+                    });
+                    const reste = { ...brouillons };
+                    delete reste[id];
+                    setBrouillons(reste);
+                    setConfirmer(false);
+                    setSelectedId(null);
+                    await charger();
+                    setBilan(`Message envoyé à ${nom} (${adresse}). Il figure dans l'historique de sa fiche.`);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                } catch (e) {
+                    setConfirmer(false);
+                    setMessage({ type: 'error', text: e.message });
+                } finally {
+                    setEnvoi(false);
+                }
+            };
+
+            const badge = (q) => {
+                const classes = { hot: 'badge-hot', warm: 'badge-warm', cold: 'badge-cold' };
+                const libelles = { hot: 'Acheteur actif', warm: 'Projet en cours', cold: 'Premier contact' };
+                return libelles[q] ? <span className={`lead-badge ${classes[q]}`}>{libelles[q]}</span> : null;
+            };
+
+            const pret = brouillon && brouillon.ids.length > 0 && brouillon.objet.trim().length >= 3 && brouillon.corps.trim().length >= 20;
+
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo">ZELYRO</div>
+                            <nav>
+                                <a href="/prospects.html">Leads</a>
+                                <a href="/biens.html">Biens</a>
+                                <a href="/matching.html">Matching</a>
+                                <a href="/propositions.html" className="active">Propositions</a>
+                                <a href="/dashboard.html">Dashboard</a>
+                                <a href="/compte.html">Compte</a>
+                            </nav>
+                            <div className="user-info">
+                                {user && <span className="user-email">{user.email}</span>}
+                                <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="container">
+                        <h1 className="page-title">Propositions</h1>
+                        <p className="page-subtitle">
+                            Chaque prospect dont le dossier est complet reçoit ici un message déjà rédigé, avec les biens qui lui
+                            conviennent le mieux. Relisez-le, corrigez-le si besoin, puis envoyez-le.
+                        </p>
+
+                        {error && <div className="error">Erreur: {error}</div>}
+                        {bilan && <div className="success">{bilan}</div>}
+
+                        {loading ? (
+                            <div className="loading"><div className="loader"></div></div>
+                        ) : data && (
+                            <>
+                                <div className="filters">
+                                    <button className={`filter-button ${onglet === 'a_envoyer' ? 'active' : ''}`}
+                                        onClick={() => setOnglet('a_envoyer')}>À envoyer ({liste.length})</button>
+                                    <button className={`filter-button ${onglet === 'envoyes' ? 'active' : ''}`}
+                                        onClick={() => setOnglet('envoyes')}>Envoyés ({data.envoyes.length})</button>
+                                </div>
+
+                                {onglet === 'envoyes' ? (
+                                    <div className="panel">
+                                        <div className="panel-title">Derniers messages envoyés</div>
+                                        {data.envoyes.length === 0 ? (
+                                            <div className="empty-state">Aucun message envoyé pour le moment.</div>
+                                        ) : data.envoyes.map((m, i) => (
+                                            <div key={i} className="envoye-item">
+                                                <div className="lead-name">
+                                                    <a href={`/leads-profile.html?id=${m.lead_id}`} style={{ color: 'inherit' }}>{m.name}</a>
+                                                </div>
+                                                <div className="envoye-sujet">{m.subject}</div>
+                                                <div className="envoye-date">
+                                                    {dateCourte(m.sent_at)} · {m.biens} bien{m.biens > 1 ? 's' : ''} proposé{m.biens > 1 ? 's' : ''} · {m.email}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : liste.length === 0 ? (
+                                    <div className="panel">
+                                        <div className="empty-state">
+                                            Aucun prospect n'est prêt pour le moment.<br />
+                                            Un prospect apparaît ici quand son e-mail, son budget et son secteur (ou son type de bien)
+                                            sont renseignés, qu'un bien de votre portefeuille lui correspond, et que vous ne lui avez
+                                            pas déjà écrit ces dernières 24 heures.
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="content-wrapper">
+                                        <div className="panel">
+                                            <div className="panel-title">Prospects prêts</div>
+                                            {liste.map((x) => (
+                                                <div key={x.lead.id}
+                                                    className={`lead-item ${x.lead_quality || ''} ${idAffiche === x.lead.id ? 'selected' : ''}`}
+                                                    onClick={() => choisir(x.lead.id)}>
+                                                    <div className="lead-name">{x.lead.name}</div>
+                                                    <div className="lead-field">
+                                                        <span className="lead-label">Biens :</span>
+                                                        <span className="lead-value">
+                                                            {x.biens.length} bien{x.biens.length > 1 ? 's' : ''} · jusqu'à {x.biens[0].score}%
+                                                        </span>
+                                                    </div>
+                                                    <div className="lead-field">
+                                                        <span className="lead-label">Budget :</span>
+                                                        <span className="lead-value">{prix(x.lead.budget) || 'N/A'}</span>
+                                                    </div>
+                                                    <div className="lead-field">
+                                                        <span className="lead-label">Secteur :</span>
+                                                        <span className="lead-value">{x.lead.location || 'N/A'}</span>
+                                                    </div>
+                                                    {badge(x.lead_quality)}
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        <div className="panel" ref={editeurRef}>
+                                            {item && brouillon && (
+                                                <>
+                                                    <div className="panel-title">Écrire à {item.lead.name}</div>
+
+                                                    {!data.envoi_possible && (
+                                                        <div className="error">
+                                                            L'envoi d'e-mails n'est pas encore configuré sur le serveur. Vous pouvez
+                                                            copier le message et l'envoyer depuis votre messagerie.
+                                                        </div>
+                                                    )}
+                                                    {message && <div className={message.type === 'error' ? 'error' : 'success'}>{message.text}</div>}
+
+                                                    <dl className="mail-a">
+                                                        <dt>À</dt><dd>{item.lead.email}</dd>
+                                                        <dt>Réponses</dt><dd>{user ? user.email : 'votre adresse'} (le prospect vous répond directement)</dd>
+                                                    </dl>
+
+                                                    <div className="detail-label" style={{ marginBottom: '10px' }}>Biens à proposer</div>
+                                                    <div className="biens-choix">
+                                                        {item.biens.map((b) => {
+                                                            const coche = brouillon.ids.includes(b.property_id);
+                                                            return (
+                                                                <label key={b.property_id} className={`bien-choix ${coche ? 'coche' : ''}`}>
+                                                                    <input type="checkbox" checked={coche} onChange={() => basculer(b.property_id)} />
+                                                                    <span className="bien-texte">
+                                                                        <div className="bien-titre">{b.title}</div>
+                                                                        <div className="bien-detail">
+                                                                            {[b.address, caracteristiques(b), prix(b.price)].filter(Boolean).join(' · ')}
+                                                                        </div>
+                                                                        {b.reasons && b.reasons.length > 0 && (
+                                                                            <div className="raisons">
+                                                                                {b.reasons.map((r, i) => <span key={i} className="raison">{r}</span>)}
+                                                                            </div>
+                                                                        )}
+                                                                    </span>
+                                                                    <span className="bien-score">{b.score}%</span>
+                                                                </label>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                    <p className="field-hint" style={{ marginTop: '-10px', marginBottom: '22px' }}>
+                                                        Les {Math.min(3, item.biens.length)} meilleurs biens sont cochés. Changer la sélection réécrit le message.
+                                                        {item.deja_proposes > 0 && ` ${item.deja_proposes} bien${item.deja_proposes > 1 ? 's ont' : ' a'} déjà été proposé${item.deja_proposes > 1 ? 's' : ''} et n'apparaît${item.deja_proposes > 1 ? 'ent' : ''} plus ici.`}
+                                                    </p>
+
+                                                    <div className="form-group">
+                                                        <label htmlFor="objet">Objet</label>
+                                                        <input id="objet" type="text" maxLength={200} value={brouillon.objet}
+                                                            onChange={(e) => maj({ objet: e.target.value })} disabled={envoi} />
+                                                    </div>
+                                                    <div className="form-group">
+                                                        <label htmlFor="corps">Message</label>
+                                                        <textarea id="corps" className="mail-corps" maxLength={5000} value={brouillon.corps}
+                                                            onChange={(e) => maj({ corps: e.target.value })} disabled={envoi}></textarea>
+                                                        <p className="field-hint">
+                                                            <button type="button" className="lien-discret" onClick={retablir} disabled={envoi}>
+                                                                Rétablir le message d'origine
+                                                            </button>
+                                                        </p>
+                                                    </div>
+
+                                                    <div className="btn-ligne">
+                                                        {data.envoi_possible && (!confirmer ? (
+                                                            <button className="btn" onClick={() => setConfirmer(true)} disabled={!pret || envoi}>
+                                                                Envoyer à {item.lead.name}
+                                                            </button>
+                                                        ) : (
+                                                            <>
+                                                                <button className="btn" onClick={envoyer} disabled={envoi}>
+                                                                    {envoi ? 'Envoi…' : `Confirmer l'envoi à ${item.lead.email}`}
+                                                                </button>
+                                                                <button className="btn secondary" onClick={() => setConfirmer(false)} disabled={envoi}>Annuler</button>
+                                                            </>
+                                                        ))}
+                                                        <button className="btn secondary" onClick={copier} disabled={envoi}>Copier le message</button>
+                                                    </div>
+                                                    <p className="field-hint" style={{ marginTop: '14px' }}>
+                                                        Le message part au nom de {agent.company_name || 'votre agence'}. Une ligne est ajoutée en bas :
+                                                        le prospect peut répondre « STOP » pour ne plus recevoir de propositions. L'envoi est noté
+                                                        dans l'historique de la fiche et le prospect passe en « Contacté ».
+                                                    </p>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+                </>
+            );
+        }
+
+        ReactDOM.render(<PropositionsApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>

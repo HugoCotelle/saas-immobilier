@@ -108,7 +108,7 @@
                 const token = localStorage.getItem('token');
                 const userData = localStorage.getItem('user');
                 if (!token) {
-                    window.location.href = '/login.html';
+                    window.location.replace('/login.html');
                     return;
                 }
                 if (userData) setUser(JSON.parse(userData));
@@ -124,7 +124,7 @@
             const deconnecter = () => {
                 localStorage.removeItem('token');
                 localStorage.removeItem('user');
-                window.location.href = '/login.html';
+                window.location.replace('/login.html');
             };
 
             // Appel authentifié : renvoie le JSON, ou lève une erreur avec le
@@ -198,7 +198,7 @@
                 setOccupe(true);
                 try {
                     await appel(`/api/v1/leads/${leadId}`, { method: 'DELETE' });
-                    window.location.href = '/prospects.html';
+                    window.location.replace('/prospects.html');
                 } catch (err) {
                     setErreurSuivi(err.message);
                     setOccupe(false);
@@ -215,7 +215,7 @@
                         if (response.status === 401) {
                             localStorage.removeItem('token');
                             localStorage.removeItem('user');
-                            window.location.href = '/login.html';
+                            window.location.replace('/login.html');
                             return;
                         }
                         if (response.status === 404) throw new Error("Ce prospect n'existe pas, ou n'appartient pas à votre agence.");
@@ -274,7 +274,7 @@
             const handleLogout = () => {
                 localStorage.removeItem('token');
                 localStorage.removeItem('user');
-                window.location.href = '/login.html';
+                window.location.replace('/login.html');
             };
 
             const set = (k, v) => { setForm({ ...form, [k]: v }); setSaved(false); };
@@ -296,6 +296,7 @@
                                 <a href="/prospects.html">Leads</a>
                                 <a href="/biens.html">Biens</a>
                                 <a href="/matching.html">Matching</a>
+                                <a href="/propositions.html">Propositions</a>
                                 <a href="/dashboard.html">Dashboard</a>
                                 <a href="/compte.html">Compte</a>
                             </nav>

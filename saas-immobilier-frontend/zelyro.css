@@ -715,6 +715,25 @@ body.auth {
 .interrupteur { display: flex; align-items: flex-start; gap: 12px; cursor: pointer; text-transform: none; letter-spacing: 0; font-size: 14px; font-weight: 400; color: var(--ink); margin-bottom: 0; }
 .interrupteur input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--sage-600); flex: none; padding: 0; }
 
+/* Propositions par e-mail */
+.biens-choix { display: grid; gap: 10px; margin-bottom: 22px; }
+.bien-choix { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; text-transform: none; letter-spacing: 0; font-size: 14px; font-weight: 400; color: var(--ink); margin-bottom: 0; }
+.bien-choix:hover { border-color: var(--line-strong); }
+.bien-choix.coche { background: var(--sage-50); border-color: var(--sage-300); }
+.bien-choix input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--sage-600); flex: none; padding: 0; }
+.bien-choix .bien-texte { flex: 1; min-width: 0; }
+.bien-choix .bien-titre { font-weight: 600; word-break: break-word; }
+.bien-choix .bien-detail { color: var(--ink-2); font-size: 13px; margin-top: 2px; word-break: break-word; }
+.bien-choix .bien-score { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--sage-700); white-space: nowrap; }
+.mail-corps { min-height: 360px; line-height: 1.65; }
+.mail-a { display: grid; grid-template-columns: 90px 1fr; gap: 6px 12px; font-size: 14px; margin-bottom: 22px; }
+.mail-a dt { color: var(--ink-3); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em; padding-top: 3px; }
+.mail-a dd { color: var(--ink); word-break: break-all; }
+.lien-discret { background: none; border: none; padding: 0; color: var(--sage-700); font: inherit; font-size: 13px; text-decoration: underline; cursor: pointer; }
+.envoye-item { padding: 16px 18px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+.envoye-item .envoye-sujet { color: var(--ink-2); font-size: 14px; margin-top: 2px; word-break: break-word; }
+.envoye-item .envoye-date { color: var(--ink-3); font-size: 12px; margin-top: 6px; }
+
 /* ---------- Petits écrans ---------- */
 @media (max-width: 760px) {
     header { padding: 12px 0; }

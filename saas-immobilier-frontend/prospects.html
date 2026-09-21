@@ -84,7 +84,7 @@
                 const token = localStorage.getItem('token');
                 const userData = localStorage.getItem('user');
                 if (!token) {
-                    window.location.href = '/login.html';
+                    window.location.replace('/login.html');
                     return;
                 }
                 if (userData) setUser(JSON.parse(userData));
@@ -102,7 +102,7 @@
                         if (response.status === 401) {
                             localStorage.removeItem('token');
                             localStorage.removeItem('user');
-                            window.location.href = '/login.html';
+                            window.location.replace('/login.html');
                             return;
                         }
                         throw new Error(`Erreur API: ${response.status}`);
@@ -158,7 +158,7 @@
             const handleLogout = () => {
                 localStorage.removeItem('token');
                 localStorage.removeItem('user');
-                window.location.href = '/login.html';
+                window.location.replace('/login.html');
             };
 
             const set = (k, v) => { setForm({ ...form, [k]: v }); setError(null); };
@@ -181,6 +181,7 @@
                                 <a href="/prospects.html" className="active">Leads</a>
                                 <a href="/biens.html">Biens</a>
                                 <a href="/matching.html">Matching</a>
+                                <a href="/propositions.html">Propositions</a>
                                 <a href="/dashboard.html">Dashboard</a>
                                 <a href="/compte.html">Compte</a>
                             </nav>
