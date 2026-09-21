@@ -2,8 +2,12 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import hashlib
+import html as _html
+import threading
 import jwt
+import requests
 import os
 import re
 import sys
@@ -191,6 +195,7 @@ def create_access_token(identity, expires):
     payload = {
         'id': identity['id'],
         'email': identity['email'],
+        'v': identity.get('v', 0),
         'exp': datetime.utcnow() + expires,
         'iat': datetime.utcnow()
     }
@@ -201,6 +206,58 @@ def get_db_connection():
     """Obtenir une connexion à la base de données"""
     conn = psycopg2.connect(DATABASE_URL)
     return conn
+
+# Ce que la gestion des mots de passe ajoute à la base. Exécuté au premier
+# besoin de chaque processus (et par init-db) : IF NOT EXISTS le rend
+# inoffensif s'il est rejoué, et le verrou évite que les 4 processus de
+# gunicorn ne le lancent en même temps.
+_DDL_COMPTES = (
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0",
+    """CREATE TABLE IF NOT EXISTS password_resets (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token_hash CHAR(64) UNIQUE NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        used_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS password_resets_user_idx ON password_resets (user_id)",
+)
+_schema_pret = False
+_schema_verrou = threading.Lock()
+
+
+def _assurer_schema():
+    global _schema_pret
+    if _schema_pret:
+        return
+    with _schema_verrou:
+        if _schema_pret:
+            return
+        conn = get_db_connection()
+        try:
+            cur = conn.cursor()
+            # Cas courant : tout est déjà là, on ne touche pas aux tables.
+            cur.execute("""
+                SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'users' AND column_name = 'token_version'),
+                       to_regclass('password_resets') IS NOT NULL
+            """)
+            if not all(cur.fetchone()):
+                cur.execute("SELECT pg_advisory_xact_lock(727301)")
+                for ddl in _DDL_COMPTES:
+                    cur.execute(ddl)
+            conn.commit()
+            _schema_pret = True
+        finally:
+            conn.close()
+
+
+def _maintenant():
+    """Heure UTC sans fuseau, prise sur l'horloge de l'application (jamais
+    celle de la base) pour la validité des liens de réinitialisation."""
+    return datetime.utcnow()
+
 
 def token_required(f):
     """Décorateur pour vérifier le token JWT"""
@@ -223,6 +280,25 @@ def token_required(f):
         except jwt.ExpiredSignatureError:
             return jsonify({"message": "Token has expired"}), 401
         except jwt.InvalidTokenError:
+            return jsonify({"message": "Invalid token"}), 401
+
+        # Le compte doit toujours exister, et le jeton doit porter la version
+        # actuelle du compte. Chaque changement de mot de passe l'incrémente :
+        # une session volée ne survit donc pas à une réinitialisation.
+        try:
+            _assurer_schema()
+            conn = get_db_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT token_version FROM users WHERE id = %s", (current_user_id,))
+                ligne = cur.fetchone()
+            finally:
+                conn.close()
+        except Exception:
+            return erreur_interne()
+        if ligne is None:
+            return jsonify({"message": "Invalid token"}), 401
+        if int(data.get('v', 0)) != ligne[0]:
             return jsonify({"message": "Invalid token"}), 401
         return f(*args, **kwargs)
     return decorated
@@ -294,6 +370,8 @@ def init_database(demo=False):
             "CREATE INDEX IF NOT EXISTS leads_user_id_idx ON leads (user_id)",
             "CREATE INDEX IF NOT EXISTS properties_user_id_idx ON properties (user_id)",
         ):
+            cursor.execute(ddl)
+        for ddl in _DDL_COMPTES:
             cursor.execute(ddl)
 
         # Vérifier si vide
@@ -465,9 +543,10 @@ def login():
         return jsonify({"message": "Invalid credentials"}), 401
 
     try:
+        _assurer_schema()
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, email, password_hash, first_name, company_name FROM users WHERE lower(email) = %s", (email,))
+        cur.execute("SELECT id, email, password_hash, first_name, company_name, token_version FROM users WHERE lower(email) = %s", (email,))
         user = cur.fetchone()
         cur.close()
         conn.close()
@@ -481,7 +560,7 @@ def login():
         if not valide:
             return jsonify({"message": "Invalid credentials"}), 401
 
-        token = create_access_token(identity={'id': user['id'], 'email': user['email']}, expires=timedelta(hours=TOKEN_LIFETIME_HOURS))
+        token = create_access_token(identity={'id': user['id'], 'email': user['email'], 'v': user['token_version']}, expires=timedelta(hours=TOKEN_LIFETIME_HOURS))
 
         return jsonify({
             "message": "Login successful",
@@ -495,6 +574,257 @@ def login():
         }), 200
     except Exception:
         return erreur_interne()
+
+# ===== MOT DE PASSE : CHANGEMENT, OUBLI, RÉINITIALISATION =====
+
+RESET_TOKEN_MINUTES = int(os.getenv("RESET_TOKEN_MINUTES", "30"))
+BREVO_URL = "https://api.brevo.com/v3/smtp/email"
+MESSAGE_OUBLI = ("Si un compte existe pour cette adresse, un e-mail contenant un lien de "
+                 f"réinitialisation vient d'être envoyé. Il est valable {RESET_TOKEN_MINUTES} minutes.")
+LIEN_INVALIDE = "Ce lien est invalide ou a expiré. Faites une nouvelle demande."
+
+
+def _erreur_mot_de_passe(mdp):
+    """Message d'erreur si le mot de passe ne respecte pas la règle, sinon None."""
+    if not isinstance(mdp, str) or not mdp:
+        return "Mot de passe manquant"
+    if len(mdp) < 10:
+        return "Le mot de passe doit contenir au moins 10 caractères"
+    if len(mdp) > 128:
+        return "Mot de passe trop long (128 caractères maximum)"
+    return None
+
+
+def _hash_jeton(jeton):
+    """Seule l'empreinte du lien est conservée : une copie de la base ne
+    permet donc pas de réinitialiser un compte."""
+    return hashlib.sha256(jeton.encode('utf-8')).hexdigest()
+
+
+def _envoi_configure():
+    """Vrai si tout ce qu'il faut pour envoyer un lien est renseigné."""
+    return all((os.getenv(k) or "").strip() for k in ("BREVO_API_KEY", "MAIL_FROM", "FRONTEND_URL"))
+
+
+def _lancer_en_arriere_plan(fonction, *args):
+    """L'envoi d'e-mail est lent : le faire après la réponse évite aussi que
+    le temps de réponse révèle si une adresse a un compte."""
+    threading.Thread(target=fonction, args=args, daemon=True).start()
+
+
+def _envoyer_email(destinataire, sujet, texte, html):
+    """Envoie un e-mail via Brevo. Renvoie True si l'envoi est accepté."""
+    cle = (os.getenv("BREVO_API_KEY") or "").strip()
+    expediteur = (os.getenv("MAIL_FROM") or "").strip()
+    if not cle or not expediteur:
+        app.logger.warning("E-mail non envoyé : BREVO_API_KEY ou MAIL_FROM non défini")
+        return False
+    try:
+        r = requests.post(
+            BREVO_URL,
+            headers={"api-key": cle, "content-type": "application/json", "accept": "application/json"},
+            json={
+                "sender": {"name": os.getenv("MAIL_FROM_NAME", "Zelyro"), "email": expediteur},
+                "to": [{"email": destinataire}],
+                "subject": sujet,
+                "textContent": texte,
+                "htmlContent": html,
+            },
+            timeout=15,
+        )
+        if r.status_code not in (200, 201, 202):
+            app.logger.error("Brevo a refusé l'envoi (code %s) : %s", r.status_code, r.text[:200])
+            return False
+        return True
+    except requests.RequestException:
+        app.logger.exception("Envoi d'e-mail impossible")
+        return False
+
+
+def _gabarit_email(titre, paragraphes, bouton=None):
+    """E-mail sobre, en texte et en HTML."""
+    texte = "\n\n".join(paragraphes + ([f"{bouton[0]} : {bouton[1]}"] if bouton else [])) + "\n\nZelyro"
+    corps = "".join(f'<p style="margin:0 0 16px;line-height:1.6">{_html.escape(p)}</p>' for p in paragraphes)
+    if bouton:
+        corps += (f'<p style="margin:24px 0"><a href="{_html.escape(bouton[1])}" '
+                  'style="background:#4F6353;color:#ffffff;text-decoration:none;padding:12px 22px;'
+                  f'border-radius:6px;display:inline-block">{_html.escape(bouton[0])}</a></p>'
+                  f'<p style="margin:0 0 16px;color:#6A7168;font-size:13px;line-height:1.5">'
+                  f'Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :<br>'
+                  f'{_html.escape(bouton[1])}</p>')
+    html = ('<div style="font-family:Arial,Helvetica,sans-serif;color:#1F2A24;max-width:520px;margin:0 auto;padding:24px">'
+            f'<h2 style="font-family:Georgia,serif;font-weight:500;letter-spacing:.08em">ZELYRO</h2>'
+            f'<h3 style="font-weight:600;margin:24px 0 16px">{_html.escape(titre)}</h3>{corps}</div>')
+    return texte, html
+
+
+def _traiter_oubli(email):
+    """Crée un lien à usage unique et l'envoie, si l'adresse a un compte."""
+    try:
+        _assurer_schema()
+        conn = get_db_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT id, email FROM users WHERE lower(email) = %s", (email,))
+            user = cur.fetchone()
+            if not user:
+                return
+            jeton = secrets.token_urlsafe(32)
+            maintenant = _maintenant()
+            # Un seul lien valable à la fois : une nouvelle demande annule les précédentes.
+            cur.execute("UPDATE password_resets SET used_at = %s WHERE user_id = %s AND used_at IS NULL",
+                        (maintenant, user[0]))
+            cur.execute("INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES (%s, %s, %s)",
+                        (user[0], _hash_jeton(jeton), maintenant + timedelta(minutes=RESET_TOKEN_MINUTES)))
+            conn.commit()
+            adresse = user[1]
+        finally:
+            conn.close()
+
+        # L'adresse du site vient de la configuration, jamais de la requête :
+        # sinon un en-tête Host falsifié ferait pointer le lien vers un autre site.
+        site = (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
+        if not site:
+            app.logger.error("Lien de réinitialisation non envoyé : FRONTEND_URL non défini")
+            return
+        # Le jeton est placé après le # : il n'est jamais envoyé au serveur du site ni journalisé.
+        lien = f"{site}/reset-password.html#token={jeton}"
+        texte, html = _gabarit_email(
+            "Réinitialiser votre mot de passe",
+            ["Vous avez demandé à réinitialiser votre mot de passe Zelyro.",
+             f"Ce lien est valable {RESET_TOKEN_MINUTES} minutes et ne peut servir qu'une fois.",
+             "Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail : votre mot de passe reste inchangé."],
+            ("Choisir un nouveau mot de passe", lien))
+        _envoyer_email(adresse, "Réinitialisation de votre mot de passe Zelyro", texte, html)
+    except Exception:
+        app.logger.exception("Réinitialisation du mot de passe : traitement impossible")
+
+
+def _prevenir_changement(adresse):
+    """Prévient le titulaire que le mot de passe vient de changer."""
+    try:
+        texte, html = _gabarit_email(
+            "Votre mot de passe a été modifié",
+            ["Le mot de passe de votre compte Zelyro vient d'être modifié.",
+             "Si ce n'est pas vous, demandez immédiatement une réinitialisation depuis la page de connexion."])
+        _envoyer_email(adresse, "Votre mot de passe Zelyro a été modifié", texte, html)
+    except Exception:
+        app.logger.exception("Notification de changement de mot de passe impossible")
+
+
+@app.route('/auth/change-password', methods=['POST'])
+@limiter.limit("5 per 15 minutes", key_func=_cle_utilisateur,
+               deduct_when=lambda reponse: reponse.status_code >= 400)
+@token_required
+def change_password():
+    """Changer son mot de passe en étant connecté.
+
+    Un mauvais mot de passe actuel renvoie 400 et non 401 : le site
+    déconnecte l'utilisateur sur un 401, ce qui serait déroutant ici.
+    """
+    data = request.get_json(silent=True) or {}
+    actuel = data.get('current_password')
+    nouveau = data.get('new_password')
+    if not isinstance(actuel, str) or not actuel:
+        return jsonify({"message": "Mot de passe actuel manquant"}), 400
+    erreur = _erreur_mot_de_passe(nouveau)
+    if erreur:
+        return jsonify({"message": erreur}), 400
+    if nouveau == actuel:
+        return jsonify({"message": "Le nouveau mot de passe doit être différent de l'ancien"}), 400
+
+    try:
+        conn = get_db_connection()
+        try:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("SELECT id, email, password_hash FROM users WHERE id = %s", (request.user_id,))
+            user = cur.fetchone()
+            if not user or not check_password_hash(user['password_hash'], actuel):
+                return jsonify({"message": "Mot de passe actuel incorrect"}), 400
+            cur.execute("UPDATE users SET password_hash = %s, token_version = token_version + 1 "
+                        "WHERE id = %s RETURNING token_version",
+                        (generate_password_hash(nouveau, method='pbkdf2:sha256'), user['id']))
+            version = cur.fetchone()['token_version']
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Les autres sessions ouvertes sont désormais refusées ; celle-ci
+        # reçoit un jeton neuf pour continuer sans se reconnecter.
+        token = create_access_token(identity={'id': user['id'], 'email': user['email'], 'v': version},
+                                    expires=timedelta(hours=TOKEN_LIFETIME_HOURS))
+        _lancer_en_arriere_plan(_prevenir_changement, user['email'])
+        return jsonify({"message": "Mot de passe modifié", "token": token}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/auth/forgot-password', methods=['POST'])
+@limiter.limit("5 per hour")
+@limiter.limit("3 per hour", key_func=_cle_email)
+def forgot_password():
+    """Demander un lien de réinitialisation par e-mail.
+
+    La réponse est identique que l'adresse ait un compte ou non : sinon
+    cette page permettrait de lister les clients de l'outil.
+    """
+    data = request.get_json(silent=True) or {}
+    email = str(data.get('email') or '').strip().lower()
+    if not email or len(email) > 255 or not EMAIL_RE.match(email):
+        return jsonify({"message": "Adresse email invalide"}), 400
+    if not _envoi_configure():
+        # Réponse identique pour toutes les adresses : elle ne renseigne que
+        # sur l'état du service, pas sur les comptes. Mieux vaut le dire que
+        # laisser croire qu'un e-mail part.
+        return jsonify({"message": "L'envoi d'e-mails n'est pas encore activé sur ce service. "
+                                   "Contactez votre administrateur."}), 503
+    _lancer_en_arriere_plan(_traiter_oubli, email)
+    return jsonify({"message": MESSAGE_OUBLI}), 200
+
+
+@app.route('/auth/reset-password', methods=['POST'])
+@limiter.limit("10 per hour")
+def reset_password():
+    """Choisir un nouveau mot de passe avec le lien reçu par e-mail."""
+    data = request.get_json(silent=True) or {}
+    jeton = data.get('token')
+    nouveau = data.get('new_password')
+    if not isinstance(jeton, str) or not 20 <= len(jeton) <= 200:
+        return jsonify({"message": LIEN_INVALIDE}), 400
+    # Vérifié avant de consommer le lien : un mot de passe refusé
+    # permet de réessayer avec le même lien.
+    erreur = _erreur_mot_de_passe(nouveau)
+    if erreur:
+        return jsonify({"message": erreur}), 400
+
+    try:
+        _assurer_schema()
+        conn = get_db_connection()
+        try:
+            cur = conn.cursor()
+            maintenant = _maintenant()
+            cur.execute("""
+                SELECT r.id, r.user_id, u.email FROM password_resets r
+                JOIN users u ON u.id = r.user_id
+                WHERE r.token_hash = %s AND r.used_at IS NULL AND r.expires_at > %s
+                FOR UPDATE OF r
+            """, (_hash_jeton(jeton), maintenant))
+            ligne = cur.fetchone()
+            if not ligne:
+                return jsonify({"message": LIEN_INVALIDE}), 400
+            cur.execute("UPDATE users SET password_hash = %s, token_version = token_version + 1 WHERE id = %s",
+                        (generate_password_hash(nouveau, method='pbkdf2:sha256'), ligne[1]))
+            cur.execute("UPDATE password_resets SET used_at = %s WHERE user_id = %s AND used_at IS NULL",
+                        (maintenant, ligne[1]))
+            conn.commit()
+            adresse = ligne[2]
+        finally:
+            conn.close()
+        _lancer_en_arriere_plan(_prevenir_changement, adresse)
+        return jsonify({"message": "Mot de passe modifié. Vous pouvez maintenant vous connecter."}), 200
+    except Exception:
+        return erreur_interne()
+
 
 @app.route('/auth/profile', methods=['GET'])
 @token_required

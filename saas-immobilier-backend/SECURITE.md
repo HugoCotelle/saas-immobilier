@@ -1,8 +1,8 @@
 # Zelyro — sécurisation : ce qui change et comment déployer
 
 Ce document est destiné à Hugo (accès Render) et Tom (accès GitHub et Vercel).
-Les modifications ont été testées sur une vraie base PostgreSQL (54 tests automatisés,
-plus un essai avec gunicorn et 4 workers). Rien n'est en ligne tant que les fichiers
+Les modifications ont été testées sur une vraie base PostgreSQL (88 tests automatisés,
+plus des essais avec gunicorn et 4 workers, et un essai des pages dans le navigateur). Rien n'est en ligne tant que les fichiers
 ne sont pas poussés sur GitHub.
 
 ## Urgent, à faire tout de suite, sans attendre le déploiement
@@ -45,6 +45,14 @@ ne sont pas poussés sur GitHub.
   renvoyé au navigateur. La clé secrète n'est plus affichée dans les journaux au démarrage.
 - Entrées : longueurs et valeurs autorisées vérifiées, corps de requête limité à 128 Ko, en-têtes de sécurité
   sur toutes les réponses de l'API.
+- Mots de passe : changer son mot de passe depuis la page Compte, « mot de passe oublié » par e-mail (lien
+  valable 30 minutes, à usage unique, jamais stocké en clair, jamais de réponse qui révèle si une adresse a un compte),
+  et un e-mail de prévenance à chaque changement. Après un changement ou une réinitialisation, toutes les autres
+  sessions ouvertes sont coupées. Un compte supprimé perd aussi immédiatement ses sessions.
+  La base reçoit pour cela une colonne (users.token_version) et une table (password_resets). Rien à faire à la main :
+  elles sont créées automatiquement au premier appel après le déploiement (quelques millisecondes, sans perte de données,
+  sans risque si plusieurs processus démarrent en même temps). Une sauvegarde de la base avant le déploiement reste
+  une bonne habitude.
 - Dépendances mises à jour (Flask 3.1, PyJWT, Werkzeug, gunicorn 23, requests) : les anciennes versions
   avaient des failles connues. Aucune faille connue dans les versions choisies au moment du test.
 
@@ -56,11 +64,34 @@ ne sont pas poussés sur GitHub.
 - vercel.json ajoute les en-têtes de sécurité : politique de contenu (le navigateur n'accepte que les scripts du site
   et les appels vers l'API Render), interdiction d'afficher le site dans un cadre (clickjacking), HTTPS forcé,
   pas de fuite d'adresse en Referer.
-- Le rendu visuel est identique. Chaque page a été testée avec la politique de contenu activée : aucune erreur.
+- Nouvelles pages : compte.html (informations et changement de mot de passe, onglet « Compte » dans la barre de navigation),
+  forgot-password.html (demande de lien) et reset-password.html (choix du nouveau mot de passe). La page de connexion
+  reçoit le lien « Mot de passe oublié ? » et l'indication des 10 caractères minimum à l'inscription.
+- Le rendu visuel des pages existantes est identique. Chaque page a été testée avec la politique de contenu activée : aucune erreur.
 
 Important : pour que vercel.json soit pris en compte, le Root Directory du projet Vercel doit être le dossier
 saas-immobilier-frontend (Settings, General, Root Directory). Si vous changez l'adresse du backend Render,
 mettre à jour connect-src dans vercel.json.
+
+## Activer « mot de passe oublié » (Brevo)
+
+Tant que ces étapes ne sont pas faites, « mot de passe oublié » répond honnêtement que l'envoi n'est pas activé
+(le changement de mot de passe depuis la page Compte fonctionne, lui, tout de suite).
+
+1. Créer un compte gratuit sur brevo.com (société française, 300 e-mails par jour gratuits).
+2. Dans Brevo, Expéditeurs, domaines et IP dédiées > Expéditeurs : ajouter l'adresse qui enverra les e-mails et la valider
+   avec le code reçu. Une adresse à votre propre nom de domaine est fortement conseillée : avec une adresse Gmail ou Outlook,
+   les messages risquent d'être refusés ou classés en indésirables.
+3. Dans Brevo, SMTP et API > Clés API : générer une clé. La copier une seule fois, directement dans Render (jamais dans
+   GitHub ni dans une conversation). Si la restriction par adresse IP est activée sur le compte Brevo, la désactiver :
+   Render n'a pas d'adresse IP fixe.
+4. Dans Render (Environment) : BREVO_API_KEY (la clé), MAIL_FROM (l'adresse validée), FRONTEND_URL (l'adresse exacte du site,
+   avec https:// et sans / final) et, si vous voulez, MAIL_FROM_NAME. Enregistrer : Render redémarre le service.
+5. Tester avec votre propre adresse : page de connexion, « Mot de passe oublié ? », lien reçu, nouveau mot de passe.
+   Si rien n'arrive, regarder les journaux Render : une ligne « Brevo a refusé l'envoi (code …) » indique la cause (clé, expéditeur non validé).
+
+Brevo devient un sous-traitant au sens du RGPD (il voit les adresses e-mail des utilisateurs) : à ajouter à la liste
+des prestataires et à la politique de confidentialité.
 
 ## Ordre de déploiement
 
@@ -78,8 +109,8 @@ et Vercel aussi (Deployments, Promote to Production sur l'ancienne version).
 
 ## Variables d'environnement
 
-Voir env-flask.example dans ce dossier. Seules SECRET_KEY, DATABASE_URL et ANTHROPIC_API_KEY sont nécessaires.
-Les autres ont des valeurs par défaut raisonnables.
+Voir env-flask.example dans ce dossier. Seules SECRET_KEY, DATABASE_URL et ANTHROPIC_API_KEY sont nécessaires au fonctionnement
+de base. Les autres ont des valeurs par défaut raisonnables, sauf BREVO_API_KEY, MAIL_FROM et FRONTEND_URL, qui activent « mot de passe oublié ».
 
 ## À savoir
 

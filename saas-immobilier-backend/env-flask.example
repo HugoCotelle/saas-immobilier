@@ -15,8 +15,9 @@ DATABASE_URL=
 ANTHROPIC_API_KEY=
 
 # Domaines autorisés à appeler l'API, séparés par des virgules.
-# Déjà autorisés sans rien écrire : saas-immobilier*.vercel.app de l'équipe immo-flow,
-# et localhost. À renseigner dès qu'un domaine personnalisé existe.
+# Déjà autorisés sans rien écrire : saas-immobilier*.vercel.app des équipes Vercel
+# immo-flow et zelyro, et localhost. À renseigner pour toute autre adresse
+# (domaine personnalisé, autre nom de projet Vercel).
 # ALLOWED_ORIGINS=https://app.zelyro.fr,https://www.zelyro.fr
 
 # Durée de validité d'une connexion, en heures (défaut : 24).
@@ -37,3 +38,16 @@ ANTHROPIC_API_KEY=
 # Uniquement pour `python app.py init-db --demo` : mot de passe du compte de démonstration
 # (aléatoire et affiché une seule fois s'il n'est pas défini).
 # DEMO_PASSWORD=
+
+# --- Mot de passe oublié (envoi d'e-mails via Brevo) ---
+# Sans ces trois variables, « changer son mot de passe » fonctionne quand même,
+# mais « mot de passe oublié » répond que l'envoi n'est pas activé.
+# Clé API Brevo (Brevo : SMTP et API > Clés API). À ne jamais écrire dans GitHub ni dans un message.
+# BREVO_API_KEY=
+# Adresse d'expédition, à valider dans Brevo (Expéditeurs) avant de l'utiliser.
+# MAIL_FROM=contact@votre-domaine.fr
+# MAIL_FROM_NAME=Zelyro
+# Adresse exacte du site, sans / final : c'est elle qui sert à fabriquer le lien de l'e-mail.
+# FRONTEND_URL=https://app.zelyro.fr
+# Durée de validité du lien, en minutes (défaut : 30).
+# RESET_TOKEN_MINUTES=30
