@@ -78,7 +78,7 @@
 
             const qualityBadge = (quality) => {
                 const classes = { hot: 'badge-hot', warm: 'badge-warm', cold: 'badge-cold' };
-                const labels = { hot: 'Chaud', warm: 'Tiède', cold: 'Froid' };
+                const labels = { hot: 'Acheteur actif', warm: 'Projet en cours', cold: 'Premier contact' };
                 if (!labels[quality]) return null;
                 return <span className={`lead-badge ${classes[quality]}`}>{labels[quality]}</span>;
             };
@@ -152,17 +152,17 @@
                                     <button
                                         className={`filter-button ${qualityFilter === 'hot' ? 'active' : ''}`}
                                         onClick={() => setQualityFilter('hot')}>
-                                        Chauds ({count('hot')})
+                                        Acheteurs actifs ({count('hot')})
                                     </button>
                                     <button
                                         className={`filter-button ${qualityFilter === 'warm' ? 'active' : ''}`}
                                         onClick={() => setQualityFilter('warm')}>
-                                        Tièdes ({count('warm')})
+                                        Projets en cours ({count('warm')})
                                     </button>
                                     <button
                                         className={`filter-button ${qualityFilter === 'cold' ? 'active' : ''}`}
                                         onClick={() => setQualityFilter('cold')}>
-                                        Froids ({count('cold')})
+                                        Premiers contacts ({count('cold')})
                                     </button>
                                 </div>
 
