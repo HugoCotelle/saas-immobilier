@@ -1,0 +1,7 @@
+Bibliothèques et polices hébergées localement (aucun appel à un tiers depuis le navigateur).
+
+React 18.3.1 et React DOM 18.3.1      Licence MIT   https://github.com/facebook/react
+@babel/standalone 7.29.9              Licence MIT   https://github.com/babel/babel
+Chart.js 3.9.1                        Licence MIT   https://www.chartjs.org
+Inter (variable, latin)               Licence SIL OFL 1.1   https://rsms.me/inter
+Playfair Display (variable, latin)    Licence SIL OFL 1.1   https://fonts.google.com/specimen/Playfair+Display
