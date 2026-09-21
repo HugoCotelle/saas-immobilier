@@ -60,7 +60,7 @@ TOKEN_LIFETIME_HOURS = int(os.getenv("TOKEN_LIFETIME_HOURS", "24"))
 # prévisualisations ; un domaine personnalisé s'ajoute avec la variable
 # ALLOWED_ORIGINS (adresses complètes séparées par des virgules).
 _ORIGINES_AUTORISEES = [
-    r"^https://saas-immobilier(-[a-z0-9]+)*-immo-flow\.vercel\.app$",
+        r"^https://saas-immobilier(-[a-z0-9]+)*-(immo-flow|zelyro)\.vercel\.app$",
     r"^https://saas-immobilier\.vercel\.app$",
     r"^http://localhost(:\d+)?$",
     r"^http://127\.0\.0\.1(:\d+)?$",
