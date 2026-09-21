@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZELYRO - Matching</title>
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="stylesheet" href="zelyro.css">
+    <style>
+        .content-wrapper { grid-template-columns: 1fr 1.2fr; }
+        .panel { margin-bottom: 0; }
+        .panel-title { margin-bottom: 18px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Déclarée au même niveau que dans les autres pages, hors du
+        // composant : c'est la seule ligne à changer le jour où l'adresse
+        // du serveur change.
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+
+        function MatchingApp() {
+            const [leads, setLeads] = useState([]);
+            const [selectedLeadId, setSelectedLeadId] = useState(null);
+            const [qualityFilter, setQualityFilter] = useState('all');
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [user, setUser] = useState(null);
+
+            useEffect(() => {
+                const token = localStorage.getItem('token');
+                const userData = localStorage.getItem('user');
+                if (!token) {
+                    window.location.href = '/login.html';
+                    return;
+                }
+                if (userData) setUser(JSON.parse(userData));
+                fetchMatches(token);
+            }, []);
+
+            const fetchMatches = async (token) => {
+                try {
+                    setLoading(true);
+                    const response = await fetch(`${API_URL}/api/v1/improved-matches`, {
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+                    });
+                    if (!response.ok) {
+                        if (response.status === 401) {
+                            localStorage.removeItem('token');
+                            localStorage.removeItem('user');
+                            window.location.href = '/login.html';
+                            return;
+                        }
+                        throw new Error(`Erreur API: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    setLeads(data);
+                    if (data.length > 0) setSelectedLeadId(data[0].id);
+                    setError(null);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleLogout = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = '/login.html';
+            };
+
+            const qualityBadge = (quality) => {
+                const classes = { hot: 'badge-hot', warm: 'badge-warm', cold: 'badge-cold' };
+                const labels = { hot: 'Chaud', warm: 'Tiède', cold: 'Froid' };
+                if (!labels[quality]) return null;
+                return <span className={`lead-badge ${classes[quality]}`}>{labels[quality]}</span>;
+            };
+
+            const financingLabel = (status) => ({
+                approved: 'Approuvé',
+                in_progress: 'En cours',
+                pending: 'En attente',
+                rejected: 'Rejeté',
+                unknown: 'Non renseigné'
+            }[status] || status);
+
+            const urgencyLabel = (urgency) => ({
+                immediate: 'Immédiat',
+                '1-3_months': '1 à 3 mois',
+                '3-6_months': '3 à 6 mois',
+                '6plus_months': 'Plus de 6 mois',
+                unknown: 'Non renseigné'
+            }[urgency] || urgency);
+
+            const filteredLeads = leads.filter(lead =>
+                qualityFilter === 'all' ? true : lead.lead_quality === qualityFilter
+            );
+            const selectedLead = leads.find(l => l.id === selectedLeadId);
+            const count = (q) => leads.filter(l => l.lead_quality === q).length;
+
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo">ZELYRO</div>
+                            <nav>
+                                <a href="/index.html">Leads</a>
+                                <a href="/biens.html">Biens</a>
+                                <a href="/matching.html" className="active">Matching</a>
+                                <a href="/dashboard.html">Dashboard</a>
+                            </nav>
+                            <div className="user-info">
+                                {user && <span className="user-email">{user.email}</span>}
+                                <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="container">
+                        <h1 className="page-title">Matching</h1>
+                        <p className="page-subtitle">
+                            Les meilleures correspondances pour chacun de vos {leads.length} prospects
+                        </p>
+
+                        {error && <div className="error">Erreur: {error}</div>}
+
+                        {loading ? (
+                            <div className="loading">
+                                <div className="loader"></div>
+                                <p style={{ marginTop: '20px' }}>Chargement des correspondances...</p>
+                            </div>
+                        ) : leads.length === 0 ? (
+                            <div className="panel">
+                                <div className="empty-state">Aucun prospect à rapprocher pour le moment.</div>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="filters">
+                                    <button
+                                        className={`filter-button ${qualityFilter === 'all' ? 'active' : ''}`}
+                                        onClick={() => setQualityFilter('all')}>
+                                        Tous ({leads.length})
+                                    </button>
+                                    <button
+                                        className={`filter-button ${qualityFilter === 'hot' ? 'active' : ''}`}
+                                        onClick={() => setQualityFilter('hot')}>
+                                        Chauds ({count('hot')})
+                                    </button>
+                                    <button
+                                        className={`filter-button ${qualityFilter === 'warm' ? 'active' : ''}`}
+                                        onClick={() => setQualityFilter('warm')}>
+                                        Tièdes ({count('warm')})
+                                    </button>
+                                    <button
+                                        className={`filter-button ${qualityFilter === 'cold' ? 'active' : ''}`}
+                                        onClick={() => setQualityFilter('cold')}>
+                                        Froids ({count('cold')})
+                                    </button>
+                                </div>
+
+                                <div className="content-wrapper">
+                                    <div className="panel leads-panel">
+                                        <div className="panel-title">Prospects</div>
+                                        {filteredLeads.length === 0 ? (
+                                            <div className="empty-state">Aucun prospect dans cette catégorie</div>
+                                        ) : (
+                                            filteredLeads.map(lead => (
+                                                <div
+                                                    key={lead.id}
+                                                    className={`lead-item ${lead.lead_quality || ''} ${selectedLeadId === lead.id ? 'selected' : ''}`}
+                                                    onClick={() => setSelectedLeadId(lead.id)}>
+                                                    <div className="lead-name">{lead.name}</div>
+                                                    <div className="lead-field">
+                                                        <span className="lead-label">Email :</span>
+                                                        <span className="lead-value">{lead.email || 'N/A'}</span>
+                                                    </div>
+                                                    <div className="lead-field">
+                                                        <span className="lead-label">Tél. :</span>
+                                                        <span className="lead-value">{lead.phone || 'N/A'}</span>
+                                                    </div>
+                                                    <div className="lead-field">
+                                                        <span className="lead-label">Budget :</span>
+                                                        <span className="lead-value">
+                                                            {lead.budget ? `${lead.budget.toLocaleString('fr-FR')} €` : 'N/A'}
+                                                        </span>
+                                                    </div>
+                                                    <div className="lead-field">
+                                                        <span className="lead-label">Secteur :</span>
+                                                        <span className="lead-value">{lead.location || 'N/A'}</span>
+                                                    </div>
+                                                    {qualityBadge(lead.lead_quality)}
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+
+                                    <div className="panel">
+                                        {selectedLead ? (
+                                            <>
+                                                <div className="panel-title">{selectedLead.name}</div>
+
+                                                <div className="detail-block">
+                                                    <div className="detail-label">Budget</div>
+                                                    <div className="detail-value">
+                                                        {selectedLead.budget ? `${selectedLead.budget.toLocaleString('fr-FR')} €` : 'Non renseigné'}
+                                                    </div>
+                                                </div>
+                                                <div className="detail-block">
+                                                    <div className="detail-label">Type recherché</div>
+                                                    <div className="detail-value">{selectedLead.property_type || 'Non renseigné'}</div>
+                                                </div>
+                                                <div className="detail-block">
+                                                    <div className="detail-label">Localisation</div>
+                                                    <div className="detail-value">{selectedLead.location || 'Non renseignée'}</div>
+                                                </div>
+
+                                                {(selectedLead.financing_status && selectedLead.financing_status !== 'unknown') ||
+                                                 (selectedLead.purchase_urgency && selectedLead.purchase_urgency !== 'unknown') ? (
+                                                    <div className="info-box">
+                                                        {selectedLead.financing_status && selectedLead.financing_status !== 'unknown' && (
+                                                            <div className="info-item">Financement : {financingLabel(selectedLead.financing_status)}</div>
+                                                        )}
+                                                        {selectedLead.purchase_urgency && selectedLead.purchase_urgency !== 'unknown' && (
+                                                            <div className="info-item">Échéance : {urgencyLabel(selectedLead.purchase_urgency)}</div>
+                                                        )}
+                                                    </div>
+                                                ) : null}
+
+                                                <a href={`/leads-profile.html?id=${selectedLead.id}`} className="edit-button">
+                                                    Éditer les détails
+                                                </a>
+
+                                                <div className="section-divider"></div>
+
+                                                <div className="panel-title">
+                                                    Biens correspondants
+                                                    {selectedLead.matches && selectedLead.matches.length > 0 &&
+                                                        ` (${selectedLead.matches.length})`}
+                                                </div>
+
+                                                {selectedLead.matches && selectedLead.matches.length > 0 ? (
+                                                    selectedLead.matches.map((match, idx) => (
+                                                        <div key={idx} className="match-card">
+                                                            <div className="match-header">
+                                                                <div>
+                                                                    <div className="match-title">{match.title || match.name}</div>
+                                                                    <div className="match-address">{match.address || 'Adresse non renseignée'}</div>
+                                                                </div>
+                                                                <div className="match-score">{match.score}%</div>
+                                                            </div>
+                                                            <div className="match-field">
+                                                                {match.type || 'N/A'}
+                                                                {match.rooms ? ` · ${match.rooms} pièces` : ''}
+                                                                {match.size ? ` · ${match.size} m²` : ''}
+                                                            </div>
+                                                            <div className="match-price">
+                                                                {match.price ? `${match.price.toLocaleString('fr-FR')} €` : 'Prix non renseigné'}
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                ) : (
+                                                    <div className="empty-state">Aucun bien ne correspond à ce prospect</div>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <div className="empty-state">Sélectionnez un prospect pour voir ses correspondances</div>
+                                        )}
+                                    </div>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </>
+            );
+        }
+
+        ReactDOM.render(<MatchingApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>

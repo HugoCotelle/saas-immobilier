@@ -1,0 +1,11 @@
+# Versions testées (Python 3.11 à 3.13). Pour les mettre à jour :
+#   pip install -U -r requirements.txt && pip-audit -r requirements.txt
+Flask==3.1.3
+flask-cors==6.0.5
+Flask-Limiter==3.12
+PyJWT==2.14.0
+Werkzeug==3.1.8
+psycopg2-binary==2.9.13
+python-dotenv==1.2.3
+gunicorn==23.0.0
+requests==2.34.2

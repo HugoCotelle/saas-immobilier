@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZELYRO - Connexion</title>
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="stylesheet" href="zelyro.css">
+</head>
+<body class="auth">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+
+        function AuthApp() {
+            const [activeTab, setActiveTab] = useState('login');
+            const [loading, setLoading] = useState(false);
+            const [message, setMessage] = useState(null);
+            const [loginData, setLoginData] = useState({ email: '', password: '' });
+            const [signupData, setSignupData] = useState({
+                email: '', password: '', confirmPassword: '', firstName: '', companyName: ''
+            });
+
+            useEffect(() => {
+                const token = localStorage.getItem('token');
+                if (token) window.location.href = '/index.html';
+            }, []);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setMessage(null);
+                setLoading(true);
+                try {
+                    const response = await fetch(`${API_URL}/auth/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(loginData)
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        localStorage.setItem('token', data.token);
+                        localStorage.setItem('user', JSON.stringify(data.user));
+                        setMessage({ type: 'success', text: 'Connexion réussie, redirection…' });
+                        setTimeout(() => { window.location.href = '/index.html'; }, 1000);
+                    } else {
+                        setMessage({ type: 'error', text: data.message || 'Identifiants incorrects' });
+                    }
+                } catch (error) {
+                    setMessage({ type: 'error', text: 'Serveur injoignable : ' + error.message });
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleSignup = async (e) => {
+                e.preventDefault();
+                setMessage(null);
+                if (signupData.password !== signupData.confirmPassword) {
+                    setMessage({ type: 'error', text: 'Les mots de passe ne correspondent pas' });
+                    return;
+                }
+                setLoading(true);
+                try {
+                    const response = await fetch(`${API_URL}/auth/register`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            email: signupData.email,
+                            password: signupData.password,
+                            first_name: signupData.firstName,
+                            company_name: signupData.companyName
+                        })
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        localStorage.setItem('token', data.token);
+                        localStorage.setItem('user', JSON.stringify(data.user));
+                        setMessage({ type: 'success', text: 'Compte créé, redirection…' });
+                        setTimeout(() => { window.location.href = '/index.html'; }, 1000);
+                    } else {
+                        setMessage({ type: 'error', text: data.message || 'Inscription impossible' });
+                    }
+                } catch (error) {
+                    setMessage({ type: 'error', text: 'Serveur injoignable : ' + error.message });
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="auth-container">
+                    <div className="auth-header">
+                        <h1>ZELYRO</h1>
+                        <p>Chaque lead. Chaque bien. Aucune opportunité perdue.</p>
+                    </div>
+
+                    {message && (
+                        <div className={message.type === 'error' ? 'error' : 'success'}>
+                            {message.text}
+                        </div>
+                    )}
+
+                    <div className="tabs">
+                        <div className={`tab ${activeTab === 'login' ? 'active' : ''}`}
+                            onClick={() => { setActiveTab('login'); setMessage(null); }}>Connexion</div>
+                        <div className={`tab ${activeTab === 'signup' ? 'active' : ''}`}
+                            onClick={() => { setActiveTab('signup'); setMessage(null); }}>Inscription</div>
+                    </div>
+
+                    {activeTab === 'login' && (
+                        <form onSubmit={handleLogin}>
+                            <div className="form-group">
+                                <label>Email</label>
+                                <input type="email" value={loginData.email}
+                                    onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
+                                    placeholder="vous@agence.fr" required disabled={loading} />
+                            </div>
+                            <div className="form-group">
+                                <label>Mot de passe</label>
+                                <input type="password" value={loginData.password}
+                                    onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
+                                    placeholder="••••••••" required disabled={loading} />
+                            </div>
+                            <button type="submit" disabled={loading}>
+                                {loading ? 'Connexion…' : 'Se connecter'}
+                            </button>
+                        </form>
+                    )}
+
+                    {activeTab === 'signup' && (
+                        <form onSubmit={handleSignup}>
+                            <div className="form-group">
+                                <label>Email</label>
+                                <input type="email" value={signupData.email}
+                                    onChange={(e) => setSignupData({ ...signupData, email: e.target.value })}
+                                    placeholder="vous@agence.fr" required disabled={loading} />
+                            </div>
+                            <div className="form-group">
+                                <label>Prénom</label>
+                                <input type="text" value={signupData.firstName}
+                                    onChange={(e) => setSignupData({ ...signupData, firstName: e.target.value })}
+                                    placeholder="Tom" disabled={loading} />
+                            </div>
+                            <div className="form-group">
+                                <label>Agence</label>
+                                <input type="text" value={signupData.companyName}
+                                    onChange={(e) => setSignupData({ ...signupData, companyName: e.target.value })}
+                                    placeholder="Nom de votre agence" disabled={loading} />
+                            </div>
+                            <div className="form-group">
+                                <label>Mot de passe</label>
+                                <input type="password" value={signupData.password}
+                                    onChange={(e) => setSignupData({ ...signupData, password: e.target.value })}
+                                    placeholder="••••••••" required disabled={loading} />
+                            </div>
+                            <div className="form-group">
+                                <label>Confirmer le mot de passe</label>
+                                <input type="password" value={signupData.confirmPassword}
+                                    onChange={(e) => setSignupData({ ...signupData, confirmPassword: e.target.value })}
+                                    placeholder="••••••••" required disabled={loading} />
+                            </div>
+                            <button type="submit" disabled={loading}>
+                                {loading ? 'Création…' : "S'inscrire"}
+                            </button>
+                        </form>
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.render(<AuthApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>

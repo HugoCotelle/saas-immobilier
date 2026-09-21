@@ -1,0 +1,39 @@
+# Variables d'environnement du backend Flask (app.py).
+# Sur Render : onglet Environment. En local : copier ce fichier en .env (jamais sur GitHub).
+# Le fichier .env.example existant décrit l'ancien backend Node et n'est plus à jour.
+
+# OBLIGATOIRE. Signe les jetons de connexion. L'application refuse de démarrer
+# si elle est absente ou fait moins de 32 caractères.
+# Générer : python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+# (JWT_SECRET est aussi accepté, pour compatibilité avec l'ancien .env.example.)
+SECRET_KEY=
+
+# OBLIGATOIRE. Adresse de la base PostgreSQL (fournie par Render).
+DATABASE_URL=
+
+# Clé de l'API Anthropic pour l'extraction de fiches prospect (route /api/v1/extract).
+ANTHROPIC_API_KEY=
+
+# Domaines autorisés à appeler l'API, séparés par des virgules.
+# Déjà autorisés sans rien écrire : saas-immobilier*.vercel.app de l'équipe immo-flow,
+# et localhost. À renseigner dès qu'un domaine personnalisé existe.
+# ALLOWED_ORIGINS=https://app.zelyro.fr,https://www.zelyro.fr
+
+# Durée de validité d'une connexion, en heures (défaut : 24).
+# TOKEN_LIFETIME_HOURS=24
+
+# Nombre de proxys de confiance devant l'application (défaut : 1, Render).
+# Sert à lire la vraie adresse IP du visiteur pour les limites de débit.
+# Si les inscriptions sont refusées (429) pour tout le monde, essayer 2.
+# TRUSTED_PROXIES=1
+
+# Stockage partagé des compteurs de limites de débit (défaut : mémoire de chaque worker).
+# Avec plusieurs workers gunicorn, un Redis rend les limites exactes.
+# RATELIMIT_STORAGE_URI=redis://...
+
+# Créer les tables au démarrage (1 = oui). Non nécessaire si la base existe déjà.
+# INIT_DB_ON_START=0
+
+# Uniquement pour `python app.py init-db --demo` : mot de passe du compte de démonstration
+# (aléatoire et affiché une seule fois s'il n'est pas défini).
+# DEMO_PASSWORD=
