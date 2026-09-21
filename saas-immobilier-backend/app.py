@@ -2,7 +2,8 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from datetime import datetime, timedelta, timezone
+from contextlib import contextmanager
+from datetime import date, datetime, timedelta, timezone
 import hashlib
 import html as _html
 import threading
@@ -76,7 +77,7 @@ _ORIGINES_AUTORISEES += [
 CORS(
     app,
     origins=_ORIGINES_AUTORISEES,
-    methods=["GET", "POST", "PUT", "OPTIONS"],
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
     max_age=600,
 )
@@ -164,6 +165,18 @@ def erreur_interne():
 FINANCING_VALUES = {'unknown', 'approved', 'in_progress', 'pending', 'rejected'}
 URGENCY_VALUES = {'unknown', 'immediate', '1-3_months', '3-6_months', '6plus_months'}
 
+# Étapes du suivi d'un prospect, dans l'ordre du parcours. Les valeurs sont
+# celles de la colonne leads.status ; seuls les libellés sont en français.
+STATUTS = ('nouveau', 'contacte', 'visite', 'offre', 'signe', 'perdu')
+STATUTS_LIBELLES = {
+    'nouveau': 'Nouveau', 'contacte': 'Contacté', 'visite': 'Visite',
+    'offre': 'Offre', 'signe': 'Signé', 'perdu': 'Perdu',
+}
+STATUTS_CLOS = ('signe', 'perdu')
+SOURCES = {'manuel', 'import', 'formulaire', 'extraction'}
+# Score à partir duquel un bien est signalé par e-mail à l'agent.
+ALERTE_SCORE_MIN = int(os.getenv("ALERT_MIN_SCORE", "70"))
+
 
 def _texte_court(v, maxlen):
     """Texte nettoyé et tronqué, ou None. Évite de dépasser la taille des colonnes."""
@@ -223,6 +236,46 @@ _DDL_COMPTES = (
     )""",
     "CREATE INDEX IF NOT EXISTS password_resets_user_idx ON password_resets (user_id)",
 )
+
+# Ce que le suivi des prospects ajoute : statuts, notes, relances, alertes
+# de matching, source des prospects et adresse du formulaire de contact.
+# Même principe que ci-dessus : tout est rejouable sans danger.
+_DDL_SUIVI = (
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS source VARCHAR(30)",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS first_contact_at TIMESTAMP",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS status_changed_at TIMESTAMP",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS consent_at TIMESTAMP",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS capture_token VARCHAR(64)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS alerts_enabled BOOLEAN NOT NULL DEFAULT TRUE",
+    "CREATE UNIQUE INDEX IF NOT EXISTS users_capture_token_idx ON users (capture_token) WHERE capture_token IS NOT NULL",
+    """CREATE TABLE IF NOT EXISTS lead_notes (
+        id SERIAL PRIMARY KEY,
+        lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind VARCHAR(10) NOT NULL DEFAULT 'note',
+        body TEXT NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS lead_notes_lead_idx ON lead_notes (lead_id)",
+    """CREATE TABLE IF NOT EXISTS lead_reminders (
+        id SERIAL PRIMARY KEY,
+        lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        due_date DATE NOT NULL,
+        label VARCHAR(255) NOT NULL,
+        done_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS lead_reminders_lead_idx ON lead_reminders (lead_id)",
+    "CREATE INDEX IF NOT EXISTS lead_reminders_user_open_idx ON lead_reminders (user_id, due_date) WHERE done_at IS NULL",
+    """CREATE TABLE IF NOT EXISTS match_alerts (
+        lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+        property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+        score INTEGER,
+        sent_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (lead_id, property_id)
+    )""",
+)
 _schema_pret = False
 _schema_verrou = threading.Lock()
 
@@ -241,11 +294,18 @@ def _assurer_schema():
             cur.execute("""
                 SELECT EXISTS (SELECT 1 FROM information_schema.columns
                                WHERE table_name = 'users' AND column_name = 'token_version'),
-                       to_regclass('password_resets') IS NOT NULL
+                       to_regclass('password_resets') IS NOT NULL,
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'users' AND column_name = 'alerts_enabled'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'leads' AND column_name = 'consent_at'),
+                       to_regclass('lead_notes') IS NOT NULL,
+                       to_regclass('lead_reminders') IS NOT NULL,
+                       to_regclass('match_alerts') IS NOT NULL
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
-                for ddl in _DDL_COMPTES:
+                for ddl in _DDL_COMPTES + _DDL_SUIVI:
                     cur.execute(ddl)
             conn.commit()
             _schema_pret = True
@@ -371,7 +431,7 @@ def init_database(demo=False):
             "CREATE INDEX IF NOT EXISTS properties_user_id_idx ON properties (user_id)",
         ):
             cursor.execute(ddl)
-        for ddl in _DDL_COMPTES:
+        for ddl in _DDL_COMPTES + _DDL_SUIVI:
             cursor.execute(ddl)
 
         # Vérifier si vide
@@ -833,7 +893,7 @@ def get_profile():
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, email, first_name, company_name, created_at FROM users WHERE id = %s", (request.user_id,))
+        cur.execute("SELECT id, email, first_name, company_name, created_at, alerts_enabled FROM users WHERE id = %s", (request.user_id,))
         user = cur.fetchone()
         cur.close()
         conn.close()
@@ -895,60 +955,100 @@ def derive_lead_quality(lead):
     return 'cold'
 
 
-def calculate_lead_score(lead, property_item):
-    score = 0
-    if lead['budget']:
-        price_diff = abs(property_item['price'] - lead['budget'])
-        budget_ratio = price_diff / lead['budget']
-        if budget_ratio < 0.05:
-            score += 20
-        elif budget_ratio < 0.10:
-            score += 18
-        elif budget_ratio < 0.15:
-            score += 15
-        elif budget_ratio < 0.20:
-            score += 12
-        elif budget_ratio < 0.30:
-            score += 8
+def _detail_score(lead, property_item):
+    """Renvoie (score, raisons) : le score de correspondance entre un
+    prospect et un bien, et les phrases qui expliquent d'où il vient.
 
-    if lead.get('property_type') == property_item.get('property_type'):
+    Les points sont ceux de l'ancien calcul, à l'identique. Seules les
+    raisons sont nouvelles : elles permettent à l'agent de voir pourquoi
+    un bien remonte, et de contester le classement s'il n'est pas d'accord.
+    """
+    score = 0
+    raisons = []
+
+    budget = lead.get('budget')
+    prix = property_item.get('price')
+    if budget and prix is not None:
+        ecart = abs(prix - budget) / budget
+        pct = round(ecart * 100)
+        if ecart < 0.05:
+            score += 20
+            raisons.append("Budget quasi identique au prix" if pct == 0 else f"Budget très proche du prix (écart de {pct} %)")
+        elif ecart < 0.10:
+            score += 18
+            raisons.append(f"Budget très proche du prix (écart de {pct} %)")
+        elif ecart < 0.15:
+            score += 15
+            raisons.append(f"Budget proche du prix (écart de {pct} %)")
+        elif ecart < 0.20:
+            score += 12
+            raisons.append(f"Budget proche du prix (écart de {pct} %)")
+        elif ecart < 0.30:
+            score += 8
+            raisons.append(f"Prix à {pct} % du budget, à discuter")
+
+    type_lead = lead.get('property_type')
+    type_bien = property_item.get('property_type')
+    if type_lead == type_bien:
         score += 30
-    elif lead.get('property_type') in ['Appartement', 'Maison'] and property_item.get('property_type') in ['Appartement', 'Maison']:
+        if type_lead:
+            raisons.append(f"Même type de bien : {type_lead}")
+    elif type_lead in ['Appartement', 'Maison'] and type_bien in ['Appartement', 'Maison']:
         score += 15
+        raisons.append("Type voisin (appartement ou maison)")
 
     # La localisation est le seul critère éliminatoire : un budget et un
     # type qui collent ne rattrapent pas une ville à 750 km.
     points_loc, hors_secteur = score_localisation(lead, property_item)
     if hors_secteur:
-        return 0
+        return 0, ["Hors du secteur recherché"]
     score += points_loc
+    if points_loc == 20:
+        raisons.append(f"Secteur recherché : {lead.get('location')}")
+    elif points_loc == 15:
+        raisons.append("Même ville, autre arrondissement")
+    elif not lead.get('location'):
+        raisons.append("Prospect ouvert sur le secteur")
 
     financing_status = lead.get('financing_status', 'unknown')
     if financing_status == 'approved':
         score += 20
+        raisons.append("Financement validé")
     elif financing_status == 'in_progress':
         score += 15
+        raisons.append("Financement en cours")
     elif financing_status == 'pending':
         score += 10
+        raisons.append("Financement en attente")
     else:
         score += 5
 
     urgency = lead.get('purchase_urgency', 'unknown')
     if urgency == 'immediate':
         score += 15
+        raisons.append("Achat immédiat")
     elif urgency == '1-3_months':
         score += 12
+        raisons.append("Achat prévu sous 1 à 3 mois")
     elif urgency == '3-6_months':
         score += 8
+        raisons.append("Achat prévu sous 3 à 6 mois")
     elif urgency == '6plus_months':
         score += 4
+        raisons.append("Achat prévu dans plus de 6 mois")
     else:
         score += 5
 
     # Le multiplicateur par lead_quality a été retiré : le financement et
     # l'urgence sont déjà comptés ci-dessus, les réappliquer les comptait
     # deux fois.
-    return min(100, max(0, int(score)))
+    return min(100, max(0, int(score))), raisons
+
+
+def calculate_lead_score(lead, property_item):
+    return _detail_score(lead, property_item)[0]
+
+
 def normaliser(txt):
     """Minuscules, sans accents. « Marseille » et « marseille » doivent
     correspondre, tout comme « Bécon » et « Becon »."""
@@ -1016,12 +1116,19 @@ def get_leads():
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, name, email, phone, budget, location, property_type, status, financing_status, purchase_urgency FROM leads WHERE user_id = %s ORDER BY id", (request.user_id,))
+        cur.execute("""
+            SELECT id, name, email, phone, budget, location, property_type, status,
+                   financing_status, purchase_urgency, source, created_at,
+                   (SELECT MIN(r.due_date) FROM lead_reminders r
+                     WHERE r.lead_id = leads.id AND r.done_at IS NULL) AS next_reminder
+            FROM leads WHERE user_id = %s ORDER BY id
+        """, (request.user_id,))
         leads = cur.fetchall()
         cur.close()
         conn.close()
         for lead in leads:
             lead['lead_quality'] = derive_lead_quality(lead)
+            lead['next_reminder'] = _iso(lead['next_reminder'])
         return jsonify(leads), 200
     except Exception:
         return erreur_interne()
@@ -1052,10 +1159,10 @@ def create_lead():
         cur.execute("""
             INSERT INTO leads
                 (user_id, name, email, phone, budget, location, property_type,
-                 status, financing_status, purchase_urgency)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s)
+                 status, financing_status, purchase_urgency, source)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s)
             RETURNING id, name, email, phone, budget, location, property_type,
-                      status, financing_status, purchase_urgency
+                      status, financing_status, purchase_urgency, source
         """, (
             request.user_id,
             nom[:255],
@@ -1065,7 +1172,8 @@ def create_lead():
             _texte_court(data.get('location'), 255),
             _texte_court(data.get('property_type'), 100),
             _choix(data.get('financing_status'), FINANCING_VALUES),
-            _choix(data.get('purchase_urgency'), URGENCY_VALUES)
+            _choix(data.get('purchase_urgency'), URGENCY_VALUES),
+            _choix(data.get('source'), SOURCES, 'manuel')
         ))
         lead = cur.fetchone()
         conn.commit()
@@ -1073,6 +1181,7 @@ def create_lead():
         conn.close()
 
         lead['lead_quality'] = derive_lead_quality(lead)
+        _lancer_en_arriere_plan(_alertes_matching, request.user_id, [lead['id']], None)
         return jsonify(lead), 201
     except Exception:
         return erreur_interne()
@@ -1136,6 +1245,7 @@ def create_property():
         cur.close()
         conn.close()
 
+        _lancer_en_arriere_plan(_alertes_matching, request.user_id, None, [bien['id']])
         return jsonify(bien), 201
     except Exception:
         return erreur_interne()
@@ -1167,7 +1277,7 @@ def get_lead_detail(lead_id):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, user_id, name, email, phone, budget, location, property_type, status, financing_status, purchase_urgency, lead_quality, financing_amount, notes, created_at FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.user_id))
+        cur.execute("SELECT id, user_id, name, email, phone, budget, location, property_type, status, financing_status, purchase_urgency, lead_quality, financing_amount, notes, created_at, source, status_changed_at, first_contact_at, consent_at FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.user_id))
         lead = cur.fetchone()
         cur.close()
         conn.close()
@@ -1265,9 +1375,9 @@ def get_improved_matches():
         for lead in leads:
             matches = []
             for prop in properties:
-                score = calculate_lead_score(lead, prop)
+                score, raisons = _detail_score(lead, prop)
                 if score > 30:
-                    matches.append({"property_id": prop['id'], "address": prop['address'], "title": prop['title'], "type": prop['property_type'], "price": prop['price'], "rooms": prop['rooms'], "size": prop['size'], "score": score})
+                    matches.append({"property_id": prop['id'], "address": prop['address'], "title": prop['title'], "type": prop['property_type'], "price": prop['price'], "rooms": prop['rooms'], "size": prop['size'], "score": score, "reasons": raisons})
             matches.sort(key=lambda x: x['score'], reverse=True)
             result.append({"id": lead['id'], "name": lead['name'], "email": lead['email'], "phone": lead['phone'], "budget": lead['budget'], "location": lead['location'], "property_type": lead['property_type'], "financing_status": lead['financing_status'], "purchase_urgency": lead['purchase_urgency'], "lead_quality": derive_lead_quality(lead), "matches": matches})
         # Les leads les plus chauds d'abord.
@@ -1276,6 +1386,693 @@ def get_improved_matches():
         return jsonify(result), 200
     except Exception:
         return erreur_interne()
+
+# ===== SUIVI DES PROSPECTS =====
+
+@contextmanager
+def _base():
+    """Connexion et curseur (lignes sous forme de dictionnaires), toujours
+    refermés. Sans commit explicite, rien n'est enregistré."""
+    conn = get_db_connection()
+    try:
+        yield conn, conn.cursor(cursor_factory=RealDictCursor)
+    finally:
+        conn.close()
+
+
+def _iso(valeur):
+    """Date ou heure en texte ISO, que tous les navigateurs savent lire.
+    Les heures sont en UTC : on ajoute le Z pour que le navigateur les
+    convertisse dans le fuseau de l'agent."""
+    if valeur is None:
+        return None
+    if isinstance(valeur, datetime):
+        return valeur.isoformat() + 'Z'
+    return valeur.isoformat()
+
+
+def _aujourdhui():
+    """La date du jour à Paris : une relance « aujourd'hui » ne doit pas
+    basculer à 2 h du matin. Repli sur UTC si les fuseaux sont absents."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Europe/Paris")).date()
+    except Exception:
+        return datetime.utcnow().date()
+
+
+def _date_valide(valeur):
+    """Date AAAA-MM-JJ raisonnable (un an en arrière, cinq ans devant), sinon None."""
+    try:
+        d = date.fromisoformat(str(valeur or '')[:10])
+    except ValueError:
+        return None
+    aujourdhui = _aujourdhui()
+    if d < aujourdhui - timedelta(days=366) or d > aujourdhui + timedelta(days=366 * 5):
+        return None
+    return d
+
+
+def _site_url():
+    return (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
+
+
+@app.route('/api/v1/leads/<int:lead_id>', methods=['DELETE'])
+@token_required
+def delete_lead(lead_id):
+    """Supprimer un prospect avec ses notes, relances et alertes (droit à
+    l'effacement). L'appartenance au compte est vérifiée dans la requête."""
+    try:
+        with _base() as (conn, cur):
+            cur.execute("DELETE FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.user_id))
+            supprimes = cur.rowcount
+            conn.commit()
+        if supprimes == 0:
+            return jsonify({"message": "Lead not found"}), 404
+        return jsonify({"message": "Prospect supprimé"}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/leads/<int:lead_id>/status', methods=['PUT'])
+@token_required
+def update_lead_status(lead_id):
+    """Faire avancer un prospect dans le suivi. Le changement est aussi
+    inscrit dans l'historique, et la première sortie de « nouveau » date le
+    premier contact (utilisé pour le délai de réponse du tableau de bord)."""
+    try:
+        data = request.get_json(silent=True) or {}
+        nouveau = data.get('status')
+        if nouveau not in STATUTS:
+            return jsonify({"message": "Statut inconnu"}), 400
+        with _base() as (conn, cur):
+            cur.execute("SELECT status FROM leads WHERE id = %s AND user_id = %s FOR UPDATE",
+                        (lead_id, request.user_id))
+            ligne = cur.fetchone()
+            if not ligne:
+                return jsonify({"message": "Lead not found"}), 404
+            ancien = ligne['status'] if ligne['status'] in STATUTS else 'nouveau'
+            if ancien != nouveau:
+                maintenant = _maintenant()
+                # Les dates du prospect utilisent l'horloge de la base, comme
+                # created_at : la différence entre les deux (délai de première
+                # réponse) reste juste quel que soit le fuseau du serveur.
+                cur.execute("""
+                    UPDATE leads SET status = %s, status_changed_at = NOW(),
+                        first_contact_at = CASE WHEN %s <> 'nouveau'
+                                                THEN COALESCE(first_contact_at, NOW())
+                                                ELSE first_contact_at END
+                    WHERE id = %s AND user_id = %s
+                """, (nouveau, nouveau, lead_id, request.user_id))
+                cur.execute("""
+                    INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
+                    VALUES (%s, %s, 'statut', %s, %s)
+                """, (lead_id, request.user_id,
+                      f"{STATUTS_LIBELLES[ancien]} → {STATUTS_LIBELLES[nouveau]}", maintenant))
+                conn.commit()
+        return jsonify({"status": nouveau}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/leads/<int:lead_id>/notes', methods=['GET'])
+@token_required
+def get_lead_notes(lead_id):
+    """L'historique d'un prospect : notes de l'agent et changements de statut."""
+    try:
+        with _base() as (conn, cur):
+            cur.execute("SELECT 1 FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.user_id))
+            if not cur.fetchone():
+                return jsonify({"message": "Lead not found"}), 404
+            cur.execute("""
+                SELECT id, kind, body, created_at FROM lead_notes
+                WHERE lead_id = %s AND user_id = %s
+                ORDER BY created_at DESC, id DESC LIMIT 200
+            """, (lead_id, request.user_id))
+            notes = cur.fetchall()
+        for n in notes:
+            n['created_at'] = _iso(n['created_at'])
+        return jsonify(notes), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/leads/<int:lead_id>/notes', methods=['POST'])
+@token_required
+def add_lead_note(lead_id):
+    try:
+        data = request.get_json(silent=True) or {}
+        texte = _texte_court(data.get('body'), 2000)
+        if not texte:
+            return jsonify({"message": "La note est vide"}), 400
+        with _base() as (conn, cur):
+            cur.execute("SELECT 1 FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.user_id))
+            if not cur.fetchone():
+                return jsonify({"message": "Lead not found"}), 404
+            cur.execute("""
+                INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
+                VALUES (%s, %s, 'note', %s, %s)
+                RETURNING id, kind, body, created_at
+            """, (lead_id, request.user_id, texte, _maintenant()))
+            note = cur.fetchone()
+            conn.commit()
+        note['created_at'] = _iso(note['created_at'])
+        return jsonify(note), 201
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/leads/<int:lead_id>/notes/<int:note_id>', methods=['DELETE'])
+@token_required
+def delete_lead_note(lead_id, note_id):
+    """Seules les notes écrites à la main se suppriment : l'historique des
+    changements de statut reste intact."""
+    try:
+        with _base() as (conn, cur):
+            cur.execute("""
+                DELETE FROM lead_notes
+                WHERE id = %s AND lead_id = %s AND user_id = %s AND kind = 'note'
+            """, (note_id, lead_id, request.user_id))
+            supprimees = cur.rowcount
+            conn.commit()
+        if supprimees == 0:
+            return jsonify({"message": "Note not found"}), 404
+        return jsonify({"message": "Note supprimée"}), 200
+    except Exception:
+        return erreur_interne()
+
+
+def _rappel_json(r):
+    r['due_date'] = _iso(r['due_date'])
+    r['done_at'] = _iso(r.get('done_at'))
+    r.pop('created_at', None)
+    return r
+
+
+@app.route('/api/v1/leads/<int:lead_id>/reminders', methods=['GET'])
+@token_required
+def get_lead_reminders(lead_id):
+    try:
+        with _base() as (conn, cur):
+            cur.execute("SELECT 1 FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.user_id))
+            if not cur.fetchone():
+                return jsonify({"message": "Lead not found"}), 404
+            cur.execute("""
+                SELECT id, lead_id, due_date, label, done_at, created_at FROM lead_reminders
+                WHERE lead_id = %s AND user_id = %s
+                ORDER BY (done_at IS NOT NULL), due_date, id LIMIT 200
+            """, (lead_id, request.user_id))
+            rappels = cur.fetchall()
+        return jsonify([_rappel_json(r) for r in rappels]), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/leads/<int:lead_id>/reminders', methods=['POST'])
+@token_required
+def add_lead_reminder(lead_id):
+    try:
+        data = request.get_json(silent=True) or {}
+        echeance = _date_valide(data.get('due_date'))
+        if echeance is None:
+            return jsonify({"message": "Date de relance invalide"}), 400
+        libelle = _texte_court(data.get('label'), 255) or "Relancer"
+        with _base() as (conn, cur):
+            cur.execute("SELECT 1 FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.user_id))
+            if not cur.fetchone():
+                return jsonify({"message": "Lead not found"}), 404
+            cur.execute("SELECT COUNT(*) AS n FROM lead_reminders WHERE lead_id = %s AND done_at IS NULL", (lead_id,))
+            if cur.fetchone()['n'] >= 50:
+                return jsonify({"message": "Trop de relances en attente sur ce prospect"}), 400
+            cur.execute("""
+                INSERT INTO lead_reminders (lead_id, user_id, due_date, label, created_at)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id, lead_id, due_date, label, done_at, created_at
+            """, (lead_id, request.user_id, echeance, libelle, _maintenant()))
+            rappel = cur.fetchone()
+            conn.commit()
+        return jsonify(_rappel_json(rappel)), 201
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/reminders/<int:reminder_id>', methods=['PUT'])
+@token_required
+def update_reminder(reminder_id):
+    """Marquer une relance faite (done: true) ou la rouvrir (done: false)."""
+    try:
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data.get('done'), bool):
+            return jsonify({"message": "Valeur « done » attendue (true ou false)"}), 400
+        with _base() as (conn, cur):
+            cur.execute("""
+                UPDATE lead_reminders SET done_at = %s WHERE id = %s AND user_id = %s
+                RETURNING id, lead_id, due_date, label, done_at, created_at
+            """, (_maintenant() if data['done'] else None, reminder_id, request.user_id))
+            rappel = cur.fetchone()
+            conn.commit()
+        if not rappel:
+            return jsonify({"message": "Reminder not found"}), 404
+        return jsonify(_rappel_json(rappel)), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/reminders/<int:reminder_id>', methods=['DELETE'])
+@token_required
+def delete_reminder(reminder_id):
+    try:
+        with _base() as (conn, cur):
+            cur.execute("DELETE FROM lead_reminders WHERE id = %s AND user_id = %s", (reminder_id, request.user_id))
+            supprimes = cur.rowcount
+            conn.commit()
+        if supprimes == 0:
+            return jsonify({"message": "Reminder not found"}), 404
+        return jsonify({"message": "Relance supprimée"}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/reminders', methods=['GET'])
+@token_required
+def get_open_reminders():
+    """Toutes les relances à faire, les plus urgentes d'abord, avec le nom du
+    prospect. Alimente la liste « À faire » du tableau de bord."""
+    try:
+        with _base() as (conn, cur):
+            cur.execute("""
+                SELECT r.id, r.lead_id, r.due_date, r.label, r.done_at, r.created_at,
+                       l.name AS lead_name, l.status AS lead_status
+                FROM lead_reminders r JOIN leads l ON l.id = r.lead_id
+                WHERE r.user_id = %s AND r.done_at IS NULL
+                ORDER BY r.due_date, r.id LIMIT 200
+            """, (request.user_id,))
+            rappels = cur.fetchall()
+        aujourdhui = _aujourdhui()
+        resultat = []
+        for r in rappels:
+            echeance = r['due_date']
+            r = _rappel_json(r)
+            r['en_retard'] = echeance < aujourdhui
+            resultat.append(r)
+        return jsonify(resultat), 200
+    except Exception:
+        return erreur_interne()
+
+
+# ===== IMPORT ET FORMULAIRE DE CONTACT =====
+
+MAX_LIGNES_IMPORT = 300
+
+
+def _chiffres(tel):
+    return re.sub(r'\D', '', tel or '')
+
+
+@app.route('/api/v1/leads/import', methods=['POST'])
+@limiter.limit("20 per hour", key_func=_cle_utilisateur)
+@token_required
+def import_leads():
+    """Importer des prospects (lignes déjà lues par le navigateur).
+
+    Un prospect dont l'e-mail ou le téléphone existe déjà est ignoré : on
+    peut réimporter le même fichier sans créer de doublons. Le navigateur
+    envoie le fichier par paquets de MAX_LIGNES_IMPORT lignes.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        lignes = data.get('rows')
+        if not isinstance(lignes, list) or not lignes:
+            return jsonify({"message": "Aucune ligne à importer"}), 400
+        if len(lignes) > MAX_LIGNES_IMPORT:
+            return jsonify({"message": f"{MAX_LIGNES_IMPORT} lignes maximum par envoi"}), 400
+        decalage = data.get('offset') if isinstance(data.get('offset'), int) and 0 <= data.get('offset') < 1_000_000 else 0
+
+        importes, doublons, invalides, ids = 0, 0, [], []
+        with _base() as (conn, cur):
+            cur.execute("SELECT lower(email) AS e, phone, lower(name) AS n FROM leads WHERE user_id = %s",
+                        (request.user_id,))
+            emails, telephones, noms_seuls = set(), set(), set()
+            for r in cur.fetchall():
+                if r['e']:
+                    emails.add(r['e'])
+                if len(_chiffres(r['phone'])) >= 6:
+                    telephones.add(_chiffres(r['phone']))
+                if not r['e'] and len(_chiffres(r['phone'])) < 6:
+                    noms_seuls.add(r['n'])
+
+            for i, ligne in enumerate(lignes):
+                numero = decalage + i + 1
+                if not isinstance(ligne, dict):
+                    invalides.append({"ligne": numero, "raison": "Ligne illisible"})
+                    continue
+                nom = _texte_court(ligne.get('name'), 255)
+                if not nom:
+                    invalides.append({"ligne": numero, "raison": "Nom manquant"})
+                    continue
+                email = (_texte_court(ligne.get('email'), 255) or '').lower() or None
+                if email and not EMAIL_RE.match(email):
+                    invalides.append({"ligne": numero, "raison": "Adresse e-mail invalide"})
+                    continue
+                tel = _texte_court(ligne.get('phone'), 20)
+                chiffres = _chiffres(tel)
+                sans_contact = not email and len(chiffres) < 6
+                if ((email and email in emails) or (len(chiffres) >= 6 and chiffres in telephones)
+                        or (sans_contact and nom.lower() in noms_seuls)):
+                    doublons += 1
+                    continue
+                cur.execute("""
+                    INSERT INTO leads (user_id, name, email, phone, budget, location, property_type,
+                                       status, financing_status, purchase_urgency, source)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, 'import')
+                    RETURNING id
+                """, (request.user_id, nom, email, tel,
+                      _entier_borne(ligne.get('budget')),
+                      _texte_court(ligne.get('location'), 255),
+                      _texte_court(ligne.get('property_type'), 100),
+                      _choix(ligne.get('financing_status'), FINANCING_VALUES),
+                      _choix(ligne.get('purchase_urgency'), URGENCY_VALUES)))
+                ids.append(cur.fetchone()['id'])
+                importes += 1
+                if email:
+                    emails.add(email)
+                if len(chiffres) >= 6:
+                    telephones.add(chiffres)
+                if sans_contact:
+                    noms_seuls.add(nom.lower())
+            conn.commit()
+
+        if ids:
+            # Un seul e-mail récapitulatif pour tout l'import.
+            _lancer_en_arriere_plan(_alertes_matching, request.user_id, ids, None)
+        return jsonify({"imported": importes, "duplicates": doublons, "invalid": invalides[:50],
+                        "invalid_count": len(invalides)}), 200
+    except Exception:
+        return erreur_interne()
+
+
+def _jeton_capture(cur, user_id, regenerer=False):
+    cur.execute("SELECT capture_token FROM users WHERE id = %s", (user_id,))
+    ligne = cur.fetchone()
+    if ligne and ligne['capture_token'] and not regenerer:
+        return ligne['capture_token']
+    jeton = secrets.token_urlsafe(24)
+    cur.execute("UPDATE users SET capture_token = %s WHERE id = %s", (jeton, user_id))
+    return jeton
+
+
+def _lien_formulaire(jeton):
+    site = _site_url()
+    return f"{site}/formulaire.html?a={jeton}" if site else None
+
+
+@app.route('/api/v1/capture-link', methods=['GET'])
+@token_required
+def get_capture_link():
+    """L'adresse du formulaire de contact de l'agence, créée au premier appel."""
+    try:
+        with _base() as (conn, cur):
+            jeton = _jeton_capture(cur, request.user_id)
+            conn.commit()
+        return jsonify({"token": jeton, "url": _lien_formulaire(jeton)}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/capture-link/regenerate', methods=['POST'])
+@limiter.limit("10 per hour", key_func=_cle_utilisateur)
+@token_required
+def regenerate_capture_link():
+    """Nouvelle adresse : l'ancienne cesse de fonctionner (en cas de spam ou de fuite)."""
+    try:
+        with _base() as (conn, cur):
+            jeton = _jeton_capture(cur, request.user_id, regenerer=True)
+            conn.commit()
+        return jsonify({"token": jeton, "url": _lien_formulaire(jeton)}), 200
+    except Exception:
+        return erreur_interne()
+
+
+JETON_RE = re.compile(r'^[A-Za-z0-9_-]{16,64}$')
+FINANCEMENT_FORMULAIRE = {'approved', 'in_progress', 'unknown'}
+
+
+@app.route('/public/capture/<token>', methods=['GET'])
+def capture_info(token):
+    """Nom de l'agence à afficher en haut du formulaire public."""
+    try:
+        if not JETON_RE.match(token):
+            return jsonify({"message": "Not found"}), 404
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("SELECT company_name FROM users WHERE capture_token = %s", (token,))
+            ligne = cur.fetchone()
+        if not ligne:
+            return jsonify({"message": "Not found"}), 404
+        return jsonify({"agence": ligne['company_name'] or ""}), 200
+    except Exception:
+        return erreur_interne()
+
+
+def _cle_jeton():
+    return "cap:" + str((request.view_args or {}).get('token', ''))[:64]
+
+
+@app.route('/public/capture/<token>', methods=['POST'])
+@limiter.limit("10 per hour")
+@limiter.limit("60 per hour", key_func=_cle_jeton)
+def capture_lead(token):
+    """Un visiteur du site d'une agence remplit le formulaire : le prospect
+    arrive directement dans la liste de l'agence.
+
+    La page est publique par nature : elle n'a pas de session. Le jeton de
+    l'agence désigne le compte, jamais un identifiant envoyé par le
+    navigateur. Le consentement est obligatoire et daté ; un champ caché
+    (« website ») piège les robots qui remplissent tout.
+    """
+    try:
+        if not JETON_RE.match(token):
+            return jsonify({"message": "Not found"}), 404
+        data = request.get_json(silent=True) or {}
+        if data.get('website'):
+            return jsonify({"message": "Merci, votre demande a bien été envoyée."}), 201
+
+        nom = _texte_court(data.get('name'), 255)
+        if not nom:
+            return jsonify({"message": "Indiquez votre nom."}), 400
+        email = (_texte_court(data.get('email'), 255) or '').lower() or None
+        if email and not EMAIL_RE.match(email):
+            return jsonify({"message": "Cette adresse e-mail semble invalide."}), 400
+        tel = _texte_court(data.get('phone'), 20)
+        if not email and not tel:
+            return jsonify({"message": "Indiquez un e-mail ou un téléphone pour être recontacté."}), 400
+        if data.get('consent') is not True:
+            return jsonify({"message": "Veuillez accepter d'être recontacté pour envoyer votre demande."}), 400
+        message = _texte_court(data.get('message'), 1000)
+
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("SELECT id FROM users WHERE capture_token = %s", (token,))
+            agence = cur.fetchone()
+            if not agence:
+                return jsonify({"message": "Not found"}), 404
+            maintenant = _maintenant()
+            cur.execute("""
+                INSERT INTO leads (user_id, name, email, phone, budget, location, property_type,
+                                   status, financing_status, purchase_urgency, source, consent_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, 'formulaire', %s)
+                RETURNING id
+            """, (agence['id'], nom, email, tel,
+                  _entier_borne(data.get('budget')),
+                  _texte_court(data.get('location'), 255),
+                  _texte_court(data.get('property_type'), 100),
+                  _choix(data.get('financing_status'), FINANCEMENT_FORMULAIRE),
+                  _choix(data.get('purchase_urgency'), URGENCY_VALUES),
+                  maintenant))
+            lead_id = cur.fetchone()['id']
+            if message:
+                cur.execute("""
+                    INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
+                    VALUES (%s, %s, 'note', %s, %s)
+                """, (lead_id, agence['id'], "Message du formulaire : " + message, maintenant))
+            conn.commit()
+
+        _lancer_en_arriere_plan(_alertes_matching, agence['id'], [lead_id], None, 'formulaire')
+        return jsonify({"message": "Merci, votre demande a bien été envoyée."}), 201
+    except Exception:
+        return erreur_interne()
+
+
+# ===== ALERTES E-MAIL =====
+
+def _alertes_matching(user_id, lead_ids=None, property_ids=None, origine=None):
+    """Prévient l'agent par e-mail quand un bien correspond à un prospect.
+
+    Appelée après la réponse (thread), à la création d'un bien, d'un
+    prospect, d'un import ou d'un formulaire. Une correspondance n'est
+    signalée qu'une fois (table match_alerts), et les prospects signés ou
+    perdus sont laissés de côté. Sans configuration d'e-mail ou si l'agent
+    a coupé les alertes, la fonction ne fait rien.
+    """
+    try:
+        if not _envoi_configure():
+            return
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("SELECT email, alerts_enabled FROM users WHERE id = %s", (user_id,))
+            agent = cur.fetchone()
+            if not agent or not agent['alerts_enabled']:
+                return
+            cur.execute("""SELECT id, name, email, phone, budget, location, property_type,
+                                  financing_status, purchase_urgency, status
+                           FROM leads WHERE user_id = %s""", (user_id,))
+            prospects = [l for l in cur.fetchall() if (l['status'] or 'nouveau') not in STATUTS_CLOS]
+            cur.execute("SELECT id, title, address, price, property_type FROM properties WHERE user_id = %s", (user_id,))
+            biens = cur.fetchall()
+
+            ids_prospects, ids_biens = set(lead_ids or []), set(property_ids or [])
+            paires = []
+            for l in prospects:
+                for b in biens:
+                    if l['id'] in ids_prospects or b['id'] in ids_biens:
+                        score, raisons = _detail_score(l, b)
+                        if score >= ALERTE_SCORE_MIN:
+                            paires.append((score, l, b, raisons))
+            if paires:
+                cur.execute("SELECT lead_id, property_id FROM match_alerts WHERE lead_id = ANY(%s)",
+                            (list({p[1]['id'] for p in paires}),))
+                deja = {(r['lead_id'], r['property_id']) for r in cur.fetchall()}
+                paires = [p for p in paires if (p[1]['id'], p[2]['id']) not in deja]
+
+            nouveau = None
+            if origine == 'formulaire':
+                nouveau = next((l for l in prospects if l['id'] in ids_prospects), None)
+            if not paires and not nouveau:
+                return
+            paires.sort(key=lambda p: -p[0])
+
+            site = _site_url()
+            paragraphes = []
+            if nouveau:
+                titre = "Nouveau prospect via votre formulaire"
+                sujet = f"Nouveau prospect : {nouveau['name'][:80]}"
+                paragraphes.append(f"{nouveau['name']} vient de remplir le formulaire de contact de votre agence.")
+                contact = " · ".join(x for x in (nouveau['email'], nouveau['phone']) if x)
+                if contact:
+                    paragraphes.append(f"Contact : {contact}")
+                recherche = " · ".join(x for x in (
+                    nouveau['property_type'], nouveau['location'],
+                    f"budget {nouveau['budget']:,} €".replace(',', ' ') if nouveau['budget'] else None) if x)
+                if recherche:
+                    paragraphes.append(f"Recherche : {recherche}")
+                bouton = ("Ouvrir la fiche du prospect", f"{site}/leads-profile.html?id={nouveau['id']}")
+                if paires:
+                    paragraphes.append("Des biens de votre portefeuille lui correspondent :")
+            else:
+                n = len(paires)
+                titre = "Des biens correspondent à vos prospects"
+                sujet = "Zelyro : 1 correspondance trouvée" if n == 1 else f"Zelyro : {n} correspondances trouvées"
+                paragraphes.append("Zelyro a trouvé de nouvelles correspondances entre vos prospects et vos biens :")
+                bouton = ("Voir mes correspondances", f"{site}/matching.html")
+            for score, l, b, raisons in paires[:10]:
+                ligne = f"{l['name']} ↔ {b['title']} ({score}/100)"
+                if raisons:
+                    ligne += " : " + ", ".join(raisons[:3])
+                paragraphes.append(ligne)
+            if len(paires) > 10:
+                paragraphes.append(f"… et {len(paires) - 10} autre(s) correspondance(s) à retrouver dans Zelyro.")
+            paragraphes.append("Vous pouvez désactiver ces e-mails depuis la page « Mon compte ».")
+
+            texte, html = _gabarit_email(titre, paragraphes, bouton)
+            if _envoyer_email(agent['email'], sujet, texte, html) and paires:
+                for score, l, b, _ in paires:
+                    cur.execute("""INSERT INTO match_alerts (lead_id, property_id, score)
+                                   VALUES (%s, %s, %s) ON CONFLICT DO NOTHING""", (l['id'], b['id'], score))
+                conn.commit()
+    except Exception:
+        app.logger.exception("Alertes de correspondance impossibles")
+
+
+@app.route('/auth/preferences', methods=['PUT'])
+@token_required
+def update_preferences():
+    """Réglages du compte : pour l'instant, les alertes e-mail."""
+    try:
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data.get('alerts_enabled'), bool):
+            return jsonify({"message": "Valeur « alerts_enabled » attendue (true ou false)"}), 400
+        with _base() as (conn, cur):
+            cur.execute("UPDATE users SET alerts_enabled = %s WHERE id = %s", (data['alerts_enabled'], request.user_id))
+            conn.commit()
+        return jsonify({"alerts_enabled": data['alerts_enabled']}), 200
+    except Exception:
+        return erreur_interne()
+
+
+# ===== TABLEAU DE BORD =====
+
+@app.route('/api/v1/dashboard', methods=['GET'])
+@token_required
+def get_dashboard():
+    """Les chiffres utiles à l'agence : où en sont les prospects, d'où ils
+    viennent, à quelle vitesse on les contacte et ce qui reste à faire."""
+    try:
+        with _base() as (conn, cur):
+            cur.execute("""SELECT id, status, source, created_at, first_contact_at, budget, location,
+                                  property_type, financing_status, purchase_urgency
+                           FROM leads WHERE user_id = %s""", (request.user_id,))
+            prospects = cur.fetchall()
+            cur.execute("""SELECT COUNT(*) AS n FROM properties WHERE user_id = %s""", (request.user_id,))
+            nb_biens = cur.fetchone()['n']
+            # « Maintenant » sur l'horloge de la base, celle de created_at.
+            cur.execute("SELECT NOW()::timestamp AS maintenant")
+            maintenant = cur.fetchone()['maintenant']
+            aujourdhui = _aujourdhui()
+            cur.execute("""SELECT
+                    COUNT(*) FILTER (WHERE due_date < %s) AS en_retard,
+                    COUNT(*) FILTER (WHERE due_date = %s) AS aujourdhui,
+                    COUNT(*) FILTER (WHERE due_date > %s AND due_date <= %s) AS semaine
+                FROM lead_reminders WHERE user_id = %s AND done_at IS NULL""",
+                        (aujourdhui, aujourdhui, aujourdhui, aujourdhui + timedelta(days=7), request.user_id))
+            rappels = cur.fetchone()
+
+        pipeline = {s: 0 for s in STATUTS}
+        qualite = {'hot': 0, 'warm': 0, 'cold': 0}
+        sources = {}
+        delais, recents, a_contacter = [], 0, 0
+        for p in prospects:
+            statut = p['status'] if p['status'] in STATUTS else 'nouveau'
+            pipeline[statut] += 1
+            if statut not in STATUTS_CLOS:
+                qualite[derive_lead_quality(p)] += 1
+            source = p['source'] if p['source'] in SOURCES else 'manuel'
+            sources[source] = sources.get(source, 0) + 1
+            if p['created_at'] and p['first_contact_at']:
+                delta = (p['first_contact_at'] - p['created_at']).total_seconds() / 3600
+                if delta >= 0:
+                    delais.append(delta)
+            if p['created_at'] and p['created_at'] >= maintenant - timedelta(days=30):
+                recents += 1
+            if statut == 'nouveau' and p['created_at'] and p['created_at'] < maintenant - timedelta(days=2):
+                a_contacter += 1
+
+        total = len(prospects)
+        return jsonify({
+            "total_leads": total,
+            "total_properties": nb_biens,
+            "pipeline": pipeline,
+            "quality": qualite,
+            "sources": sources,
+            "new_last_30_days": recents,
+            "to_contact": a_contacter,
+            "avg_first_response_hours": round(sum(delais) / len(delais), 1) if delais else None,
+            "conversion_rate": round(100 * pipeline['signe'] / total) if total else None,
+            "reminders": {"overdue": rappels['en_retard'], "today": rappels['aujourdhui'],
+                          "this_week": rappels['semaine']},
+        }), 200
+    except Exception:
+        return erreur_interne()
+
 
 # ===== EXTRACTION DEPUIS UN MESSAGE LIBRE =====
 
