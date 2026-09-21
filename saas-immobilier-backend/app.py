@@ -642,7 +642,7 @@ _HASH_FACTICE = generate_password_hash(secrets.token_urlsafe(16), method='pbkdf2
 
 
 MESSAGE_INVITATION = ("Une clé d'activation est nécessaire pour créer un compte. "
-                      "Écrivez à tb@zelyro.fr pour en obtenir une.")
+                      "Écrivez à contact@zelyro.fr pour en obtenir une.")
 LIEN_INVITATION_INVALIDE = ("Clé d'activation invalide ou expirée. Vérifiez-la, ou demandez-en une nouvelle "
                             "à l'équipe Zelyro.")
 MESSAGE_CLE_AUTRE_ADRESSE = "Cette clé d'activation est réservée à une autre adresse e-mail."
