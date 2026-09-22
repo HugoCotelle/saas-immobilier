@@ -173,7 +173,7 @@ STATUTS_LIBELLES = {
     'offre': 'Offre', 'signe': 'Signé', 'perdu': 'Perdu',
 }
 STATUTS_CLOS = ('signe', 'perdu')
-SOURCES = {'manuel', 'import', 'formulaire', 'extraction'}
+SOURCES = {'manuel', 'import', 'formulaire', 'extraction', 'leboncoin', 'seloger', 'portail'}
 # Score à partir duquel un bien est signalé par e-mail à l'agent.
 ALERTE_SCORE_MIN = int(os.getenv("ALERT_MIN_SCORE", "70"))
 
@@ -287,6 +287,23 @@ _DDL_SUIVI = (
     "CREATE INDEX IF NOT EXISTS lead_mails_lead_idx ON lead_mails (lead_id, sent_at)",
 )
 
+# Réception automatique des leads LeBonCoin/SeLoger : une adresse de capture
+# par agence, et le journal des e-mails déjà traités (Brevo peut renvoyer le
+# même événement plusieurs fois ; le message_id évite les doublons).
+_DDL_CAPTURE_MAIL = (
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS mail_capture_token VARCHAR(32)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS users_mail_capture_token_idx "
+    "ON users (mail_capture_token) WHERE mail_capture_token IS NOT NULL",
+    """CREATE TABLE IF NOT EXISTS inbound_emails (
+        id SERIAL PRIMARY KEY,
+        message_id VARCHAR(255) UNIQUE NOT NULL,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        source VARCHAR(20),
+        lead_id INTEGER REFERENCES leads(id) ON DELETE SET NULL,
+        received_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )""",
+)
+
 # Les forfaits : code, nom, prospects, biens, e-mails par mois, extractions IA
 # par mois (None = illimité), ordre d'affichage. Ces valeurs ne servent qu'à
 # remplir la table « plans » la première fois : ensuite, les limites se règlent
@@ -384,6 +401,9 @@ def _assurer_schema():
                        to_regclass('match_alerts') IS NOT NULL,
                        to_regclass('lead_mails') IS NOT NULL,
                        EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'users' AND column_name = 'mail_capture_token'),
+                       to_regclass('inbound_emails') IS NOT NULL,
+                       EXISTS (SELECT 1 FROM information_schema.columns
                                WHERE table_name = 'users' AND column_name = 'plan'),
                        to_regclass('plans') IS NOT NULL,
                        to_regclass('invitations') IS NOT NULL,
@@ -394,7 +414,7 @@ def _assurer_schema():
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
-                for ddl in _DDL_COMPTES + _DDL_SUIVI + _DDL_ACCES:
+                for ddl in _DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_ACCES:
                     cur.execute(ddl)
             conn.commit()
             _schema_pret = True
@@ -541,7 +561,7 @@ def init_database(demo=False):
             "CREATE INDEX IF NOT EXISTS properties_user_id_idx ON properties (user_id)",
         ):
             cursor.execute(ddl)
-        for ddl in _DDL_COMPTES + _DDL_SUIVI + _DDL_ACCES:
+        for ddl in _DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_ACCES:
             cursor.execute(ddl)
 
         # Vérifier si vide
@@ -2016,6 +2036,66 @@ def regenerate_capture_link():
         return erreur_interne()
 
 
+# ===== ADRESSE DE CAPTURE MAIL (LEBONCOIN / SELOGER) =====
+# Chaque agent reçoit une adresse personnelle du type <jeton>@leads.zelyro.fr.
+# Il configure un transfert depuis sa boîte mail (ou redirige directement les
+# notifications leboncoin/SeLoger vers cette adresse) ; le webhook plus bas
+# reconnaît l'agence à partir de cette adresse et crée le prospect.
+
+ALPHABET_JETON_MAIL = "abcdefghjkmnpqrstuvwxyz23456789"  # sans i, l, o, 0, 1 (ambigus)
+JETON_MAIL_RE = re.compile(r'^[a-z2-9]{8,16}$')
+
+
+def _domaine_capture_mail():
+    return (os.getenv("LEADS_INBOUND_DOMAIN") or "leads.zelyro.fr").strip().lower()
+
+
+def _nouveau_jeton_mail():
+    return ''.join(secrets.choice(ALPHABET_JETON_MAIL) for _ in range(10))
+
+
+def _jeton_capture_mail(cur, user_id, regenerer=False):
+    cur.execute("SELECT mail_capture_token FROM users WHERE id = %s", (user_id,))
+    ligne = cur.fetchone()
+    if ligne and ligne['mail_capture_token'] and not regenerer:
+        return ligne['mail_capture_token']
+    jeton = _nouveau_jeton_mail()
+    cur.execute("UPDATE users SET mail_capture_token = %s WHERE id = %s", (jeton, user_id))
+    return jeton
+
+
+def _adresse_capture_mail(jeton):
+    return f"{jeton}@{_domaine_capture_mail()}"
+
+
+@app.route('/api/v1/mail-capture', methods=['GET'])
+@token_required
+def get_mail_capture():
+    """L'adresse e-mail personnelle vers laquelle transférer les notifications
+    LeBonCoin et SeLoger, créée au premier appel."""
+    try:
+        with _base() as (conn, cur):
+            jeton = _jeton_capture_mail(cur, request.user_id)
+            conn.commit()
+        return jsonify({"token": jeton, "address": _adresse_capture_mail(jeton)}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/mail-capture/regenerate', methods=['POST'])
+@limiter.limit("10 per hour", key_func=_cle_utilisateur)
+@token_required
+def regenerate_mail_capture():
+    """Nouvelle adresse : l'ancienne cesse de fonctionner (en cas de messages indésirables)."""
+    try:
+        with _base() as (conn, cur):
+            jeton = _jeton_capture_mail(cur, request.user_id, regenerer=True)
+            conn.commit()
+        return jsonify({"token": jeton, "address": _adresse_capture_mail(jeton)}), 200
+    except Exception:
+        return erreur_interne()
+
+
 JETON_RE = re.compile(r'^[A-Za-z0-9_-]{16,64}$')
 FINANCEMENT_FORMULAIRE = {'approved', 'in_progress', 'unknown'}
 
@@ -2112,6 +2192,19 @@ def capture_lead(token):
 
 # ===== ALERTES E-MAIL =====
 
+# Formulation de l'e-mail d'alerte selon l'origine du nouveau prospect.
+ORIGINE_NOUVEAU_PROSPECT = {
+    'formulaire': ("Nouveau prospect via votre formulaire",
+                   "vient de remplir le formulaire de contact de votre agence."),
+    'leboncoin': ("Nouveau prospect via LeBonCoin",
+                  "vous a contacté via une annonce LeBonCoin, capté automatiquement par Zelyro."),
+    'seloger': ("Nouveau prospect via SeLoger",
+                "vous a contacté via une annonce SeLoger, capté automatiquement par Zelyro."),
+    'portail': ("Nouveau prospect par e-mail",
+                "vous a contacté par e-mail, capté automatiquement par Zelyro."),
+}
+
+
 def _alertes_matching(user_id, lead_ids=None, property_ids=None, origine=None):
     """Prévient l'agent par e-mail quand un bien correspond à un prospect.
 
@@ -2152,7 +2245,7 @@ def _alertes_matching(user_id, lead_ids=None, property_ids=None, origine=None):
                 paires = [p for p in paires if (p[1]['id'], p[2]['id']) not in deja]
 
             nouveau = None
-            if origine == 'formulaire':
+            if origine in ORIGINE_NOUVEAU_PROSPECT:
                 nouveau = next((l for l in prospects if l['id'] in ids_prospects), None)
             if not paires and not nouveau:
                 return
@@ -2161,9 +2254,9 @@ def _alertes_matching(user_id, lead_ids=None, property_ids=None, origine=None):
             site = _site_url()
             paragraphes = []
             if nouveau:
-                titre = "Nouveau prospect via votre formulaire"
+                titre, phrase = ORIGINE_NOUVEAU_PROSPECT[origine]
                 sujet = f"Nouveau prospect : {nouveau['name'][:80]}"
-                paragraphes.append(f"{nouveau['name']} vient de remplir le formulaire de contact de votre agence.")
+                paragraphes.append(f"{nouveau['name']} {phrase}")
                 contact = " · ".join(x for x in (nouveau['email'], nouveau['phone']) if x)
                 if contact:
                     paragraphes.append(f"Contact : {contact}")
@@ -2915,12 +3008,71 @@ def _valider(brut):
     }
 
 
+def _appeler_extraction_ia(consigne):
+    """Appelle Claude Haiku avec `consigne` et renvoie les champs validés.
+
+    (champs, None) en cas de succès ; (None, (message, code_http)) sinon. Ce
+    que renvoie le modèle est toujours traité comme non fiable : voir
+    _valider. Suppose que la clé ANTHROPIC_API_KEY est déjà vérifiée présente
+    par l'appelant.
+    """
+    cle = (os.getenv('ANTHROPIC_API_KEY') or '').strip()
+    texte = ''
+    try:
+        r = requests.post(
+            'https://api.anthropic.com/v1/messages',
+            headers={
+                'content-type': 'application/json',
+                'x-api-key': cle,
+                'anthropic-version': '2023-06-01',
+            },
+            json={
+                'model': 'claude-haiku-4-5-20251001',
+                'max_tokens': 1000,
+                'messages': [{'role': 'user', 'content': consigne}],
+            },
+            timeout=30,
+        )
+        if r.status_code != 200:
+            print(f"Erreur API extraction : {r.status_code} {r.text[:200]}")
+            # On renvoie le code de l'API en amont : sans lui, il faut aller
+            # dans les logs du serveur pour distinguer une clé invalide d'un
+            # manque de crédit.
+            return None, (f"Service d'extraction indisponible (code {r.status_code})", 502)
+        texte = ''.join(
+            bloc.get('text', '') for bloc in r.json().get('content', [])
+        ).strip()
+
+        # Le modèle encadre parfois sa réponse de balises de code.
+        # BALISE est construit par chr() plutôt qu'écrit littéralement :
+        # trois accents graves dans un fichier Python collé depuis un
+        # document markdown coupent le bloc de code à cet endroit.
+        if texte.startswith(BALISE):
+            texte = texte.split(BALISE)[1]
+            if texte.startswith('json'):
+                texte = texte[4:]
+            texte = texte.strip()
+
+        brut = _json.loads(texte)
+
+    except _json.JSONDecodeError:
+        print(f"Réponse non JSON : {texte[:200]}")
+        return None, ("Réponse du modèle illisible", 502)
+    except requests.Timeout:
+        return None, ("Délai dépassé, réessayez", 504)
+    except Exception:
+        app.logger.exception("Appel d'extraction impossible")
+        return None, ("Erreur interne du serveur", 500)
+
+    return _valider(brut), None
+
+
 @app.route('/api/v1/extract', methods=['POST'])
 @limiter.limit("30 per hour;200 per day", key_func=_cle_utilisateur)
 @token_required
 def extract_message():
     """Extraire des critères d'un message écrit en langage naturel."""
-        # Une clé collée dans une interface web emporte souvent un espace ou
+    # Une clé collée dans une interface web emporte souvent un espace ou
     # un retour à la ligne invisible, que l'API rejette avec un 401.
     cle = (os.getenv('ANTHROPIC_API_KEY') or '').strip()
     if not cle:
@@ -2948,54 +3100,9 @@ def extract_message():
         message=message,
     )
 
-    try:
-        r = requests.post(
-            'https://api.anthropic.com/v1/messages',
-            headers={
-                'content-type': 'application/json',
-                'x-api-key': cle,
-                'anthropic-version': '2023-06-01',
-            },
-            json={
-                'model': 'claude-haiku-4-5-20251001',
-                'max_tokens': 1000,
-                'messages': [{'role': 'user', 'content': consigne}],
-            },
-            timeout=30,
-        )
-        if r.status_code != 200:
-            print(f"Erreur API extraction : {r.status_code} {r.text[:200]}")
-                        # On renvoie le code de l'API en amont : sans lui, il faut
-            # aller dans les logs du serveur pour distinguer une clé
-            # invalide d'un manque de crédit.
-            return jsonify({
-                "message": f"Service d'extraction indisponible (code {r.status_code})"
-            }), 502
-        texte = ''.join(
-            bloc.get('text', '') for bloc in r.json().get('content', [])
-        ).strip()
-
-        # Le modèle encadre parfois sa réponse de balises de code.
-        # BALISE est construit par chr() plutôt qu'écrit littéralement :
-        # trois accents graves dans un fichier Python collé depuis un
-        # document markdown coupent le bloc de code à cet endroit.
-        if texte.startswith(BALISE):
-            texte = texte.split(BALISE)[1]
-            if texte.startswith('json'):
-                texte = texte[4:]
-            texte = texte.strip()
-
-        brut = _json.loads(texte)
-
-    except _json.JSONDecodeError:
-        print(f"Réponse non JSON : {texte[:200]}")
-        return jsonify({"message": "Réponse du modèle illisible"}), 502
-    except requests.Timeout:
-        return jsonify({"message": "Délai dépassé, réessayez"}), 504
-    except Exception:
-        return erreur_interne()
-
-    champs = _valider(brut)
+    champs, erreur = _appeler_extraction_ia(consigne)
+    if erreur:
+        return jsonify({"message": erreur[0]}), erreur[1]
     _compter_extraction(request.user_id)
 
     # Les secteurs qui ne tiennent pas dans la fiche rejoignent les notes :
@@ -3011,6 +3118,223 @@ def extract_message():
     champs['_message_source'] = message[:2000]
 
     return jsonify(champs), 200
+
+
+# ===== RÉCEPTION AUTOMATIQUE DES LEADS (E-MAIL LEBONCOIN / SELOGER) =====
+# Un agent transfère (ou redirige) vers son adresse de capture les
+# notifications de contact que lui envoient leboncoin et SeLoger ; Brevo
+# (Inbound Parsing) relaie chaque e-mail reçu sur le domaine dédié à ce
+# webhook, qui identifie l'agence et crée le prospect automatiquement.
+# Aucune des deux plateformes n'offre d'API publique pour ça : c'est
+# l'approche qu'utilisent en pratique les CRM immobiliers indépendants.
+
+CONSIGNE_PORTAIL = """Tu es un assistant pour une agence immobilière. Voici un e-mail de \
+notification envoyé par {portail} quand quelqu'un contacte l'agence au sujet d'une annonce. \
+Extrais les informations du contact et réponds UNIQUEMENT en JSON, sans commentaire ni texte \
+autour.
+
+Date du jour : {date}
+
+Champs : nom, email, telephone, transaction, budget, secteurs, type_bien, nombre_pieces, \
+echeance, financement, garants, profession, notes
+
+Règles strictes :
+- N'invente jamais. Information non explicite dans le message = null.
+- Le nom, l'email et le téléphone sont ceux du CONTACT (l'acheteur ou locataire potentiel), \
+jamais ceux de l'agence ni du portail.
+- Ignore les mentions légales, liens de désinscription et signatures automatiques du portail.
+- transaction : "achat", "location" ou null.
+- secteurs : TABLEAU de noms de communes mentionnées, [] si aucune.
+- type_bien : exactement l'un de {types}, ou null.
+- telephone : chiffres uniquement, sans espaces ni points.
+- budget : entier en euros si un montant est explicitement mentionné, sinon null.
+- echeance : l'un de {echeances}, ou null.
+- financement : l'un de {financements}, ou null.
+- garants : nombre de garants mentionnés, ou null.
+- profession : situation professionnelle citée, ou null.
+- notes : le message du contact et l'annonce concernée (titre, référence ou adresse) si \
+identifiable, résumés en une ou deux phrases. null si rien d'utile.
+
+E-mail :
+{message}"""
+
+_PORTAIL_LIBELLE = {'leboncoin': 'LeBonCoin', 'seloger': 'SeLoger'}
+_PORTAIL_NOM_DEFAUT = {'leboncoin': 'Contact LeBonCoin', 'seloger': 'Contact SeLoger',
+                       'portail': 'Contact (e-mail transféré)'}
+
+
+def _source_portail(adresse_expediteur):
+    domaine = (adresse_expediteur or '').rsplit('@', 1)[-1].lower()
+    if 'leboncoin' in domaine:
+        return 'leboncoin'
+    if 'seloger' in domaine:
+        return 'seloger'
+    return 'portail'
+
+
+def _corps_texte_email(item):
+    """Le texte le plus propre disponible : Brevo nettoie déjà signatures et
+    citations dans ExtractedMarkdownMessage. À défaut, le texte brut, puis en
+    dernier recours le HTML débarrassé de ses balises."""
+    for cle in ('ExtractedMarkdownMessage', 'RawTextBody'):
+        v = item.get(cle)
+        if v and str(v).strip():
+            return str(v).strip()
+    brut = item.get('RawHtmlBody') or ''
+    if not brut:
+        return ''
+    texte = re.sub(r'(?is)<(script|style)[^>]*>.*?</\1>', ' ', brut)
+    texte = re.sub(r'(?s)<[^>]+>', ' ', texte)
+    texte = _html.unescape(texte)
+    return re.sub(r'\s+', ' ', texte).strip()
+
+
+def _adresse_capture_dans(destinataires):
+    """L'adresse de capture Zelyro parmi les destinataires de l'e-mail, ou
+    None. Un e-mail transféré porte souvent plusieurs destinataires."""
+    domaine = '@' + _domaine_capture_mail()
+    for d in (destinataires or []):
+        if not isinstance(d, dict):
+            continue
+        adresse = (d.get('Address') or '').strip().lower()
+        if adresse.endswith(domaine):
+            return adresse
+    return None
+
+
+def _traiter_email_entrant(item):
+    """Transforme un e-mail entrant (notification LeBonCoin/SeLoger transférée
+    par un agent) en prospect. Ne lève jamais : une erreur reste dans les
+    journaux, un e-mail malformé ne doit pas faire échouer les autres."""
+    message_id = _texte_court(item.get('MessageId'), 255)
+    adresse_capture = _adresse_capture_dans(item.get('To'))
+    if not adresse_capture:
+        return
+    jeton = adresse_capture.split('@', 1)[0]
+    if not JETON_MAIL_RE.match(jeton):
+        return
+
+    _assurer_schema()
+    with _base() as (conn, cur):
+        if message_id:
+            cur.execute("SELECT id FROM inbound_emails WHERE message_id = %s", (message_id,))
+            if cur.fetchone():
+                return
+        cur.execute("SELECT id FROM users WHERE mail_capture_token = %s AND is_active", (jeton,))
+        agence = cur.fetchone()
+        if not agence:
+            return
+        user_id = agence['id']
+
+        expediteur = ((item.get('From') or {}).get('Address') or '').strip()
+        portail = _source_portail(expediteur)
+        sujet = _texte_court(item.get('Subject'), 255) or ''
+        corps = _corps_texte_email(item)[:6000]
+
+        reste_leads, _ = _reste(cur, user_id, 'leads')
+        if reste_leads == 0:
+            if message_id:
+                cur.execute("""INSERT INTO inbound_emails (message_id, user_id, source, received_at)
+                               VALUES (%s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING""",
+                            (message_id, user_id, portail, _maintenant()))
+            conn.commit()
+            return
+
+        champs = None
+        extraction_effectuee = False
+        if corps and len(corps) >= 10 and (os.getenv('ANTHROPIC_API_KEY') or '').strip():
+            reste_extr, _ = _reste(cur, user_id, 'extractions', verrouiller=False)
+            if reste_extr != 0:
+                consigne = CONSIGNE_PORTAIL.format(
+                    portail=_PORTAIL_LIBELLE.get(portail, "un portail d'annonces"),
+                    date=datetime.utcnow().strftime('%Y-%m-%d'),
+                    types=', '.join(TYPES_BIEN), echeances=', '.join(ECHEANCES),
+                    financements=', '.join(FINANCEMENTS), message=corps[:4000],
+                )
+                valides, erreur = _appeler_extraction_ia(consigne)
+                if erreur:
+                    app.logger.warning("Extraction e-mail entrant : %s", erreur[0])
+                else:
+                    champs = valides
+                    extraction_effectuee = True
+
+        nom = (champs or {}).get('nom')
+        if not nom and expediteur and EMAIL_RE.match(expediteur):
+            nom = expediteur.split('@', 1)[0].replace('.', ' ').replace('_', ' ').title()
+        nom = nom or _PORTAIL_NOM_DEFAUT.get(portail, 'Contact')
+
+        notes = (champs or {}).get('notes')
+        if not champs and corps:
+            notes = corps[:500]
+        if sujet and (not notes or sujet.lower() not in notes.lower()):
+            notes = f"{sujet} — {notes}" if notes else sujet
+
+        email_contact = (champs or {}).get('email')
+        if not email_contact and expediteur and EMAIL_RE.match(expediteur) and 'noreply' not in expediteur.lower():
+            email_contact = expediteur
+
+        cur.execute("""
+            INSERT INTO leads
+                (user_id, name, email, phone, budget, location, property_type,
+                 status, financing_status, purchase_urgency, source)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s)
+            RETURNING id
+        """, (
+            user_id, nom[:255],
+            _texte_court(email_contact, 255),
+            (champs or {}).get('telephone'),
+            (champs or {}).get('budget'),
+            _texte_court((champs or {}).get('secteur'), 255),
+            (champs or {}).get('type_bien'),
+            _choix((champs or {}).get('financement'), FINANCING_VALUES),
+            _choix((champs or {}).get('echeance'), URGENCY_VALUES),
+            portail,
+        ))
+        lead_id = cur.fetchone()['id']
+        if notes:
+            cur.execute("""INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
+                           VALUES (%s, %s, 'note', %s, %s)""",
+                        (lead_id, user_id, notes[:1000], _maintenant()))
+        if message_id:
+            cur.execute("""INSERT INTO inbound_emails (message_id, user_id, source, lead_id, received_at)
+                           VALUES (%s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING""",
+                        (message_id, user_id, portail, lead_id, _maintenant()))
+        conn.commit()
+
+    # Après la fermeture de la transaction ci-dessus : _compter_extraction
+    # ouvre sa propre connexion, et l'appeler pendant que la transaction
+    # tient encore le verrou FOR UPDATE sur la ligne de l'agence (posé par
+    # _reste ci-dessus) la ferait attendre indéfiniment sur elle-même.
+    if extraction_effectuee:
+        _compter_extraction(user_id)
+    _lancer_en_arriere_plan(_alertes_matching, user_id, [lead_id], None, portail)
+
+
+@app.route('/webhooks/email-inbound', methods=['POST'])
+@limiter.limit("300 per hour")
+def email_inbound():
+    """Point d'entrée pour Brevo (Inbound Parsing) : un agent a transféré ou
+    redirigé une notification LeBonCoin/SeLoger vers son adresse de capture
+    Zelyro, et Brevo nous relaie l'e-mail. Protégé par un jeton secret dans
+    l'URL, Brevo ne signant pas ses appels."""
+    secret = (os.getenv('EMAIL_INBOUND_SECRET') or '').strip()
+    if not secret or request.args.get('cle') != secret:
+        return jsonify({"message": "Not found"}), 404
+    data = request.get_json(silent=True) or {}
+    items = data.get('items')
+    if not isinstance(items, list):
+        items = [data] if data.get('MessageId') else []
+    traites = 0
+    for item in items:
+        try:
+            if isinstance(item, dict):
+                _traiter_email_entrant(item)
+                traites += 1
+        except Exception:
+            app.logger.exception("E-mail entrant : échec de traitement")
+    return jsonify({"received": len(items), "processed": traites}), 200
+
+
 if __name__ == '__main__':
     if sys.argv[1:2] == ['init-db']:
         init_database(demo='--demo' in sys.argv)
