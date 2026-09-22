@@ -29,6 +29,9 @@
             const [messageLien, setMessageLien] = useState(null);
             const [confirmerLien, setConfirmerLien] = useState(false);
             const [forfait, setForfait] = useState(null);
+            const [mailCapture, setMailCapture] = useState(null);
+            const [messageMailCapture, setMessageMailCapture] = useState(null);
+            const [confirmerMailCapture, setConfirmerMailCapture] = useState(false);
 
             const appel = async (chemin, options = {}) => {
                 const r = await fetch(`${API_URL}${chemin}`, {
@@ -60,6 +63,7 @@
                 }).catch(() => {});
                 appel('/api/v1/plan').then(setForfait).catch(() => {});
                 appel('/api/v1/capture-link').then(setLien).catch((e) => setMessageLien({ type: 'error', text: e.message }));
+                appel('/api/v1/mail-capture').then(setMailCapture).catch((e) => setMessageMailCapture({ type: 'error', text: e.message }));
             }, []);
 
             const changerAlertes = async (valeur) => {
@@ -91,6 +95,26 @@
                     setMessageLien({ type: 'success', text: 'Nouvelle adresse créée. L\'ancienne ne fonctionne plus.' });
                 } catch (e) {
                     setMessageLien({ type: 'error', text: e.message });
+                }
+            };
+
+            const copierMailCapture = async () => {
+                try {
+                    await navigator.clipboard.writeText(mailCapture.address);
+                    setMessageMailCapture({ type: 'success', text: 'Adresse copiée.' });
+                } catch (e) {
+                    document.getElementById('champ-mail-capture').select();
+                    setMessageMailCapture({ type: 'error', text: 'Copie automatique impossible : l\'adresse est sélectionnée, copiez-la avec Ctrl+C.' });
+                }
+            };
+
+            const nouvelleAdresseMailCapture = async () => {
+                setConfirmerMailCapture(false);
+                try {
+                    setMailCapture(await appel('/api/v1/mail-capture/regenerate', { method: 'POST' }));
+                    setMessageMailCapture({ type: 'success', text: 'Nouvelle adresse créée. L\'ancienne ne fonctionne plus : pensez à mettre à jour votre transfert.' });
+                } catch (e) {
+                    setMessageMailCapture({ type: 'error', text: e.message });
                 }
             };
 
@@ -263,8 +287,8 @@
                                 <p className="panel-note">
                                     Recevez un e-mail quand un bien correspond à un prospect (score de 70 sur 100
                                     ou plus), quand un import ajoute des prospects qui correspondent à vos biens,
-                                    et quand quelqu'un remplit votre formulaire de contact. Une même
-                                    correspondance n'est signalée qu'une fois.
+                                    et quand un nouveau prospect arrive via votre formulaire de contact ou via
+                                    LeBonCoin/SeLoger. Une même correspondance n'est signalée qu'une fois.
                                 </p>
                                 {messageAlertes && (
                                     <div className={messageAlertes.type === 'error' ? 'error' : 'success'}>{messageAlertes.text}</div>
@@ -312,6 +336,46 @@
                                         </p>
                                     </>
                                 ) : !messageLien && <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}
+                            </div>
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Leads LeBonCoin &amp; SeLoger</h2>
+                                </div>
+                                <p className="panel-note">
+                                    LeBonCoin et SeLoger ne proposent pas d'API pour récupérer vos contacts : la
+                                    seule solution fiable est de transférer leurs e-mails de notification vers
+                                    cette adresse. Zelyro les lit automatiquement et crée le prospect, avec la
+                                    source LeBonCoin ou SeLoger. Dans votre messagerie (Gmail par exemple),
+                                    créez un filtre : « si l'expéditeur contient leboncoin.fr ou seloger.com,
+                                    transférer vers cette adresse ». Deux minutes à faire, une seule fois.
+                                </p>
+                                {messageMailCapture && (
+                                    <div className={messageMailCapture.type === 'error' ? 'error' : 'success'}>{messageMailCapture.text}</div>
+                                )}
+                                {mailCapture && mailCapture.address ? (
+                                    <>
+                                        <div className="copie-ligne">
+                                            <input id="champ-mail-capture" type="text" readOnly value={mailCapture.address}
+                                                onFocus={(e) => e.target.select()} aria-label="Adresse de capture des leads" />
+                                            <button className="btn" onClick={copierMailCapture}>Copier</button>
+                                        </div>
+                                        <div className="btn-ligne" style={{ marginTop: '14px' }}>
+                                            {!confirmerMailCapture ? (
+                                                <button className="btn secondary petit" onClick={() => setConfirmerMailCapture(true)}>Créer une nouvelle adresse</button>
+                                            ) : (
+                                                <>
+                                                    <button className="btn danger plein petit" onClick={nouvelleAdresseMailCapture}>Confirmer : l'ancienne adresse cessera de fonctionner</button>
+                                                    <button className="btn secondary petit" onClick={() => setConfirmerMailCapture(false)}>Annuler</button>
+                                                </>
+                                            )}
+                                        </div>
+                                        <p className="field-hint">
+                                            Une nouvelle adresse est utile en cas de messages indésirables : l'ancienne
+                                            est aussitôt désactivée, pensez à mettre à jour votre filtre de transfert.
+                                        </p>
+                                    </>
+                                ) : !messageMailCapture && <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}
                             </div>
                         </div>
                     </div>
