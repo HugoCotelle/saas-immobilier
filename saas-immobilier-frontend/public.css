@@ -21,6 +21,7 @@ html { scroll-behavior: smooth; scroll-padding-top: 84px; }
 @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
     .feat, .price-card, .reveal { transition: none !important; transform: none !important; opacity: 1 !important; }
+    .mock-chip, .mock-match { animation: none !important; }
 }
 
 /* ---------- Apparition au défilement ---------- */
@@ -209,6 +210,7 @@ body.pub {
     background: var(--surface); border: 1px solid var(--line-strong); border-radius: 999px;
     padding: 9px 16px 9px 12px; font-size: 12.5px; color: var(--ink);
     box-shadow: 0 16px 30px -14px rgba(31, 42, 36, .3);
+    animation: float-chip 6.5s ease-in-out infinite;
 }
 .mock-chip svg { width: 18px; height: 18px; color: var(--sage-600); }
 .mock-chip small { color: var(--muted); font-size: 12px; }
@@ -216,6 +218,16 @@ body.pub {
     position: absolute; z-index: 2; left: -28px; bottom: 0; width: min(400px, 82%);
     background: var(--surface); border: 1px solid var(--line-strong); border-radius: 14px; padding: 18px 18px 16px;
     box-shadow: 0 34px 60px -26px rgba(31, 42, 36, .42), 0 8px 18px -10px rgba(31, 42, 36, .15);
+    animation: float-match 8s ease-in-out infinite;
+    animation-delay: -3.2s;
+}
+@keyframes float-chip {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    50% { transform: translateY(-9px) rotate(-1deg); }
+}
+@keyframes float-match {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(10px); }
 }
 .mock-match-top { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .mock-kicker { font-size: 10.5px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
@@ -514,8 +526,8 @@ body.pub {
     .mock-lead { padding: 12px 13px; }
     .hero-visual { padding-bottom: 0; display: flex; flex-direction: column; }
     .mock-body { padding-bottom: 46px; }
-    .mock-match { position: relative; left: auto; bottom: auto; width: auto; margin: -34px 0 0 10px; }
-    .mock-chip { position: relative; top: auto; right: auto; order: 3; margin: 14px 4px 0 auto; width: fit-content; }
+    .mock-match { position: relative; left: auto; bottom: auto; width: auto; margin: -34px 0 0 10px; animation: none; }
+    .mock-chip { position: relative; top: auto; right: auto; order: 3; margin: 14px 4px 0 auto; width: fit-content; animation: none; }
     .mock-caption { text-align: center; margin-top: 14px; }
     .faq summary { font-size: 18px; padding: 20px 0; }
     .faq .answer { padding-right: 0; }
