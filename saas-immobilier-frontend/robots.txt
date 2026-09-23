@@ -1,0 +1,17 @@
+User-agent: *
+Allow: /
+Disallow: /login.html
+Disallow: /dashboard.html
+Disallow: /biens.html
+Disallow: /compte.html
+Disallow: /forgot-password.html
+Disallow: /reset-password.html
+Disallow: /import.html
+Disallow: /leads-profile.html
+Disallow: /matching.html
+Disallow: /propositions.html
+Disallow: /prospects.html
+Disallow: /admin.html
+Disallow: /formulaire.html
+
+Sitemap: https://www.zelyro.fr/sitemap.xml
