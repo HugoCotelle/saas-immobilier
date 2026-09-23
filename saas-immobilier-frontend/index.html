@@ -174,82 +174,28 @@
                         <span class="mock-tag">Exemple</span>
                     </div>
                     <div class="mock-body">
-                        <div class="mock-panel is-active" data-panel="leads">
-                            <div class="mock-title-row">
-                                <span class="mock-title">Prospects</span>
-                                <span class="mock-sub">3 affichés</span>
-                            </div>
-                            <div class="mock-lead hot">
-                                <span class="mock-lead-name">Camille R.</span>
-                                <span class="lead-badge badge-hot">Acheteur actif</span>
-                                <span class="mock-lead-meta">Appartement · budget 420 000 € · financement accordé, achat immédiat</span>
-                            </div>
-                            <div class="mock-lead warm">
-                                <span class="mock-lead-name">Julien M.</span>
-                                <span class="lead-badge badge-warm">Projet en cours</span>
-                                <span class="mock-lead-meta">Maison · budget 560 000 € · financement en cours, achat sous 3 à 6 mois</span>
-                            </div>
-                            <div class="mock-lead cold">
-                                <span class="mock-lead-name">Sophie L.</span>
-                                <span class="lead-badge badge-cold">Premier contact</span>
-                                <span class="mock-lead-meta">Dossier incomplet : budget et secteur non renseignés</span>
-                            </div>
+                        <div class="mock-title-row">
+                            <span class="mock-title">Prospects</span>
+                            <span class="mock-sub">3 affichés</span>
                         </div>
-                        <div class="mock-panel" data-panel="biens">
-                            <div class="mock-title-row">
-                                <span class="mock-title">Biens</span>
-                                <span class="mock-sub">12 en portefeuille</span>
-                            </div>
-                            <div class="mock-lead hot">
-                                <span class="mock-lead-name">Appartement 3 pièces, 68 m²</span>
-                                <span class="lead-badge badge-hot">Disponible</span>
-                                <span class="mock-lead-meta">Centre-ville · 395 000 € · 3 prospects correspondants</span>
-                            </div>
-                            <div class="mock-lead warm">
-                                <span class="mock-lead-name">Maison 4 pièces, 110 m²</span>
-                                <span class="lead-badge badge-warm">Sous offre</span>
-                                <span class="mock-lead-meta">Périphérie · 560 000 € · 1 prospect correspondant</span>
-                            </div>
-                            <div class="mock-lead cold">
-                                <span class="mock-lead-name">Studio meublé, 24 m²</span>
-                                <span class="lead-badge badge-cold">Vendu</span>
-                                <span class="mock-lead-meta">Centre-ville · 145 000 € · retiré du portefeuille</span>
-                            </div>
+                        <div class="mock-lead hot">
+                            <span class="mock-lead-name">Camille R.</span>
+                            <span class="lead-badge badge-hot">Acheteur actif</span>
+                            <span class="mock-lead-meta">Appartement · budget 420 000 € · financement accordé, achat immédiat</span>
                         </div>
-                        <div class="mock-panel" data-panel="matching">
-                            <div class="mock-title-row">
-                                <span class="mock-title">Matching</span>
-                                <span class="mock-sub">Meilleures correspondances</span>
-                            </div>
-                            <div class="mock-lead hot">
-                                <span class="mock-lead-name">Camille R. → Appartement 3 pièces</span>
-                                <span class="lead-badge badge-hot">Score 86</span>
-                                <span class="mock-lead-meta">Budget, secteur et financement alignés</span>
-                            </div>
-                            <div class="mock-lead warm">
-                                <span class="mock-lead-name">Julien M. → Maison 4 pièces</span>
-                                <span class="lead-badge badge-warm">Score 74</span>
-                                <span class="mock-lead-meta">Budget proche, financement en cours</span>
-                            </div>
-                            <div class="mock-lead cold">
-                                <span class="mock-lead-name">Sophie L. → Studio meublé</span>
-                                <span class="lead-badge badge-cold">Score 51</span>
-                                <span class="mock-lead-meta">Dossier incomplet, secteur à confirmer</span>
-                            </div>
+                        <div class="mock-lead warm">
+                            <span class="mock-lead-name">Julien M.</span>
+                            <span class="lead-badge badge-warm">Projet en cours</span>
+                            <span class="mock-lead-meta">Maison · budget 560 000 € · financement en cours, achat sous 3 à 6 mois</span>
                         </div>
-                        <div class="mock-panel" data-panel="dashboard">
-                            <div class="mock-title-row">
-                                <span class="mock-title">Dashboard</span>
-                                <span class="mock-sub">Ce mois-ci</span>
-                            </div>
-                            <div class="mock-stats">
-                                <div class="mock-stat"><b>12</b><span>Nouveaux prospects</span></div>
-                                <div class="mock-stat"><b>4</b><span>Rendez-vous prévus</span></div>
-                                <div class="mock-stat"><b>86</b><span>Score moyen des correspondances</span></div>
-                                <div class="mock-stat"><b>2</b><span>Signatures en cours</span></div>
-                            </div>
+                        <div class="mock-lead cold">
+                            <span class="mock-lead-name">Sophie L.</span>
+                            <span class="lead-badge badge-cold">Premier contact</span>
+                            <span class="mock-lead-meta">Dossier incomplet : budget et secteur non renseignés</span>
                         </div>
-                    <div class="mock-match" aria-hidden="true">
+                    </div>
+                </div>
+                <div class="mock-match" aria-hidden="true">
                     <div class="mock-match-top">
                         <div>
                             <p class="mock-kicker">Bien correspondant · Camille R.</p>
@@ -658,22 +604,6 @@
         });
     }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
     targets.forEach(function (el) { el.classList.add('reveal'); io.observe(el); });
-})();
-
-/* Panneau d'aperçu interactif : Leads / Biens / Matching / Dashboard */
-(function () {
-    var tabs = document.querySelectorAll('.mock-tabs span');
-    var panels = document.querySelectorAll('.mock-panel');
-    if (!tabs.length || !panels.length || tabs.length !== panels.length) return;
-    tabs.forEach(function (tab, i) {
-        tab.addEventListener('click', function () {
-            if (tab.classList.contains('on')) return;
-            tabs.forEach(function (t) { t.classList.remove('on'); });
-            panels.forEach(function (p) { p.classList.remove('is-active'); });
-            tab.classList.add('on');
-            panels[i].classList.add('is-active');
-        });
-    });
 })();
 </script>
 </body>
