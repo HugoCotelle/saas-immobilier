@@ -96,7 +96,7 @@
             </tbody>
         </table>
     </div>
-    <p>Un accord de sous-traitance de données (DPA) conforme à l’article 28 du RGPD est mis à la disposition des agences : <span class="a-completer">[À COMPLÉTER : modalités de mise à disposition du DPA, par exemple document annexé aux CGU ou signé sur demande]</span>.</p>
+    <p>Un accord de sous-traitance de données (DPA) conforme à l’article 28 du RGPD est mis à la disposition des agences : il figure en annexe des <a href="/cgu.html">CGU</a> et est également consultable à l’adresse <a href="/accord-sous-traitance.html">zelyro.fr/accord-sous-traitance.html</a>.</p>
 </section>
 
 <section id="responsable" aria-labelledby="h-responsable">
@@ -104,7 +104,7 @@
     <p>Pour les données de compte, le responsable de traitement est <span class="a-completer">[À COMPLÉTER : raison sociale et adresse, identiques à celles des mentions légales]</span>, qui exploite le service Zelyro (site zelyro.fr). Voir les <a href="/mentions-legales.html">mentions légales</a>.</p>
     <dl class="deflist">
         <dt>Contact pour vos données</dt><dd><a href="mailto:contact@zelyro.fr">contact@zelyro.fr</a></dd>
-        <dt>Délégué à la protection des données</dt><dd><span class="a-completer">[À COMPLÉTER : indiquer si un DPO a été désigné et ses coordonnées, ou préciser qu’aucun n’est désigné]</span></dd>
+        <dt>Délégué à la protection des données</dt><dd>Aucun délégué à la protection des données n’a été désigné à ce jour : cette désignation n’est pas obligatoire pour Zelyro au regard de l’article 37 du RGPD, compte tenu de la nature et du volume des données traitées. Toute question relative aux données personnelles peut être adressée à <a href="mailto:contact@zelyro.fr">contact@zelyro.fr</a>. <span class="a-completer">[À CONFIRMER avec votre juriste : cette analyse est à revoir si l’activité ou le volume de données évolue]</span></dd>
     </dl>
 </section>
 
@@ -154,7 +154,7 @@
     <p>Zelyro classe chaque prospect selon trois niveaux (« Acheteur actif », « Projet en cours », « Premier contact ») à partir de règles de calcul fondées sur l’état du financement, l’urgence de l’achat et le caractère complet du dossier. Le rapprochement avec les biens produit un score sur 100 selon des critères de même nature (budget, type de bien, secteur, financement, urgence).</p>
     <p>Ces calculs constituent une forme de profilage au sens du RGPD. Ils n’ont pas recours à l’apprentissage automatique et servent uniquement d’aide à l’organisation du travail de l’agence : aucune décision n’est prise par Zelyro à l’égard des prospects, et l’agent reste libre de contacter ou non un prospect, quel que soit son niveau.</p>
     <h3>Fonction d’extraction de critères à partir d’un message</h3>
-    <p>Si cette fonction est activée, le texte d’un message collé dans l’outil peut être transmis à Anthropic (États-Unis) afin d’en extraire des critères (par exemple budget, type de bien, échéance). Seul le texte du message est transmis pour cette analyse. Les agences doivent éviter d’y inclure des informations inutiles ou sensibles. <span class="a-completer">[À COMPLÉTER : conditions contractuelles applicables avec Anthropic, notamment sur la conservation et l’absence d’utilisation des données à des fins d’entraînement, à vérifier]</span></p>
+    <p>Si cette fonction est activée, le texte d’un message collé dans l’outil peut être transmis à Anthropic (États-Unis) afin d’en extraire des critères (par exemple budget, type de bien, échéance). Seul le texte du message est transmis pour cette analyse. Les agences doivent éviter d’y inclure des informations inutiles ou sensibles. Anthropic indique ne pas utiliser, par défaut, les données transmises via son API commerciale pour entraîner ses modèles. <span class="a-completer">[À VÉRIFIER : que les conditions commerciales signées avec Anthropic (Commercial Terms of Service) reflètent bien cette politique à la date de publication, et préciser la durée de conservation appliquée]</span></p>
 </section>
 
 <section id="destinataires" aria-labelledby="h-destinataires">
@@ -165,8 +165,8 @@
         <table>
             <thead><tr><th>Prestataire</th><th>Rôle</th><th>Données concernées</th><th>Localisation</th></tr></thead>
             <tbody>
-                <tr><td data-label="Prestataire">Vercel Inc.</td><td data-label="Rôle">Hébergement de l’interface web</td><td data-label="Données concernées">Données techniques de connexion (adresse IP, journaux d’accès)</td><td data-label="Localisation"><span class="a-completer">[À COMPLÉTER : localisation, États-Unis ou autre, à confirmer]</span></td></tr>
-                <tr><td data-label="Prestataire">Render</td><td data-label="Rôle">Hébergement de l’API et de la base de données PostgreSQL</td><td data-label="Données concernées">Données de compte et données des prospects</td><td data-label="Localisation"><span class="a-completer">[À COMPLÉTER : région d’hébergement]</span></td></tr>
+                <tr><td data-label="Prestataire">Vercel Inc.</td><td data-label="Rôle">Hébergement de l’interface web</td><td data-label="Données concernées">Données techniques de connexion (adresse IP, journaux d’accès)</td><td data-label="Localisation">États-Unis (adhérent au cadre européen de protection des données EU-U.S. Data Privacy Framework)</td></tr>
+                <tr><td data-label="Prestataire">Render</td><td data-label="Rôle">Hébergement de l’API et de la base de données PostgreSQL</td><td data-label="Données concernées">Données de compte et données des prospects</td><td data-label="Localisation">États-Unis <span class="a-completer">[À COMPLÉTER : région exacte du service et de la base, visible dans le tableau de bord Render, réglages du service]</span></td></tr>
                 <tr><td data-label="Prestataire">Brevo</td><td data-label="Rôle">Envoi d’e-mails transactionnels</td><td data-label="Données concernées">Adresse e-mail du destinataire et contenu du message envoyé</td><td data-label="Localisation">France</td></tr>
                 <tr><td data-label="Prestataire">Anthropic (si la fonction d’extraction est activée)</td><td data-label="Rôle">Analyse du texte d’un message pour en extraire des critères</td><td data-label="Données concernées">Texte du message soumis</td><td data-label="Localisation">États-Unis</td></tr>
             </tbody>
@@ -177,7 +177,7 @@
 
 <section id="transferts" aria-labelledby="h-transferts">
     <h2 id="h-transferts">7. Transferts hors de l’Union européenne</h2>
-    <p>Certains prestataires mentionnés ci-dessus sont établis aux États-Unis ou peuvent héberger des données hors de l’Union européenne. Dans ce cas, le transfert est encadré par les garanties prévues au chapitre V du RGPD : <span class="a-completer">[À COMPLÉTER : mécanisme retenu pour chaque prestataire (décision d’adéquation, clauses contractuelles types, autre), à vérifier auprès de chacun]</span>.</p>
+    <p>Certains prestataires mentionnés ci-dessus sont établis aux États-Unis ou peuvent héberger des données hors de l’Union européenne. Dans ce cas, le transfert est encadré par les garanties prévues au chapitre V du RGPD : Vercel adhère au cadre européen de protection des données (EU-U.S. Data Privacy Framework) ; Render et Anthropic recourent, selon leurs informations publiées, aux clauses contractuelles types de la Commission européenne. <span class="a-completer">[À VÉRIFIER auprès de chaque prestataire, notamment dans son propre DPA, que le mécanisme retenu est toujours en vigueur à la date de publication]</span>.</p>
 </section>
 
 <section id="conservation" aria-labelledby="h-conservation">
@@ -187,12 +187,12 @@
         <table>
             <thead><tr><th>Catégorie</th><th>Durée de conservation</th></tr></thead>
             <tbody>
-                <tr><td data-label="Catégorie">Données de compte</td><td data-label="Durée de conservation">Pendant la durée du contrat, puis <span class="a-completer">[À COMPLÉTER : durée après la fin du contrat]</span></td></tr>
-                <tr><td data-label="Catégorie">Données des prospects</td><td data-label="Durée de conservation">Jusqu’à leur suppression par l’agence (fonction « supprimer ce prospect »), ou jusqu’à la fin du contrat puis <span class="a-completer">[À COMPLÉTER : délai de restitution et de suppression]</span></td></tr>
-                <tr><td data-label="Catégorie">Journaux techniques</td><td data-label="Durée de conservation"><span class="a-completer">[À COMPLÉTER : durée de conservation des journaux]</span></td></tr>
-                <tr><td data-label="Catégorie">Demandes de réinitialisation du mot de passe</td><td data-label="Durée de conservation">Lien valable pendant une durée limitée ; <span class="a-completer">[À COMPLÉTER : durée de conservation des enregistrements expirés]</span></td></tr>
-                <tr><td data-label="Catégorie">Messages adressés à Zelyro (démonstration, questions)</td><td data-label="Durée de conservation"><span class="a-completer">[À COMPLÉTER : durée de conservation]</span></td></tr>
-                <tr><td data-label="Catégorie">Données de facturation et pièces comptables</td><td data-label="Durée de conservation"><span class="a-completer">[À COMPLÉTER : durée légale applicable]</span></td></tr>
+                <tr><td data-label="Catégorie">Données de compte</td><td data-label="Durée de conservation">Pendant la durée du contrat, puis 30 jours après sa fin (délai permettant à l’agence de demander une restitution), sauf obligation légale de conservation plus longue <span class="a-completer">[À VALIDER : délai proposé]</span></td></tr>
+                <tr><td data-label="Catégorie">Données des prospects</td><td data-label="Durée de conservation">Jusqu’à leur suppression par l’agence (fonction « supprimer ce prospect »), ou jusqu’à la fin du contrat puis 30 jours (même délai que les données de compte) <span class="a-completer">[À VALIDER]</span></td></tr>
+                <tr><td data-label="Catégorie">Journaux techniques</td><td data-label="Durée de conservation">12 mois <span class="a-completer">[À VALIDER : durée usuelle pour des journaux de sécurité, généralement entre 6 et 12 mois]</span></td></tr>
+                <tr><td data-label="Catégorie">Demandes de réinitialisation du mot de passe</td><td data-label="Durée de conservation">Lien valable pendant une durée limitée (30 minutes) ; l’enregistrement de la demande est supprimé dès son utilisation ou, au plus tard, 24 heures après son expiration</td></tr>
+                <tr><td data-label="Catégorie">Messages adressés à Zelyro (démonstration, questions)</td><td data-label="Durée de conservation">3 ans à compter du dernier contact, conformément aux recommandations usuelles en matière de prospection commerciale <span class="a-completer">[À VALIDER]</span></td></tr>
+                <tr><td data-label="Catégorie">Données de facturation et pièces comptables</td><td data-label="Durée de conservation">10 ans, conformément à l’obligation légale de conservation des documents comptables (article L123-22 du Code de commerce)</td></tr>
             </tbody>
         </table>
     </div>
@@ -253,7 +253,7 @@
 
 <section id="modifications" aria-labelledby="h-modifications">
     <h2 id="h-modifications">13. Modification de la politique</h2>
-    <p>Cette politique peut évoluer, notamment en cas de changement de prestataire ou de fonctionnalité. La date de dernière mise à jour figure en haut de la page. En cas de modification substantielle, les utilisateurs concernés en seront informés <span class="a-completer">[À COMPLÉTER : mode d’information, par exemple e-mail ou message dans l’application]</span>.</p>
+    <p>Cette politique peut évoluer, notamment en cas de changement de prestataire ou de fonctionnalité. La date de dernière mise à jour figure en haut de la page. En cas de modification substantielle, les utilisateurs concernés en seront informés par e-mail, à l’adresse associée à leur compte, au moins 30 jours avant son entrée en vigueur <span class="a-completer">[À VALIDER : délai proposé, à harmoniser avec celui retenu à l’article 2 des CGU]</span>.</p>
 </section>
 
             </article>
@@ -283,6 +283,7 @@
                     <li><a href="/mentions-legales.html">Mentions légales</a></li>
                     <li><a href="/confidentialite.html">Politique de confidentialité</a></li>
                     <li><a href="/cgu.html">Conditions générales d’utilisation</a></li>
+                    <li><a href="/accord-sous-traitance.html">Accord de sous-traitance (DPA)</a></li>
                 </ul>
             </div>
             <div class="foot-col">
