@@ -96,7 +96,7 @@ body.pub {
 @media (max-width: 900px) {
     .site-header { padding: 10px 0; }
     .site-header .header-content { gap: 10px; padding: 0 16px; flex-wrap: nowrap; }
-    .site-header .logo { font-size: 19px; }
+    .site-header .logo { font-size: 20px; }
     .header-actions { margin-left: auto; }
     .header-actions .btn-demo { display: none; }
     .js .menu-toggle { display: inline-flex; }

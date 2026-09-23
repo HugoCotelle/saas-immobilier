@@ -101,17 +101,17 @@ header {
 .logo {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 11px;
     font-family: var(--logo-font);
-    font-size: 21px;
+    font-size: 23px;
     font-weight: 500;
     letter-spacing: 0.14em;
     color: var(--ink);
 }
 .logo::before {
     content: "";
-    width: 9px;
-    height: 9px;
+    width: 10px;
+    height: 10px;
     background: var(--sage-600);
     border-radius: 2px;
     transform: rotate(45deg);
