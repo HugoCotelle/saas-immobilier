@@ -188,6 +188,8 @@ body.pub {
 .mock-logo { display: inline-flex; align-items: center; gap: 7px; font-family: var(--serif); font-size: 13px; letter-spacing: .14em; color: var(--ink); }
 .mock-logo::before { content: ""; width: 6px; height: 6px; background: var(--sage-600); border-radius: 1.5px; transform: rotate(45deg); }
 .mock-tabs { display: flex; gap: 16px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.mock-tabs span { cursor: pointer; transition: color .15s ease; }
+.mock-tabs span:hover { color: var(--ink); }
 .mock-tabs .on { color: var(--ink); position: relative; }
 .mock-tabs .on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -14px; height: 2px; background: var(--sage-600); }
 .mock-tag {
@@ -209,6 +211,15 @@ body.pub {
 .mock-lead-name { font-family: var(--serif); font-size: 17px; font-weight: 500; color: var(--ink); line-height: 1.25; }
 .mock-lead-meta { grid-column: 1 / -1; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
 .mock-lead .lead-badge { font-size: 11.5px; padding: 3px 10px; white-space: nowrap; }
+.mock-panel { display: none; }
+.mock-panel.is-active { display: block; }
+.mock-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.mock-stat {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px;
+}
+.mock-stat b { display: block; font-family: var(--serif); font-size: 24px; font-weight: 500; color: var(--ink); line-height: 1.2; }
+.mock-stat span { font-size: 12px; color: var(--muted); }
 .mock-chip {
     position: absolute; top: -30px; right: 34px; z-index: 3;
     display: flex; align-items: center; gap: 10px;
