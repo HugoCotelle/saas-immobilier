@@ -489,17 +489,46 @@ textarea { resize: vertical; min-height: 90px; line-height: 1.6; }
 
 /* ---------- Connexion / inscription ---------- */
 body.auth {
-    background:
-        radial-gradient(900px 520px at 12% -8%, #E4EADB 0%, rgba(228, 234, 219, 0) 62%),
-        radial-gradient(700px 460px at 100% 108%, #EADFC9 0%, rgba(234, 223, 201, 0) 60%),
-        var(--bg);
+    position: relative;
+    isolation: isolate;
+    background: var(--bg);
     min-height: 100vh;
     display: flex;
     justify-content: center;
     align-items: center;
     padding: 24px;
 }
+body.auth::before {
+    content: "";
+    position: absolute; inset: 0; z-index: -1;
+    background:
+        radial-gradient(60% 50% at 15% 10%, #E1E9D6 0%, rgba(225, 233, 214, 0) 70%),
+        radial-gradient(55% 55% at 90% 15%, #F0E6CC 0%, rgba(240, 230, 204, 0) 65%),
+        radial-gradient(60% 55% at 85% 95%, #E6DCC3 0%, rgba(230, 220, 195, 0) 65%),
+        radial-gradient(50% 45% at 5% 90%, #E2E8DA 0%, rgba(226, 232, 218, 0) 65%);
+}
+.auth-trust { margin-top: 22px; text-align: center; font-size: 12px; color: var(--ink-3); }
+.auth-decor { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.auth-chip {
+    position: absolute;
+    display: inline-flex; align-items: center; gap: 9px;
+    background: var(--surface); border: 1px solid var(--line-strong); border-radius: 999px;
+    padding: 10px 18px 10px 13px; font-size: 12.5px; color: var(--ink); white-space: nowrap;
+    box-shadow: 0 18px 34px -16px rgba(31, 42, 36, .32);
+}
+.auth-chip svg { width: 16px; height: 16px; color: var(--sage-600); flex: none; }
+.auth-chip-score {
+    display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 999px; flex: none;
+    background: var(--sage-100); color: var(--sage-700); font-family: var(--serif); font-weight: 600; font-size: 12px;
+}
+.auth-chip-1 { top: 16%; left: 10%; }
+.auth-chip-2 { bottom: 18%; right: 9%; }
+@media (max-width: 760px) {
+    .auth-decor { display: none; }
+}
 .auth-container {
+    position: relative;
+    z-index: 1;
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: 16px;
