@@ -18,7 +18,14 @@
 }
 
 html { scroll-behavior: smooth; scroll-padding-top: 84px; }
-@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+@media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .feat, .price-card, .reveal { transition: none !important; transform: none !important; opacity: 1 !important; }
+}
+
+/* ---------- Apparition au défilement ---------- */
+.reveal { opacity: 0; transform: translateY(20px); transition: opacity .6s var(--ease), transform .6s var(--ease); }
+.reveal.is-visible { opacity: 1; transform: none; }
 
 body.pub {
     font-size: 16px;
@@ -56,8 +63,14 @@ body.pub {
 .site-header .header-content { max-width: var(--wrap); gap: 28px; }
 .site-header .logo { text-decoration: none; }
 .site-nav { display: flex; align-items: center; gap: 30px; margin-left: auto; }
-.site-nav a { color: var(--ink-2); text-decoration: none; font-size: 14px; }
+.site-nav a { color: var(--ink-2); text-decoration: none; font-size: 14px; position: relative; }
+.site-nav a::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: -4px; height: 1px;
+    background: var(--sage-600); transform: scaleX(0); transform-origin: left;
+    transition: transform .25s var(--ease);
+}
 .site-nav a:hover { color: var(--ink); }
+.site-nav a:hover::after { transform: scaleX(1); }
 .site-nav a.nav-demo { display: none; }
 .header-actions { display: flex; align-items: center; gap: 10px; }
 .site-header .btn { white-space: nowrap; }
@@ -241,13 +254,15 @@ body.pub {
     background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 32px;
     transition: border-color .25s ease, box-shadow .25s ease, transform .25s var(--ease);
 }
-.feat:hover { border-color: var(--line-strong); box-shadow: var(--shadow-hover); }
+.feat:hover { border-color: var(--line-strong); box-shadow: var(--shadow-hover); transform: translateY(-4px); }
 .feat.w2 { grid-column: span 2; }
 .feat.w4 { grid-column: span 4; }
 .feat-icon {
     width: 44px; height: 44px; border-radius: 12px; background: var(--sage-100); color: var(--sage-700);
     display: grid; place-items: center; margin-bottom: 22px; flex: none;
+    transition: background .25s ease, color .25s ease, transform .25s var(--ease);
 }
+.feat:hover .feat-icon { background: var(--sage-600); color: #fff; transform: scale(1.06); }
 .feat-icon svg { width: 22px; height: 22px; }
 .feat h3 { margin-bottom: 12px; }
 .feat p { color: var(--ink-2); font-size: 15.5px; line-height: 1.65; max-width: 46em; }
@@ -521,9 +536,9 @@ body.pub {
 .price-card {
     display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line);
     border-radius: 18px; padding: 32px; position: relative;
-    transition: border-color .25s ease, box-shadow .25s ease;
+    transition: border-color .25s ease, box-shadow .25s ease, transform .25s var(--ease);
 }
-.price-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-hover); }
+.price-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-hover); transform: translateY(-6px); }
 .price-card.featured { border: 2px solid var(--sage-600); }
 .price-badge {
     position: absolute; top: -13px; left: 30px; background: var(--sage-600); color: #fff;
