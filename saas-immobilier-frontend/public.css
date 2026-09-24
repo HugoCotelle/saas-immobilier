@@ -478,6 +478,13 @@ body.pub {
 .legal-body tr:last-child td { border-bottom: none; }
 .legal-body td:first-child { color: var(--ink); font-weight: 500; }
 
+.legal-body.compare th, .legal-body.compare td { font-size: 15.5px; padding: 17px 22px; }
+.legal-body.compare th { font-size: 12.5px; }
+.legal-body.compare td:first-child { font-weight: 500; color: var(--ink-2); }
+.legal-body.compare td:not(:first-child), .legal-body.compare th:not(:first-child) { text-align: center; }
+.legal-body.compare th:nth-child(3), .legal-body.compare td:nth-child(3) { background: var(--sage-50); }
+.legal-body.compare td:nth-child(3) { font-weight: 700; color: var(--ink); }
+
 @media (max-width: 640px) {
     .legal-body table, .legal-body tbody, .legal-body tr, .legal-body td { display: block; width: 100%; }
     .legal-body thead { position: absolute; left: -9999px; }
@@ -487,6 +494,9 @@ body.pub {
     .legal-body td::before { content: attr(data-label); display: block; font-size: 11px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
     .legal-body td:first-child::before { display: none; }
     .legal-body td:first-child { padding-top: 8px; font-size: 15.5px; }
+    .legal-body.compare td:not(:first-child), .legal-body.compare th:not(:first-child) { text-align: left; }
+    .legal-body.compare th:nth-child(3), .legal-body.compare td:nth-child(3) { background: none; }
+    .legal-body.compare td:nth-child(3) { font-weight: 500; color: var(--ink); }
     .deflist { grid-template-columns: 1fr; }
     .deflist dt { border-bottom: none; padding-bottom: 0; padding-top: 14px; font-size: 13px; }
     .deflist dd { padding-top: 2px; }

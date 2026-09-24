@@ -31,6 +31,8 @@
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
 <defs>
 <symbol id="ck" viewBox="0 0 12 12"><path d="M2.5 6.5l2.5 2.5 4.5-5.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 20c0-3.6 2.5-6.3 5.5-6.3s5.5 2.7 5.5 6.3"/><circle cx="17.5" cy="9.5" r="2.4"/><path d="M14.8 14.2c1.9.5 3.4 2.6 3.7 5.8"/></symbol>
+<symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4M8 14.5l2 2 3.5-3.5"/></symbol>
 </defs>
 </svg>
 <header class="site-header">
@@ -123,7 +125,7 @@
                 <p class="eyebrow">Comparatif</p>
                 <h2 id="titre-comparatif">Tous les forfaits, côte à côte.</h2>
             </div>
-            <div class="legal-body">
+            <div class="legal-body compare">
                 <div class="table-wrap">
                     <table>
                         <thead><tr><th>Caractéristique</th><th>Essentiel</th><th>Agence</th><th>Réseau</th></tr></thead>
@@ -147,19 +149,20 @@
     <section class="section" aria-labelledby="titre-comptes">
         <div class="wrap">
             <div class="section-head">
-                <p class="eyebrow">Comptes utilisateurs</p>
-                <h2 id="titre-comptes">Un compte par agent, une vue d’ensemble pour le responsable.</h2>
-                <p>Chaque forfait inclut plusieurs comptes utilisateurs pour l’agence. Le compte « Administrateur », créé à la souscription, a accès à l’ensemble des données de l’agence ainsi qu’aux statistiques d’activité des comptes « Agent » qui lui sont rattachés. Les comptes « Agent », destinés aux collaborateurs de l’agence, ont un accès paramétré par l’Administrateur. Au-delà du nombre de comptes inclus dans le forfait, chaque compte supplémentaire est facturé 15&nbsp;€ HT par mois.</p>
+                <p class="eyebrow">Comptes et facturation</p>
+                <h2 id="titre-comptes">Le forfait s’adapte à votre équipe.</h2>
             </div>
-        </div>
-    </section>
-
-    <section class="section" aria-labelledby="titre-annuel">
-        <div class="wrap">
-            <div class="section-head">
-                <p class="eyebrow">Facturation annuelle</p>
-                <h2 id="titre-annuel">Réglez à l’année, économisez 10&nbsp;%.</h2>
-                <p>La facturation annuelle est réglée en une fois, en début de période, et emporte un engagement de douze (12) mois. En cas de résiliation anticipée, les sommes déjà versées restent acquises et ne sont pas remboursées, mais votre agence continue de bénéficier du Service jusqu’au terme des douze mois déjà réglés. La facturation mensuelle, elle, reste sans engagement et résiliable à tout moment.</p>
+            <div class="bento">
+                <div class="feat">
+                    <div class="feat-icon"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-users"/></svg></div>
+                    <h3>Un compte par agent, une vue d’ensemble pour le responsable</h3>
+                    <p>Chaque forfait inclut plusieurs comptes utilisateurs pour l’agence. Le compte « Administrateur », créé à la souscription, a accès à l’ensemble des données de l’agence ainsi qu’aux statistiques d’activité des comptes « Agent » qui lui sont rattachés. Les comptes « Agent », destinés aux collaborateurs de l’agence, ont un accès paramétré par l’Administrateur. Au-delà du nombre inclus, chaque compte supplémentaire est facturé 15&nbsp;€ HT par mois.</p>
+                </div>
+                <div class="feat">
+                    <div class="feat-icon"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-cal"/></svg></div>
+                    <h3>Réglez à l’année, économisez 10&nbsp;%</h3>
+                    <p>La facturation annuelle est réglée en une fois, en début de période, et emporte un engagement de douze (12) mois. En cas de résiliation anticipée, les sommes déjà versées restent acquises et ne sont pas remboursées, mais votre agence continue de bénéficier du Service jusqu’au terme des douze mois déjà réglés. La facturation mensuelle reste sans engagement et résiliable à tout moment.</p>
+                </div>
             </div>
         </div>
     </section>
