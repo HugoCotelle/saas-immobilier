@@ -484,6 +484,11 @@ body.pub {
 .legal-body.compare td:not(:first-child), .legal-body.compare th:not(:first-child) { text-align: center; }
 .legal-body.compare th:nth-child(3), .legal-body.compare td:nth-child(3) { background: var(--sage-50); }
 .legal-body.compare td:nth-child(3) { font-weight: 700; color: var(--ink); }
+@media (min-width: 641px) {
+    .legal-body.compare table { table-layout: fixed; }
+    .legal-body.compare th:first-child, .legal-body.compare td:first-child { width: 34%; }
+    .legal-body.compare th:not(:first-child), .legal-body.compare td:not(:first-child) { width: 22%; }
+}
 
 @media (max-width: 640px) {
     .legal-body table, .legal-body tbody, .legal-body tr, .legal-body td { display: block; width: 100%; }
