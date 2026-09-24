@@ -478,7 +478,7 @@ body.pub {
 .legal-body tr:last-child td { border-bottom: none; }
 .legal-body td:first-child { color: var(--ink); font-weight: 500; }
 
-.legal-body.compare th, .legal-body.compare td { font-size: 15.5px; padding: 17px 22px; }
+.legal-body.compare th, .legal-body.compare td { font-size: 15.5px; padding: 17px 22px; vertical-align: middle; }
 .legal-body.compare th { font-size: 12.5px; }
 .legal-body.compare td:first-child { font-weight: 500; color: var(--ink-2); }
 .legal-body.compare td:not(:first-child), .legal-body.compare th:not(:first-child) { text-align: center; }
