@@ -3380,8 +3380,12 @@ def _traiter_email_entrant(item):
         try:
             _tous_liens = re.findall(r'href=["\']([^"\']+)["\']', str(item.get('RawHtmlBody') or ''))
             if _tous_liens:
-                app.logger.info("DEBUG liens bruts (%s, sujet=%r) : %s",
-                                 portail, sujet, _tous_liens[:20])
+                app.logger.warning("DEBUG liens bruts (%s, sujet=%r) : %s",
+                                    portail, sujet, _tous_liens[:20])
+            else:
+                app.logger.warning("DEBUG aucun lien trouve dans RawHtmlBody (%s, sujet=%r), "
+                                    "longueur RawHtmlBody=%s", portail, sujet,
+                                    len(str(item.get('RawHtmlBody') or '')))
         except Exception:
             app.logger.exception("DEBUG liens bruts : echec")
 
