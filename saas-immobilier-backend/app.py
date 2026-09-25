@@ -3204,9 +3204,14 @@ def _corps_texte_email(item):
         v = item.get(cle)
         if v and str(v).strip():
             v = str(v).strip()
-            if _BALISE_HTML_RE.search(v):
-                return _deshtmliser(v)
-            return v
+            # Certains envois (dont les e-mails Gmail/Outlook) livrent ce champ
+            # avec les balises HTML échappées ("&lt;html&gt;...") plutôt qu'en
+            # clair : on déséchappe avant de tester, sinon la détection de
+            # balises ci-dessous ne voit jamais rien à nettoyer.
+            v_visible = _html.unescape(v)
+            if _BALISE_HTML_RE.search(v_visible):
+                return _deshtmliser(v_visible)
+            return v_visible
     return _deshtmliser(item.get('RawHtmlBody') or '')
 
 
