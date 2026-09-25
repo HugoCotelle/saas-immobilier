@@ -3305,25 +3305,31 @@ def _deshtmliser(brut):
 
 
 def _corps_texte_email(item):
-    """Le texte le plus propre disponible : Brevo nettoie déjà signatures et
-    citations dans ExtractedMarkdownMessage. À défaut, le texte brut, puis en
-    dernier recours le HTML débarrassé de ses balises (en gardant les liens).
-    Certains expéditeurs (dont les e-mails de confirmation Gmail/Outlook) ne
-    fournissent pas d'alternative texte propre : ExtractedMarkdownMessage ou
-    RawTextBody contiennent alors du HTML brut qu'il faut nettoyer aussi."""
+    """Le HTML brut passe en premier, nettoyé par notre propre _deshtmliser :
+    c'est la seule source qui garde de façon fiable les vraies URL derrière
+    les liens. Le texte pré-nettoyé par Brevo (ExtractedMarkdownMessage /
+    RawTextBody) simplifie parfois un lien dont le texte visible ressemble
+    déjà à une URL (ex. le mail de confirmation de transfert Gmail affiche
+    "https://mail.google.com" comme texte cliquable) : il ne garde alors que
+    ce texte affiché et perd l'URL réelle de confirmation cachée derrière.
+    On ne retombe sur les champs texte de Brevo que si le HTML brut est
+    absent (rare, mais certains envois n'ont qu'une alternative texte)."""
+    html_brut = item.get('RawHtmlBody')
+    if html_brut and str(html_brut).strip():
+        return _deshtmliser(str(html_brut).strip())
     for cle in ('ExtractedMarkdownMessage', 'RawTextBody'):
         v = item.get(cle)
         if v and str(v).strip():
             v = str(v).strip()
-            # Certains envois (dont les e-mails Gmail/Outlook) livrent ce champ
-            # avec les balises HTML échappées ("&lt;html&gt;...") plutôt qu'en
-            # clair : on déséchappe avant de tester, sinon la détection de
-            # balises ci-dessous ne voit jamais rien à nettoyer.
+            # Certains envois livrent ce champ avec les balises HTML échappées
+            # ("&lt;html&gt;...") plutôt qu'en clair : on déséchappe avant de
+            # tester, sinon la détection de balises ci-dessous ne voit jamais
+            # rien à nettoyer.
             v_visible = _html.unescape(v)
             if _BALISE_HTML_RE.search(v_visible):
                 return _deshtmliser(v_visible)
             return v_visible
-    return _deshtmliser(item.get('RawHtmlBody') or '')
+    return ''
 
 
 def _adresse_capture_dans(destinataires):
