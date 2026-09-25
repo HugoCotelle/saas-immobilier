@@ -3407,7 +3407,14 @@ def _traiter_email_entrant(item):
             notes = f"{sujet} — {notes}" if notes else sujet
 
         email_contact = (champs or {}).get('email')
-        if not email_contact and expediteur and EMAIL_RE.match(expediteur) and 'noreply' not in expediteur.lower():
+        # Le "From" d'un e-mail LeBonCoin/SeLoger est toujours l'adresse système
+        # du portail (ex. info@service.seloger.com), jamais celle du contact : le
+        # prendre comme email_contact enverrait le mail de complétion au portail
+        # lui-même. On ne se rabat sur l'expéditeur que pour un transfert
+        # générique (portail inconnu), où l'expéditeur a des chances d'être la
+        # bonne personne.
+        if (not email_contact and portail == 'portail' and expediteur
+                and EMAIL_RE.match(expediteur) and 'noreply' not in expediteur.lower()):
             email_contact = expediteur
 
         cur.execute("""
