@@ -304,6 +304,14 @@ _DDL_CAPTURE_MAIL = (
     )""",
 )
 
+# Lien personnel envoyé au prospect après un contact LeBonCoin/SeLoger, pour
+# qu'il précise lui-même sa recherche : met à jour SA fiche (pas de doublon).
+_DDL_COMPLETION = (
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS completion_token VARCHAR(64)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS leads_completion_token_idx "
+    "ON leads (completion_token) WHERE completion_token IS NOT NULL",
+)
+
 # Les forfaits : code, nom, prospects, biens, e-mails par mois, extractions IA
 # par mois (None = illimité), ordre d'affichage. Ces valeurs ne servent qu'à
 # remplir la table « plans » la première fois : ensuite, les limites se règlent
@@ -404,6 +412,8 @@ def _assurer_schema():
                                WHERE table_name = 'users' AND column_name = 'mail_capture_token'),
                        to_regclass('inbound_emails') IS NOT NULL,
                        EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'leads' AND column_name = 'completion_token'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
                                WHERE table_name = 'users' AND column_name = 'plan'),
                        to_regclass('plans') IS NOT NULL,
                        to_regclass('invitations') IS NOT NULL,
@@ -414,7 +424,7 @@ def _assurer_schema():
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
-                for ddl in _DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_ACCES:
+                for ddl in _DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION + _DDL_ACCES:
                     cur.execute(ddl)
             conn.commit()
             _schema_pret = True
@@ -2009,6 +2019,11 @@ def _lien_formulaire(jeton):
     return f"{site}/formulaire.html?a={jeton}" if site else None
 
 
+def _lien_completion(jeton):
+    site = _site_url()
+    return f"{site}/completer.html?c={jeton}" if site else None
+
+
 @app.route('/api/v1/capture-link', methods=['GET'])
 @token_required
 def get_capture_link():
@@ -2186,6 +2201,102 @@ def capture_lead(token):
 
         _lancer_en_arriere_plan(_alertes_matching, agence['id'], [lead_id], None, 'formulaire')
         return jsonify({"message": "Merci, votre demande a bien été envoyée."}), 201
+    except Exception:
+        return erreur_interne()
+
+
+COMPLETION_JETON_RE = re.compile(r'^[A-Za-z0-9_-]{16,64}$')
+
+
+@app.route('/public/completer/<token>', methods=['GET'])
+def completer_info(token):
+    """Nom de l'agence et prénom du prospect, pour personnaliser le formulaire
+    de complétion envoyé par e-mail après un contact LeBonCoin/SeLoger."""
+    try:
+        if not COMPLETION_JETON_RE.match(token):
+            return jsonify({"message": "Not found"}), 404
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("""
+                SELECT u.company_name, l.name FROM leads l
+                JOIN users u ON u.id = l.user_id
+                WHERE l.completion_token = %s AND u.is_active
+            """, (token,))
+            ligne = cur.fetchone()
+        if not ligne:
+            return jsonify({"message": "Not found"}), 404
+        prenom = (ligne['name'] or '').split(' ')[0] if ligne['name'] else ''
+        return jsonify({"agence": ligne['company_name'] or "", "prenom": prenom}), 200
+    except Exception:
+        return erreur_interne()
+
+
+def _cle_jeton_completion():
+    return "compl:" + str((request.view_args or {}).get('token', ''))[:64]
+
+
+@app.route('/public/completer/<token>', methods=['POST'])
+@limiter.limit("10 per hour")
+@limiter.limit("60 per hour", key_func=_cle_jeton_completion)
+def completer_lead(token):
+    """Le prospect précise sa recherche depuis le lien personnel reçu par
+    e-mail : met à jour SA fiche déjà créée depuis la notification
+    LeBonCoin/SeLoger (pas de doublon). Page publique, comme /public/capture."""
+    try:
+        if not COMPLETION_JETON_RE.match(token):
+            return jsonify({"message": "Not found"}), 404
+        data = request.get_json(silent=True) or {}
+        if data.get('website'):
+            return jsonify({"message": "Merci, vos informations ont bien été enregistrées."}), 200
+        if data.get('consent') is not True:
+            return jsonify({"message": "Veuillez accepter d'être recontacté pour envoyer vos informations."}), 400
+
+        email = (_texte_court(data.get('email'), 255) or '').lower() or None
+        if email and not EMAIL_RE.match(email):
+            return jsonify({"message": "Cette adresse e-mail semble invalide."}), 400
+        tel = _texte_court(data.get('phone'), 20)
+        message = _texte_court(data.get('message'), 1000)
+
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("""
+                SELECT l.id, l.user_id FROM leads l
+                JOIN users u ON u.id = l.user_id
+                WHERE l.completion_token = %s AND u.is_active
+            """, (token,))
+            lead = cur.fetchone()
+            if not lead:
+                return jsonify({"message": "Not found"}), 404
+
+            cur.execute("""
+                UPDATE leads SET
+                    budget = COALESCE(%s, budget),
+                    location = COALESCE(%s, location),
+                    property_type = COALESCE(%s, property_type),
+                    financing_status = %s,
+                    purchase_urgency = %s,
+                    email = COALESCE(email, %s),
+                    phone = COALESCE(phone, %s),
+                    consent_at = COALESCE(consent_at, %s)
+                WHERE id = %s
+            """, (
+                _entier_borne(data.get('budget')),
+                _texte_court(data.get('location'), 255),
+                _texte_court(data.get('property_type'), 100),
+                _choix(data.get('financing_status'), FINANCEMENT_FORMULAIRE),
+                _choix(data.get('purchase_urgency'), URGENCY_VALUES),
+                email, tel, _maintenant(),
+                lead['id'],
+            ))
+            if message:
+                cur.execute("""
+                    INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
+                    VALUES (%s, %s, 'note', %s, %s)
+                """, (lead['id'], lead['user_id'], "Précisions envoyées par le prospect : " + message, _maintenant()))
+            conn.commit()
+
+        _lancer_en_arriere_plan(_alertes_matching, lead['user_id'], [lead['id']], None, None)
+        return jsonify({"message": "Merci, vos informations ont bien été enregistrées."}), 200
     except Exception:
         return erreur_interne()
 
@@ -3334,6 +3445,52 @@ def _traiter_email_entrant(item):
     if extraction_effectuee:
         _compter_extraction(user_id)
     _lancer_en_arriere_plan(_alertes_matching, user_id, [lead_id], None, portail)
+    if portail in ('leboncoin', 'seloger') and email_contact:
+        _lancer_en_arriere_plan(_envoyer_email_completion, user_id, lead_id, nom, email_contact, portail)
+
+
+def _envoyer_email_completion(user_id, lead_id, nom, email_contact, portail):
+    """E-mail automatique demandant au prospect de préciser sa recherche
+    (budget, secteur, type de bien...), envoyé juste après la création
+    d'un prospect capté depuis LeBonCoin/SeLoger. Le lien est personnel à
+    CE prospect : le formulaire complète sa fiche, n'en crée pas une autre.
+    N'envoie rien si l'adresse est absente/invalide ou si l'envoi d'e-mail
+    n'est pas configuré ; ne doit jamais faire échouer la création du lead
+    (appelée en tâche de fond, après la réponse au webhook)."""
+    try:
+        if not email_contact or not EMAIL_RE.match(email_contact) or not _envoi_configure():
+            return
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("SELECT company_name FROM users WHERE id = %s", (user_id,))
+            agent = cur.fetchone()
+            agence = (agent or {}).get('company_name') or 'votre agence'
+            cur.execute("SELECT completion_token FROM leads WHERE id = %s", (lead_id,))
+            ligne = cur.fetchone()
+            jeton = ligne['completion_token'] if ligne else None
+            if not jeton:
+                jeton = secrets.token_urlsafe(24)
+                cur.execute("UPDATE leads SET completion_token = %s WHERE id = %s", (jeton, lead_id))
+            conn.commit()
+
+        lien = _lien_completion(jeton)
+        if not lien:
+            return
+        libelle_portail = _PORTAIL_LIBELLE.get(portail, "un portail immobilier")
+        prenom = (nom or '').split(' ')[0] if nom and nom not in _PORTAIL_NOM_DEFAUT.values() else ''
+        salutation = f"Bonjour {prenom}," if prenom else "Bonjour,"
+        texte, html = _gabarit_email(
+            f"Précisez votre recherche pour {agence}",
+            [salutation,
+             f"Vous avez contacté {agence} via {libelle_portail}. Pour vous proposer rapidement les "
+             "biens qui correspondent vraiment à votre projet, merci de préciser en une minute votre "
+             "budget, le secteur recherché et vos critères.",
+             "Ce lien est personnel, à usage unique pour votre demande :"],
+            bouton=("Préciser ma recherche", lien),
+        )
+        _envoyer_email(email_contact, f"Précisez votre recherche — {agence}", texte, html, nom_expediteur=agence)
+    except Exception:
+        app.logger.exception("E-mail de complétion : échec d'envoi")
 
 
 @app.route('/webhooks/email-inbound', methods=['POST'])
