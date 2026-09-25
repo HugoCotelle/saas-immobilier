@@ -3172,21 +3172,42 @@ def _source_portail(adresse_expediteur):
     return 'portail'
 
 
-def _corps_texte_email(item):
-    """Le texte le plus propre disponible : Brevo nettoie déjà signatures et
-    citations dans ExtractedMarkdownMessage. À défaut, le texte brut, puis en
-    dernier recours le HTML débarrassé de ses balises."""
-    for cle in ('ExtractedMarkdownMessage', 'RawTextBody'):
-        v = item.get(cle)
-        if v and str(v).strip():
-            return str(v).strip()
-    brut = item.get('RawHtmlBody') or ''
+_BALISE_HTML_RE = re.compile(r'<[a-zA-Z!/][^>]{0,200}>')
+
+
+def _deshtmliser(brut):
+    """HTML -> texte lisible, en gardant les liens : un e-mail de confirmation
+    (Gmail, Outlook...) affiche un texte court sur le lien ("cliquez ici") alors
+    que l'URL utile est dans le href. La stripper sans la garder rendrait le
+    lien de confirmation inutilisable une fois affiché dans les notes."""
     if not brut:
         return ''
     texte = re.sub(r'(?is)<(script|style)[^>]*>.*?</\1>', ' ', brut)
+    texte = re.sub(
+        r'(?is)<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
+        lambda m: f"{re.sub(r'(?s)<[^>]+>', ' ', m.group(2)).strip()} ({m.group(1)})",
+        texte,
+    )
     texte = re.sub(r'(?s)<[^>]+>', ' ', texte)
     texte = _html.unescape(texte)
     return re.sub(r'\s+', ' ', texte).strip()
+
+
+def _corps_texte_email(item):
+    """Le texte le plus propre disponible : Brevo nettoie déjà signatures et
+    citations dans ExtractedMarkdownMessage. À défaut, le texte brut, puis en
+    dernier recours le HTML débarrassé de ses balises (en gardant les liens).
+    Certains expéditeurs (dont les e-mails de confirmation Gmail/Outlook) ne
+    fournissent pas d'alternative texte propre : ExtractedMarkdownMessage ou
+    RawTextBody contiennent alors du HTML brut qu'il faut nettoyer aussi."""
+    for cle in ('ExtractedMarkdownMessage', 'RawTextBody'):
+        v = item.get(cle)
+        if v and str(v).strip():
+            v = str(v).strip()
+            if _BALISE_HTML_RE.search(v):
+                return _deshtmliser(v)
+            return v
+    return _deshtmliser(item.get('RawHtmlBody') or '')
 
 
 def _adresse_capture_dans(destinataires):
@@ -3265,7 +3286,7 @@ def _traiter_email_entrant(item):
 
         notes = (champs or {}).get('notes')
         if not champs and corps:
-            notes = corps[:500]
+            notes = corps[:900]
         if sujet and (not notes or sujet.lower() not in notes.lower()):
             notes = f"{sujet} — {notes}" if notes else sujet
 
@@ -3318,7 +3339,8 @@ def email_inbound():
     Zelyro, et Brevo nous relaie l'e-mail. Protégé par un jeton secret dans
     l'URL, Brevo ne signant pas ses appels."""
     secret = (os.getenv('EMAIL_INBOUND_SECRET') or '').strip()
-    if not secret or request.args.get('cle') != secret:
+    cle_recue = request.args.get('cle') or ''
+    if not secret or not secrets.compare_digest(cle_recue, secret):
         return jsonify({"message": "Not found"}), 404
     data = request.get_json(silent=True) or {}
     items = data.get('items')
