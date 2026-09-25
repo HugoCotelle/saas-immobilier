@@ -3402,7 +3402,7 @@ def _traiter_email_entrant(item):
 
         notes = (champs or {}).get('notes')
         if not champs and corps:
-            notes = corps[:900]
+            notes = corps[:2500]
         if sujet and (not notes or sujet.lower() not in notes.lower()):
             notes = f"{sujet} — {notes}" if notes else sujet
 
@@ -3431,7 +3431,7 @@ def _traiter_email_entrant(item):
         if notes:
             cur.execute("""INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
                            VALUES (%s, %s, 'note', %s, %s)""",
-                        (lead_id, user_id, notes[:1000], _maintenant()))
+                        (lead_id, user_id, notes[:3000], _maintenant()))
         if message_id:
             cur.execute("""INSERT INTO inbound_emails (message_id, user_id, source, lead_id, received_at)
                            VALUES (%s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING""",
