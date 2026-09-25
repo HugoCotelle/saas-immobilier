@@ -3374,20 +3374,17 @@ def _traiter_email_entrant(item):
         sujet = _texte_court(item.get('Subject'), 255) or ''
         corps = _corps_texte_email(item)[:6000]
 
-        # DEBUG TEMPORAIRE : liste tous les liens bruts du HTML pour diagnostiquer
-        # le mail de confirmation de transfert Gmail (à retirer une fois le souci
-        # de validation d'adresse de transfert résolu).
+        # DEBUG TEMPORAIRE : dump complet des champs recus de Brevo, pour trouver
+        # le code/lien de confirmation Gmail qu'on ne trouve pas dans les champs
+        # deja exploites (a retirer une fois le souci resolu).
         try:
-            _tous_liens = re.findall(r'href=["\']([^"\']+)["\']', str(item.get('RawHtmlBody') or ''))
-            if _tous_liens:
-                app.logger.warning("DEBUG liens bruts (%s, sujet=%r) : %s",
-                                    portail, sujet, _tous_liens[:20])
-            else:
-                app.logger.warning("DEBUG aucun lien trouve dans RawHtmlBody (%s, sujet=%r), "
-                                    "longueur RawHtmlBody=%s", portail, sujet,
-                                    len(str(item.get('RawHtmlBody') or '')))
+            app.logger.warning("DEBUG champs Brevo recus (sujet=%r) : %s", sujet, sorted(item.keys()))
+            for _cle, _val in item.items():
+                if isinstance(_val, str) and _val.strip():
+                    app.logger.warning("DEBUG champ %s (longueur=%d) : %s",
+                                        _cle, len(_val), _val[:800])
         except Exception:
-            app.logger.exception("DEBUG liens bruts : echec")
+            app.logger.exception("DEBUG dump item : echec")
 
         reste_leads, _ = _reste(cur, user_id, 'leads')
         if reste_leads == 0:
