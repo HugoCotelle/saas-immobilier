@@ -243,6 +243,9 @@ nav a.active::after {
 .panel-header .panel-title { margin-bottom: 0; }
 .panel-count { font-size: 13px; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .panel-note { font-size: 13px; color: var(--ink-2); margin-bottom: 22px; line-height: 1.65; }
+.mail-capture-etapes { margin: 16px 0 4px; padding-left: 20px; font-size: 13px; color: var(--ink-2); line-height: 1.7; }
+.mail-capture-etapes li { margin-bottom: 6px; }
+.mail-capture-etapes li::marker { color: var(--sage-600); font-weight: 600; }
 .section-divider { border-top: 1px solid var(--line); margin: 26px 0 22px; }
 
 /* ---------- Formulaires ---------- */

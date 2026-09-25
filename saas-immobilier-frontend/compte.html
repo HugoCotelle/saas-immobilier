@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZELYRO - Mon compte</title>
+    <meta name="robots" content="noindex">
     <script src="vendor/react.production.min.js"></script>
     <script src="vendor/react-dom.production.min.js"></script>
     <script src="vendor/babel.min.js"></script>
@@ -344,12 +345,12 @@
                                     <h2 className="panel-title">Leads LeBonCoin &amp; SeLoger</h2>
                                 </div>
                                 <p className="panel-note">
-                                    LeBonCoin et SeLoger ne proposent pas d'API pour récupérer vos contacts : la
-                                    seule solution fiable est de transférer leurs e-mails de notification vers
-                                    cette adresse. Zelyro les lit automatiquement et crée le prospect, avec la
-                                    source LeBonCoin ou SeLoger. Dans votre messagerie (Gmail par exemple),
-                                    créez un filtre : « si l'expéditeur contient leboncoin.fr ou seloger.com,
-                                    transférer vers cette adresse ». Deux minutes à faire, une seule fois.
+                                    LeBonCoin et SeLoger ne proposent pas d'API pour récupérer vos contacts
+                                    automatiquement : la seule solution fiable est de transférer leurs e-mails de
+                                    notification vers l'adresse ci-dessous. Zelyro les lit et crée le prospect, avec
+                                    la bonne source. <strong>Cette adresse se configure dans votre messagerie
+                                    (Gmail, Outlook…), jamais dans les paramètres LeBonCoin ou SeLoger</strong> :
+                                    ces portails n'ont rien à savoir de Zelyro.
                                 </p>
                                 {messageMailCapture && (
                                     <div className={messageMailCapture.type === 'error' ? 'error' : 'success'}>{messageMailCapture.text}</div>
@@ -361,6 +362,13 @@
                                                 onFocus={(e) => e.target.select()} aria-label="Adresse de capture des leads" />
                                             <button className="btn" onClick={copierMailCapture}>Copier</button>
                                         </div>
+                                        <ol className="mail-capture-etapes">
+                                            <li>Copiez l'adresse ci-dessus.</li>
+                                            <li>Dans votre messagerie (Gmail par exemple), ouvrez les paramètres puis « Filtres et adresses bloquées » (ou l'équivalent selon votre messagerie).</li>
+                                            <li>Créez un filtre : <em>si l'expéditeur contient leboncoin.fr ou seloger.com</em> → <em>transférer vers</em> cette adresse.</li>
+                                            <li>C'est fini : chaque nouvelle notification LeBonCoin ou SeLoger devient automatiquement un prospect dans Zelyro.</li>
+                                        </ol>
+                                        <p className="field-hint" style={{ marginTop: '2px' }}>Deux minutes à faire, une seule fois.</p>
                                         <div className="btn-ligne" style={{ marginTop: '14px' }}>
                                             {!confirmerMailCapture ? (
                                                 <button className="btn secondary petit" onClick={() => setConfirmerMailCapture(true)}>Créer une nouvelle adresse</button>
