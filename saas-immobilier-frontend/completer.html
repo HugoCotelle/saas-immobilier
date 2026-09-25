@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Précisez votre recherche</title>
+    <meta name="robots" content="noindex">
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="zelyro.css">
+    <style>
+        body.auth { align-items: flex-start; }
+        .form-carte { max-width: 620px; margin: 24px auto; }
+        .form-carte .auth-header h1 { font-size: 30px; letter-spacing: 0.02em; }
+        .form-carte .auth-header h1::before { display: none; }
+        .form-carte .form-row { grid-template-columns: 1fr 1fr; }
+        @media (max-width: 600px) { .form-carte .form-row { grid-template-columns: 1fr; } }
+        .piege { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+        .consentement { display: flex; gap: 12px; align-items: flex-start; text-transform: none; letter-spacing: 0; font-size: 13px; font-weight: 400; color: var(--ink-2); line-height: 1.6; cursor: pointer; margin-bottom: 0; }
+        .consentement input { width: 18px; height: 18px; margin-top: 3px; flex: none; padding: 0; accent-color: var(--sage-600); }
+        .consentement a { color: var(--sage-700); }
+        .pied-formulaire { text-align: center; margin-top: 22px; font-size: 12px; color: var(--ink-3); line-height: 1.7; }
+        .pied-formulaire a { color: var(--ink-3); }
+        .form-carte button[type=submit] { margin-top: 22px; }
+        .masque { display: none; }
+        .champ-erreur { color: var(--danger); font-size: 12px; margin-top: 6px; }
+    </style>
+</head>
+<body class="auth">
+    <main class="auth-container form-carte" id="carte">
+        <div class="auth-header">
+            <h1 id="titre">Précisez votre recherche</h1>
+            <p id="sous-titre">Une minute suffit : votre agence pourra vous proposer les bons biens plus vite.</p>
+        </div>
+
+        <div id="etat" class="loading masque"><div class="loader"></div></div>
+        <div id="message" class="masque" role="status"></div>
+
+        <form id="formulaire" class="masque" novalidate>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="property_type">Type de bien</label>
+                    <select id="property_type" name="property_type">
+                        <option value="">Non précisé</option>
+                        <option>Appartement</option>
+                        <option>Maison</option>
+                        <option>Villa</option>
+                        <option>Studio</option>
+                        <option>Penthouse</option>
+                        <option>Terrain</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="location">Secteur recherché</label>
+                    <input id="location" name="location" type="text" maxlength="255" placeholder="Ville ou quartier">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="budget">Budget (€)</label>
+                    <input id="budget" name="budget" type="number" min="0" max="100000000" inputmode="numeric" placeholder="280000">
+                </div>
+                <div class="form-group">
+                    <label for="financing_status">Financement</label>
+                    <select id="financing_status" name="financing_status">
+                        <option value="unknown">Non précisé</option>
+                        <option value="approved">J'ai un accord de la banque</option>
+                        <option value="in_progress">Démarche en cours</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="purchase_urgency">Quand souhaitez-vous acheter ?</label>
+                <select id="purchase_urgency" name="purchase_urgency">
+                    <option value="unknown">Non précisé</option>
+                    <option value="immediate">Dès que possible</option>
+                    <option value="1-3_months">Dans 1 à 3 mois</option>
+                    <option value="3-6_months">Dans 3 à 6 mois</option>
+                    <option value="6plus_months">Dans plus de 6 mois</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="email">E-mail (si différent de celui déjà connu)</label>
+                    <input id="email" name="email" type="email" autocomplete="email" maxlength="255">
+                </div>
+                <div class="form-group">
+                    <label for="phone">Téléphone</label>
+                    <input id="phone" name="phone" type="tel" autocomplete="tel" maxlength="20">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="message-libre">Un détail à ajouter ?</label>
+                <textarea id="message-libre" name="message" maxlength="1000" placeholder="Vos critères, vos disponibilités..."></textarea>
+            </div>
+
+            <!-- Piège à robots : un visiteur ne voit pas ce champ, un robot le remplit. -->
+            <div class="piege" aria-hidden="true">
+                <label for="website">Ne pas remplir</label>
+                <input id="website" name="website" type="text" tabindex="-1" autocomplete="off">
+            </div>
+
+            <div class="form-group">
+                <label class="consentement" for="consent">
+                    <input id="consent" name="consent" type="checkbox">
+                    <span>J'accepte que <strong id="agence-consent">l'agence</strong> conserve ces informations pour me
+                    recontacter au sujet de mon projet. Voir la
+                    <a href="/confidentialite.html" target="_blank" rel="noopener">politique de confidentialité</a>. <span class="obligatoire">*</span></span>
+                </label>
+                <div class="champ-erreur masque" id="erreur-consent">Cochez cette case pour envoyer vos informations.</div>
+            </div>
+
+            <button type="submit" id="envoyer">Envoyer</button>
+        </form>
+
+        <p class="pied-formulaire">Formulaire propulsé par Zelyro · <a href="/mentions-legales.html" target="_blank" rel="noopener">Mentions légales</a></p>
+    </main>
+
+    <script>
+        (function () {
+            var API_URL = 'https://saas-immobilier-921a.onrender.com';
+            var jeton = new URLSearchParams(window.location.search).get('c') || '';
+            var $ = function (id) { return document.getElementById(id); };
+            var montrer = function (id, oui) { $(id).classList.toggle('masque', !oui); };
+            var afficher = function (type, texte) {
+                var m = $('message');
+                m.className = type === 'error' ? 'error' : 'success';
+                m.textContent = texte;
+                m.style.textAlign = 'left';
+            };
+
+            function indisponible() {
+                montrer('etat', false);
+                montrer('formulaire', false);
+                $('titre').textContent = 'Lien indisponible';
+                $('sous-titre').textContent = "Ce lien n'est plus valable. Contactez directement l'agence pour lui faire part de votre projet.";
+            }
+
+            if (!/^[A-Za-z0-9_-]{16,64}$/.test(jeton)) { indisponible(); return; }
+
+            montrer('etat', true);
+            fetch(API_URL + '/public/completer/' + encodeURIComponent(jeton))
+                .then(function (r) { if (!r.ok) throw new Error('indisponible'); return r.json(); })
+                .then(function (d) {
+                    var agence = d.agence || '';
+                    var prenom = d.prenom || '';
+                    if (agence) {
+                        $('titre').textContent = prenom ? ('Merci ' + prenom + ', précisez votre recherche') : ('Précisez votre recherche pour ' + agence);
+                        document.title = 'Précisez votre recherche — ' + agence;
+                        $('agence-consent').textContent = agence;
+                        $('sous-titre').textContent = agence + ' pourra vous proposer les bons biens plus vite avec ces quelques précisions.';
+                    }
+                    montrer('etat', false);
+                    montrer('formulaire', true);
+                })
+                .catch(function () { indisponible(); });
+
+            $('formulaire').addEventListener('submit', function (e) {
+                e.preventDefault();
+                montrer('erreur-consent', false);
+                if (!$('consent').checked) { montrer('erreur-consent', true); $('consent').focus(); return; }
+                montrer('message', false);
+
+                var budget = $('budget').value === '' ? null : parseInt($('budget').value, 10);
+                var bouton = $('envoyer');
+                bouton.disabled = true;
+                bouton.textContent = 'Envoi…';
+                fetch(API_URL + '/public/completer/' + encodeURIComponent(jeton), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: $('email').value.trim() || null,
+                        phone: $('phone').value.trim() || null,
+                        budget: budget,
+                        location: $('location').value.trim() || null,
+                        property_type: $('property_type').value || null,
+                        financing_status: $('financing_status').value,
+                        purchase_urgency: $('purchase_urgency').value,
+                        message: $('message-libre').value.trim() || null,
+                        website: $('website').value,
+                        consent: true
+                    })
+                }).then(function (r) {
+                    return r.json().catch(function () { return {}; }).then(function (d) { return { ok: r.ok, status: r.status, d: d }; });
+                }).then(function (res) {
+                    if (res.ok) {
+                        montrer('formulaire', false);
+                        $('titre').textContent = 'Merci !';
+                        $('sous-titre').textContent = 'Vos précisions ont bien été transmises à votre agence.';
+                    } else if (res.status === 429) {
+                        afficher('error', 'Trop de demandes envoyées depuis cette connexion. Réessayez un peu plus tard.');
+                    } else {
+                        afficher('error', res.d.message || "L'envoi a échoué. Réessayez dans un instant.");
+                    }
+                }).catch(function () {
+                    afficher('error', 'Impossible de joindre le serveur. Vérifiez votre connexion et réessayez.');
+                }).then(function () {
+                    bouton.disabled = false;
+                    bouton.textContent = 'Envoyer';
+                });
+            });
+        })();
+    </script>
+</body>
+</html>
