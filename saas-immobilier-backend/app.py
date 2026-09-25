@@ -3374,6 +3374,17 @@ def _traiter_email_entrant(item):
         sujet = _texte_court(item.get('Subject'), 255) or ''
         corps = _corps_texte_email(item)[:6000]
 
+        # DEBUG TEMPORAIRE : liste tous les liens bruts du HTML pour diagnostiquer
+        # le mail de confirmation de transfert Gmail (à retirer une fois le souci
+        # de validation d'adresse de transfert résolu).
+        try:
+            _tous_liens = re.findall(r'href=["\']([^"\']+)["\']', str(item.get('RawHtmlBody') or ''))
+            if _tous_liens:
+                app.logger.info("DEBUG liens bruts (%s, sujet=%r) : %s",
+                                 portail, sujet, _tous_liens[:20])
+        except Exception:
+            app.logger.exception("DEBUG liens bruts : echec")
+
         reste_leads, _ = _reste(cur, user_id, 'leads')
         if reste_leads == 0:
             if message_id:
