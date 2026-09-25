@@ -3307,17 +3307,15 @@ def _deshtmliser(brut):
 def _corps_texte_email(item):
     """Le HTML brut passe en premier, nettoyé par notre propre _deshtmliser :
     c'est la seule source qui garde de façon fiable les vraies URL derrière
-    les liens. Le texte pré-nettoyé par Brevo (ExtractedMarkdownMessage /
-    RawTextBody) simplifie parfois un lien dont le texte visible ressemble
-    déjà à une URL (ex. le mail de confirmation de transfert Gmail affiche
-    "https://mail.google.com" comme texte cliquable) : il ne garde alors que
-    ce texte affiché et perd l'URL réelle de confirmation cachée derrière.
-    On ne retombe sur les champs texte de Brevo que si le HTML brut est
-    absent (rare, mais certains envois n'ont qu'une alternative texte)."""
+    les liens. À défaut de HTML, RawTextBody (texte brut tel quel, jamais
+    retouché) passe avant ExtractedMarkdownMessage : ce dernier, nettoyé par
+    Brevo, s'est déjà révélé tronquer une URL longue (le lien de confirmation
+    de transfert Gmail, envoyé en texte seul sans HTML, y perdait son jeton de
+    validation alors qu'il était intact dans RawTextBody)."""
     html_brut = item.get('RawHtmlBody')
     if html_brut and str(html_brut).strip():
         return _deshtmliser(str(html_brut).strip())
-    for cle in ('ExtractedMarkdownMessage', 'RawTextBody'):
+    for cle in ('RawTextBody', 'ExtractedMarkdownMessage'):
         v = item.get(cle)
         if v and str(v).strip():
             v = str(v).strip()
@@ -3374,17 +3372,6 @@ def _traiter_email_entrant(item):
         sujet = _texte_court(item.get('Subject'), 255) or ''
         corps = _corps_texte_email(item)[:6000]
 
-        # DEBUG TEMPORAIRE : dump complet des champs recus de Brevo, pour trouver
-        # le code/lien de confirmation Gmail qu'on ne trouve pas dans les champs
-        # deja exploites (a retirer une fois le souci resolu).
-        try:
-            app.logger.warning("DEBUG champs Brevo recus (sujet=%r) : %s", sujet, sorted(item.keys()))
-            for _cle, _val in item.items():
-                if isinstance(_val, str) and _val.strip():
-                    app.logger.warning("DEBUG champ %s (longueur=%d) : %s",
-                                        _cle, len(_val), _val[:800])
-        except Exception:
-            app.logger.exception("DEBUG dump item : echec")
 
         reste_leads, _ = _reste(cur, user_id, 'leads')
         if reste_leads == 0:
