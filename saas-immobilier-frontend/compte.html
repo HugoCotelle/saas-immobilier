@@ -31,9 +31,6 @@
             const [messageLien, setMessageLien] = useState(null);
             const [confirmerLien, setConfirmerLien] = useState(false);
             const [forfait, setForfait] = useState(null);
-            const [mailCapture, setMailCapture] = useState(null);
-            const [messageMailCapture, setMessageMailCapture] = useState(null);
-            const [confirmerMailCapture, setConfirmerMailCapture] = useState(false);
             const [gmailStatus, setGmailStatus] = useState(null);
             const [messageGmail, setMessageGmail] = useState(null);
             const [connectingGmail, setConnectingGmail] = useState(false);
@@ -70,7 +67,6 @@
                 }).catch(() => {});
                 appel('/api/v1/plan').then(setForfait).catch(() => {});
                 appel('/api/v1/capture-link').then(setLien).catch((e) => setMessageLien({ type: 'error', text: e.message }));
-                appel('/api/v1/mail-capture').then(setMailCapture).catch((e) => setMessageMailCapture({ type: 'error', text: e.message }));
                 appel('/api/v1/gmail/status').then(setGmailStatus).catch((e) => setMessageGmail({ type: 'error', text: e.message }));
 
                 // Google renvoie ici le navigateur après le consentement (ou son refus) :
@@ -119,26 +115,6 @@
                     setMessageLien({ type: 'success', text: 'Nouvelle adresse créée. L\'ancienne ne fonctionne plus.' });
                 } catch (e) {
                     setMessageLien({ type: 'error', text: e.message });
-                }
-            };
-
-            const copierMailCapture = async () => {
-                try {
-                    await navigator.clipboard.writeText(mailCapture.address);
-                    setMessageMailCapture({ type: 'success', text: 'Adresse copiée.' });
-                } catch (e) {
-                    document.getElementById('champ-mail-capture').select();
-                    setMessageMailCapture({ type: 'error', text: 'Copie automatique impossible : l\'adresse est sélectionnée, copiez-la avec Ctrl+C.' });
-                }
-            };
-
-            const nouvelleAdresseMailCapture = async () => {
-                setConfirmerMailCapture(false);
-                try {
-                    setMailCapture(await appel('/api/v1/mail-capture/regenerate', { method: 'POST' }));
-                    setMessageMailCapture({ type: 'success', text: 'Nouvelle adresse créée. L\'ancienne ne fonctionne plus : pensez à mettre à jour votre transfert.' });
-                } catch (e) {
-                    setMessageMailCapture({ type: 'error', text: e.message });
                 }
             };
 
@@ -442,52 +418,6 @@
                                         </button>
                                     )
                                 ) : <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}
-                            </div>
-
-                            <div className="panel">
-                                <div className="panel-header">
-                                    <h2 className="panel-title">Leads LeBonCoin &amp; SeLoger — autre messagerie que Gmail</h2>
-                                </div>
-                                <p className="panel-note">
-                                    Vous n'utilisez pas Gmail (Outlook, messagerie professionnelle…) ? Transférez les
-                                    e-mails de notification LeBonCoin et SeLoger vers l'adresse ci-dessous : Zelyro
-                                    les lit et crée le prospect, avec la bonne source. <strong>Cette adresse se
-                                    configure dans votre messagerie, jamais dans les paramètres LeBonCoin ou
-                                    SeLoger.</strong>
-                                </p>
-                                {messageMailCapture && (
-                                    <div className={messageMailCapture.type === 'error' ? 'error' : 'success'}>{messageMailCapture.text}</div>
-                                )}
-                                {mailCapture && mailCapture.address ? (
-                                    <>
-                                        <div className="copie-ligne">
-                                            <input id="champ-mail-capture" type="text" readOnly value={mailCapture.address}
-                                                onFocus={(e) => e.target.select()} aria-label="Adresse de capture des leads" />
-                                            <button className="btn" onClick={copierMailCapture}>Copier</button>
-                                        </div>
-                                        <ol className="mail-capture-etapes">
-                                            <li>Copiez l'adresse ci-dessus.</li>
-                                            <li>Dans votre messagerie (Gmail par exemple), ouvrez les paramètres puis « Filtres et adresses bloquées » (ou l'équivalent selon votre messagerie).</li>
-                                            <li>Créez un filtre : <em>si l'expéditeur contient leboncoin.fr ou seloger.com</em> → <em>transférer vers</em> cette adresse.</li>
-                                            <li>C'est fini : chaque nouvelle notification LeBonCoin ou SeLoger devient automatiquement un prospect dans Zelyro.</li>
-                                        </ol>
-                                        <p className="field-hint" style={{ marginTop: '2px' }}>Deux minutes à faire, une seule fois.</p>
-                                        <div className="btn-ligne" style={{ marginTop: '14px' }}>
-                                            {!confirmerMailCapture ? (
-                                                <button className="btn secondary petit" onClick={() => setConfirmerMailCapture(true)}>Créer une nouvelle adresse</button>
-                                            ) : (
-                                                <>
-                                                    <button className="btn danger plein petit" onClick={nouvelleAdresseMailCapture}>Confirmer : l'ancienne adresse cessera de fonctionner</button>
-                                                    <button className="btn secondary petit" onClick={() => setConfirmerMailCapture(false)}>Annuler</button>
-                                                </>
-                                            )}
-                                        </div>
-                                        <p className="field-hint">
-                                            Une nouvelle adresse est utile en cas de messages indésirables : l'ancienne
-                                            est aussitôt désactivée, pensez à mettre à jour votre filtre de transfert.
-                                        </p>
-                                    </>
-                                ) : !messageMailCapture && <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}
                             </div>
                         </div>
                     </div>
