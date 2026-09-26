@@ -783,6 +783,9 @@ body.auth::before {
 .admin-table input[type=number] { width: 110px; padding: 8px 10px; }
 .admin-table input[type=text] { padding: 8px 10px; }
 .admin-table select { padding: 8px 10px; width: auto; }
+.admin-sous-ligne td { padding: 0; background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.admin-table-imbriquee { margin: 4px 20px 4px 34px; width: calc(100% - 54px); }
+.admin-table-imbriquee th, .admin-table-imbriquee td { padding: 8px 12px 8px 0; }
 .cellule-nom small { display: block; color: var(--ink-3); font-size: 12px; word-break: break-all; }
 .usage { min-width: 104px; font-size: 13px; font-variant-numeric: tabular-nums; }
 .usage-piste { height: 5px; background: var(--surface-2); border-radius: 3px; margin-top: 5px; overflow: hidden; }

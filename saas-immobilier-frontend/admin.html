@@ -34,6 +34,7 @@
             ['max_properties', 'Biens'],
             ['max_mails_month', 'E-mails / mois'],
             ['max_extractions_month', 'Extractions IA / mois'],
+            ['max_users', 'Comptes utilisateurs'],
         ];
 
         function Usage({ n, max }) {
@@ -63,6 +64,7 @@
             const [confirmerSusp, setConfirmerSusp] = useState(null);
             const [limites, setLimites] = useState({});
             const [occupe, setOccupe] = useState(false);
+            const [equipesOuvertes, setEquipesOuvertes] = useState({});
 
             const handleLogout = () => {
                 localStorage.removeItem('token');
@@ -300,16 +302,27 @@
                                     <div className="table-scroll">
                                         <table className="admin-table">
                                             <thead>
-                                                <tr><th>Agence</th><th>Forfait</th><th>Prospects</th><th>Biens</th><th>E-mails (mois)</th><th>IA (mois)</th><th>Statut</th><th></th></tr>
+                                                <tr><th>Agence</th><th>Équipe</th><th>Forfait</th><th>Prospects</th><th>Biens</th><th>E-mails (mois)</th><th>IA (mois)</th><th>Statut</th><th></th></tr>
                                             </thead>
                                             <tbody>
                                                 {data.users.map((u) => {
                                                     const p = data.plans.find((x) => x.code === u.plan) || {};
+                                                    const employes = u.employees || [];
+                                                    const ouvert = !!equipesOuvertes[u.id];
                                                     return (
-                                                        <tr key={u.id}>
+                                                    <React.Fragment key={u.id}>
+                                                        <tr>
                                                             <td className="cellule-nom">
                                                                 {u.company_name || u.first_name || '—'}
                                                                 <small>{u.email}</small>
+                                                            </td>
+                                                            <td>
+                                                                {employes.length > 0 ? (
+                                                                    <button className="btn secondary petit"
+                                                                        onClick={() => setEquipesOuvertes((v) => ({ ...v, [u.id]: !v[u.id] }))}>
+                                                                        {1 + employes.length} compte{employes.length > 0 ? 's' : ''} {ouvert ? '▲' : '▼'}
+                                                                    </button>
+                                                                ) : <span className="field-hint">1 compte (admin seul)</span>}
                                                             </td>
                                                             <td>
                                                                 <select value={u.plan} disabled={occupe} aria-label={`Forfait de ${u.email}`}
@@ -343,6 +356,32 @@
                                                                 )}
                                                             </td>
                                                         </tr>
+                                                        {ouvert && employes.length > 0 && (
+                                                            <tr className="admin-sous-ligne">
+                                                                <td colSpan={9}>
+                                                                    <table className="admin-table admin-table-imbriquee">
+                                                                        <thead>
+                                                                            <tr><th>Collaborateur</th><th>Statut</th><th>Depuis</th></tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {employes.map((e) => (
+                                                                                <tr key={e.id}>
+                                                                                    <td className="cellule-nom">
+                                                                                        {e.first_name || '—'}
+                                                                                        <small>{e.email}</small>
+                                                                                    </td>
+                                                                                    <td>
+                                                                                        {e.is_active ? <span className="pastille">Actif</span> : <span className="pastille off">Retiré</span>}
+                                                                                    </td>
+                                                                                    <td>{date(e.created_at)}</td>
+                                                                                </tr>
+                                                                            ))}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </td>
+                                                            </tr>
+                                                        )}
+                                                    </React.Fragment>
                                                     );
                                                 })}
                                             </tbody>

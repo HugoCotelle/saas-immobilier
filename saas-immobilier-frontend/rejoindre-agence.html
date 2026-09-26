@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
+    <title>ZELYRO - Rejoindre une agence</title>
+    <meta name="robots" content="noindex">
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="zelyro.css">
+</head>
+<body class="auth">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+
+        // Le lien de l'e-mail place le jeton après le # : il n'est jamais envoyé
+        // au serveur du site. On le lit une fois, puis on l'efface de la barre d'adresse.
+        const JETON = (() => {
+            const m = window.location.hash.match(/token=([\w-]+)/);
+            if (m) window.history.replaceState(null, '', window.location.pathname);
+            return m ? m[1] : null;
+        })();
+
+        function RejoindreApp() {
+            const [infos, setInfos] = useState(null);
+            const [lienMort, setLienMort] = useState(!JETON);
+            const [form, setForm] = useState({ first_name: '', password: '', confirmation: '' });
+            const [loading, setLoading] = useState(false);
+            const [message, setMessage] = useState(null);
+
+            useEffect(() => {
+                if (!JETON) return;
+                fetch(`${API_URL}/api/v1/team/invitations/${JETON}`)
+                    .then(async (r) => {
+                        const data = await r.json().catch(() => ({}));
+                        if (!r.ok) { setLienMort(true); return; }
+                        setInfos(data);
+                    })
+                    .catch(() => setLienMort(true));
+            }, []);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setMessage(null);
+                if (form.password.length < 10) {
+                    setMessage({ type: 'error', text: 'Le mot de passe doit contenir au moins 10 caractères' });
+                    return;
+                }
+                if (form.password !== form.confirmation) {
+                    setMessage({ type: 'error', text: 'Les mots de passe ne correspondent pas' });
+                    return;
+                }
+                setLoading(true);
+                try {
+                    const response = await fetch(`${API_URL}/api/v1/team/accept`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ token: JETON, password: form.password, first_name: form.first_name })
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (response.ok) {
+                        localStorage.setItem('token', data.token);
+                        localStorage.setItem('user', JSON.stringify(data.user));
+                        window.location.replace('/dashboard.html');
+                        return;
+                    } else if (response.status === 429) {
+                        setMessage({ type: 'error', text: 'Trop de tentatives. Réessayez dans quelques minutes.' });
+                    } else if (data.message && data.message.startsWith("Ce lien d'invitation")) {
+                        setLienMort(true);
+                    } else {
+                        setMessage({ type: 'error', text: data.message || 'Création du compte impossible' });
+                    }
+                } catch (error) {
+                    setMessage({ type: 'error', text: 'Serveur injoignable : ' + error.message });
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="auth-container">
+                    <div className="auth-header">
+                        <h1>ZELYRO</h1>
+                        <p>{infos ? `Rejoindre ${infos.agence}` : 'Rejoindre votre agence'}</p>
+                    </div>
+
+                    {lienMort && (
+                        <>
+                            <div className="error">Ce lien d'invitation est invalide ou a expiré.</div>
+                            <p className="field-hint">Demandez une nouvelle invitation à l'administrateur de votre agence.</p>
+                        </>
+                    )}
+
+                    {message && (
+                        <div className={message.type === 'error' ? 'error' : 'success'}>
+                            {message.text}
+                        </div>
+                    )}
+
+                    {!lienMort && (
+                        <form onSubmit={handleSubmit}>
+                            {infos && (
+                                <div className="form-group">
+                                    <label>Adresse e-mail</label>
+                                    <input type="email" value={infos.email} disabled />
+                                    <p className="field-hint">Cette invitation est réservée à cette adresse.</p>
+                                </div>
+                            )}
+                            <div className="form-group">
+                                <label>Prénom</label>
+                                <input type="text" value={form.first_name}
+                                    onChange={(e) => setForm({ ...form, first_name: e.target.value })}
+                                    autoComplete="given-name" disabled={loading} />
+                            </div>
+                            <div className="form-group">
+                                <label>Choisir un mot de passe</label>
+                                <input type="password" value={form.password}
+                                    onChange={(e) => setForm({ ...form, password: e.target.value })}
+                                    placeholder="••••••••" autoComplete="new-password"
+                                    minLength={10} required disabled={loading} />
+                                <p className="field-hint">10 caractères minimum.</p>
+                            </div>
+                            <div className="form-group">
+                                <label>Confirmer le mot de passe</label>
+                                <input type="password" value={form.confirmation}
+                                    onChange={(e) => setForm({ ...form, confirmation: e.target.value })}
+                                    placeholder="••••••••" autoComplete="new-password"
+                                    required disabled={loading} />
+                            </div>
+                            <button type="submit" disabled={loading || !infos}>
+                                {loading ? 'Création…' : 'Créer mon compte'}
+                            </button>
+                        </form>
+                    )}
+
+                    <div className="auth-footer">
+                        <a href="/login.html">← Retour à la connexion</a>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<RejoindreApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>

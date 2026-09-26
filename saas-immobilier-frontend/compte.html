@@ -36,6 +36,12 @@
             const [connectingGmail, setConnectingGmail] = useState(false);
             const [syncingGmail, setSyncingGmail] = useState(false);
             const [confirmerDeconnexionGmail, setConfirmerDeconnexionGmail] = useState(false);
+            const [team, setTeam] = useState(null);
+            const [messageTeam, setMessageTeam] = useState(null);
+            const [inviteEmail, setInviteEmail] = useState('');
+            const [inviting, setInviting] = useState(false);
+            const [confirmerRetrait, setConfirmerRetrait] = useState(null);
+            const [busyTeamId, setBusyTeamId] = useState(null);
 
             const appel = async (chemin, options = {}) => {
                 const r = await fetch(`${API_URL}${chemin}`, {
@@ -57,12 +63,13 @@
                 if (userData) setUser(JSON.parse(userData));
                 appel('/auth/profile').then((p) => {
                     setAlertes(p.alerts_enabled !== false);
-                    // Met à jour ce que le navigateur sait du compte (forfait, droits d'administration).
+                    // Met à jour ce que le navigateur sait du compte (forfait, rôle, droits d'administration).
                     try {
                         const u = JSON.parse(localStorage.getItem('user') || '{}');
-                        const maj = { ...u, plan: p.plan, is_admin: p.is_admin === true };
+                        const maj = { ...u, plan: p.plan, role: p.role, is_admin: p.is_admin === true };
                         localStorage.setItem('user', JSON.stringify(maj));
                         setUser(maj);
+                        if (p.role === 'admin') chargerEquipe();
                     } catch (e) { /* sans importance */ }
                 }).catch(() => {});
                 appel('/api/v1/plan').then(setForfait).catch(() => {});
@@ -154,6 +161,55 @@
                 }
             };
 
+            const chargerEquipe = async () => {
+                try {
+                    setTeam(await appel('/api/v1/team'));
+                } catch (e) {
+                    setMessageTeam({ type: 'error', text: e.message });
+                }
+            };
+
+            const inviterCollaborateur = async (e) => {
+                e.preventDefault();
+                setMessageTeam(null);
+                setInviting(true);
+                try {
+                    const r = await appel('/api/v1/team/invite', { method: 'POST', body: JSON.stringify({ email: inviteEmail.trim() }) });
+                    setMessageTeam({ type: 'success', text: r.message });
+                    setInviteEmail('');
+                    await chargerEquipe();
+                } catch (e) {
+                    setMessageTeam({ type: 'error', text: e.message });
+                } finally {
+                    setInviting(false);
+                }
+            };
+
+            const retirerCollaborateur = async (id) => {
+                setConfirmerRetrait(null);
+                setBusyTeamId(id);
+                try {
+                    await appel(`/api/v1/team/${id}`, { method: 'DELETE' });
+                    await chargerEquipe();
+                } catch (e) {
+                    setMessageTeam({ type: 'error', text: e.message });
+                } finally {
+                    setBusyTeamId(null);
+                }
+            };
+
+            const reactiverCollaborateur = async (id) => {
+                setBusyTeamId(id);
+                try {
+                    await appel(`/api/v1/team/${id}/reactivate`, { method: 'PUT' });
+                    await chargerEquipe();
+                } catch (e) {
+                    setMessageTeam({ type: 'error', text: e.message });
+                } finally {
+                    setBusyTeamId(null);
+                }
+            };
+
             const handleLogout = () => {
                 localStorage.removeItem('token');
                 localStorage.removeItem('user');
@@ -242,6 +298,9 @@
                                     <dd>{user ? user.email : '…'}</dd>
                                     {user && user.first_name && (<><dt>Prénom</dt><dd>{user.first_name}</dd></>)}
                                     {user && user.company_name && (<><dt>Agence</dt><dd>{user.company_name}</dd></>)}
+                                    {user && user.role && (
+                                        <><dt>Rôle</dt><dd>{user.role === 'admin' ? "Administrateur de l'agence" : 'Collaborateur'}</dd></>
+                                    )}
                                 </dl>
                             </div>
 
@@ -373,6 +432,96 @@
                                     </>
                                 ) : !messageLien && <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}
                             </div>
+
+                            {user && user.role === 'admin' && (
+                                <div className="panel">
+                                    <div className="panel-header">
+                                        <h2 className="panel-title">Mon équipe</h2>
+                                        {team && (
+                                            <span className="panel-count">
+                                                {team.used}{team.max_users != null ? ` / ${team.max_users}` : ''} compte{team.used > 1 ? 's' : ''}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p className="panel-note">
+                                        Invitez les collaborateurs de votre agence : chacun a son propre compte
+                                        (son propre mot de passe), avec un accès complet aux mêmes prospects et
+                                        aux mêmes biens que vous. Le nombre de comptes inclus dépend de votre
+                                        forfait{team && team.label ? ` (${team.label})` : ''}.
+                                    </p>
+                                    {messageTeam && (
+                                        <div className={messageTeam.type === 'error' ? 'error' : 'success'}>{messageTeam.text}</div>
+                                    )}
+                                    {team ? (
+                                        <>
+                                            <form onSubmit={inviterCollaborateur} className="btn-ligne" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                                                <div className="form-group" style={{ flex: '1 1 240px', marginBottom: 0 }}>
+                                                    <label>E-mail du collaborateur</label>
+                                                    <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)}
+                                                        placeholder="prenom@agence.fr" required disabled={inviting} />
+                                                </div>
+                                                <button type="submit" className="btn" disabled={inviting || !inviteEmail.trim()}>
+                                                    {inviting ? 'Envoi…' : 'Inviter'}
+                                                </button>
+                                            </form>
+
+                                            {team.employees.length > 0 && (
+                                                <div className="table-scroll" style={{ marginTop: '18px' }}>
+                                                    <table className="admin-table">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>Collaborateur</th><th>Prospects suivis</th>
+                                                                <th>Statuts changés (30j)</th><th>E-mails envoyés (30j)</th>
+                                                                <th>Dernière activité</th><th>Statut</th><th></th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {team.employees.map((emp) => (
+                                                                <tr key={emp.id}>
+                                                                    <td className="cellule-nom">
+                                                                        {emp.first_name || '—'}
+                                                                        <small>{emp.email}</small>
+                                                                    </td>
+                                                                    <td>{emp.prospects_touches}</td>
+                                                                    <td>{emp.changements_statut_30j}</td>
+                                                                    <td>{emp.mails_envoyes_30j}</td>
+                                                                    <td>{emp.derniere_activite ? new Date(emp.derniere_activite).toLocaleDateString('fr-FR') : '—'}</td>
+                                                                    <td>
+                                                                        {emp.is_active ? <span className="pastille">Actif</span> : <span className="pastille off">Retiré</span>}
+                                                                    </td>
+                                                                    <td>
+                                                                        {emp.is_active ? (
+                                                                            confirmerRetrait === emp.id ? (
+                                                                                <div className="btn-ligne">
+                                                                                    <button className="btn danger plein petit" disabled={busyTeamId === emp.id}
+                                                                                        onClick={() => retirerCollaborateur(emp.id)}>Confirmer</button>
+                                                                                    <button className="btn secondary petit" onClick={() => setConfirmerRetrait(null)}>Annuler</button>
+                                                                                </div>
+                                                                            ) : (
+                                                                                <button className="btn danger petit" disabled={busyTeamId === emp.id}
+                                                                                    onClick={() => setConfirmerRetrait(emp.id)}>Retirer</button>
+                                                                            )
+                                                                        ) : (
+                                                                            <button className="btn secondary petit" disabled={busyTeamId === emp.id}
+                                                                                onClick={() => reactiverCollaborateur(emp.id)}>Réactiver</button>
+                                                                        )}
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            )}
+
+                                            {team.invitations.length > 0 && (
+                                                <p className="field-hint" style={{ marginTop: '18px' }}>
+                                                    Invitation{team.invitations.length > 1 ? 's' : ''} envoyée{team.invitations.length > 1 ? 's' : ''}, en attente d'acceptation : {team.invitations.map((i) => i.email).join(', ')}.
+                                                </p>
+                                            )}
+                                        </>
+                                    ) : !messageTeam && <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}
+                                </div>
+                            )}
 
                             <div className="panel">
                                 <div className="panel-header">
