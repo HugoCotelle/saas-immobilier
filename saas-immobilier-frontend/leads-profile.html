@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZELYRO - Fiche prospect</title>
+    <meta name="robots" content="noindex">
     <script src="vendor/react.production.min.js"></script>
     <script src="vendor/react-dom.production.min.js"></script>
     <script src="vendor/babel.min.js"></script>
@@ -590,8 +591,11 @@
                                             <div className="panel-title">Supprimer ce prospect</div>
                                             <div className="panel-note">
                                                 Efface définitivement la fiche, ses notes, ses relances et son
-                                                historique. À utiliser pour une demande d'effacement de ses données
-                                                ou pour retirer un doublon. Cette action est irréversible.
+                                                historique. À utiliser pour une demande d'effacement de ses données,
+                                                pour retirer un doublon, ou si cette fiche vient d'une notification
+                                                LeBonCoin/SeLoger qui n'était pas une vraie demande de contact
+                                                (dites-le-nous si ça arrive : le tri automatique s'améliore avec
+                                                chaque cas signalé). Cette action est irréversible.
                                             </div>
                                             {!confirmerSuppression ? (
                                                 <button className="btn danger petit" onClick={() => setConfirmerSuppression(true)}>
