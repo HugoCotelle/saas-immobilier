@@ -77,7 +77,12 @@ GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1"
 GOOGLE_GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 # Notifications LeBonCoin/SeLoger recentes : fenetre large (le tri des
 # doublons se fait par message_id dans inbound_emails, pas par la fenetre).
-REQUETE_GMAIL_PORTAILS = "from:(seloger.com OR leboncoin.fr) newer_than:7d"
+REQUETE_GMAIL_PORTAILS = (
+    'from:(seloger.com OR leboncoin.fr) newer_than:7d '
+    '-subject:"nouvelle annonce" -subject:"nouvelles annonces" '
+    '-subject:"correspondant a vos criteres" -subject:"vous propose" '
+    '-subject:"alerte"'
+)
 TOKEN_LIFETIME_HOURS = int(os.getenv("TOKEN_LIFETIME_HOURS", "24"))
 
 # Sites autorisés à appeler l'API depuis un navigateur. Les motifs des
@@ -3346,6 +3351,26 @@ def _source_portail(adresse_expediteur):
     return 'portail'
 
 
+# LeBonCoin et SeLoger envoient aussi des alertes automatiques ("nouvelles
+# annonces correspondant à vos critères") depuis les mêmes adresses que les
+# vraies demandes de contact : le domaine seul ne suffit pas à les
+# distinguer. Ces formulations sont caractéristiques des alertes, jamais
+# d'un message d'un acheteur.
+_SUJET_ALERTE_RE = re.compile(
+    r"(?i)nouvelle(?:s)? annonce|correspondant.{0,15}(?:a|à) vos crit[eè]res|"
+    r"vous propose|recommand[ée]|d[ée]couvrez ces|alerte e-?mail|votre recherche "
+    r"[a-z]* ?:"
+)
+
+
+def _est_alerte_portail(sujet, corps):
+    """Vrai si le sujet (ou, à défaut, le début du corps) porte une
+    formulation caractéristique d'une alerte automatique du portail plutôt
+    que d'une vraie demande de contact."""
+    texte = f"{sujet or ''} {(corps or '')[:300]}"
+    return bool(_SUJET_ALERTE_RE.search(texte))
+
+
 _BALISE_HTML_RE = re.compile(r'<[a-zA-Z!/][^>]{0,200}>')
 
 
@@ -3440,6 +3465,19 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
     l'agence (user_id) et le portail avant d'arriver ici. Ne lève jamais.
     Renvoie l'identifiant du prospect créé, ou None si rien n'a été créé
     (doublon déjà traité, quota de prospects atteint...)."""
+    if portail in ('leboncoin', 'seloger') and _est_alerte_portail(sujet, corps):
+        # Une alerte "nouvelles annonces correspondant à vos critères" n'est
+        # pas une demande de contact : pas de prospect, mais on retient le
+        # message pour ne pas le réexaminer à chaque cycle.
+        if message_id:
+            _assurer_schema()
+            with _base() as (conn, cur):
+                cur.execute("""INSERT INTO inbound_emails (message_id, user_id, source, received_at)
+                               VALUES (%s, %s, 'alerte-portail', %s) ON CONFLICT (message_id) DO NOTHING""",
+                            (message_id, user_id, _maintenant()))
+                conn.commit()
+        return None
+
     _assurer_schema()
     lead_id = None
     extraction_effectuee = False
