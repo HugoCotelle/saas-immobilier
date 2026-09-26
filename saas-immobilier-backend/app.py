@@ -3167,7 +3167,13 @@ def _valider(brut):
         secteurs = []
     secteurs = [s.strip() for s in secteurs if isinstance(s, str) and s.strip()][:5]
 
+    # Absent (cas de CONSIGNE, qui ne demande pas ce champ) : True par
+    # défaut, puisque ce chemin traite déjà un message écrit par un humain.
+    est_contact = brut.get('est_demande_contact')
+    est_contact = True if not isinstance(est_contact, bool) else est_contact
+
     return {
+        'est_demande_contact': est_contact,
         'nom': texte('nom', 120),
         'email': texte('email', 200),
         'telephone': tel,
@@ -3307,17 +3313,25 @@ def extract_message():
 # Aucune des deux plateformes n'offre d'API publique pour ça : c'est
 # l'approche qu'utilisent en pratique les CRM immobiliers indépendants.
 
-CONSIGNE_PORTAIL = """Tu es un assistant pour une agence immobilière. Voici un e-mail de \
-notification envoyé par {portail} quand quelqu'un contacte l'agence au sujet d'une annonce. \
-Extrais les informations du contact et réponds UNIQUEMENT en JSON, sans commentaire ni texte \
-autour.
+CONSIGNE_PORTAIL = """Tu es un assistant pour une agence immobilière. Voici un e-mail envoyé \
+par {portail}, qui peut être soit une vraie demande de contact d'un acheteur/locataire au \
+sujet d'une annonce, soit une notification automatique du portail sans rapport avec un \
+contact réel (alerte de nouvelles annonces correspondant à une recherche sauvegardée, \
+baisse de prix, newsletter, relance marketing...). Réponds UNIQUEMENT en JSON, sans \
+commentaire ni texte autour.
 
 Date du jour : {date}
 
-Champs : nom, email, telephone, transaction, budget, secteurs, type_bien, nombre_pieces, \
-echeance, financement, garants, profession, notes
+Champs : est_demande_contact, nom, email, telephone, transaction, budget, secteurs, \
+type_bien, nombre_pieces, echeance, financement, garants, profession, notes
 
 Règles strictes :
+- est_demande_contact : true si c'est une vraie demande de contact d'une personne \
+intéressée par une annonce précise (elle a laissé un message, ses coordonnées, ou \
+manifesté un intérêt direct) ; false si c'est une notification automatique du portail \
+sans lien avec un contact réel. En cas de doute, réponds true : il vaut mieux qu'une \
+agence vérifie un prospect en trop que rater une vraie demande.
+- Si est_demande_contact est false, laisse tous les autres champs à null.
 - N'invente jamais. Information non explicite dans le message = null.
 - Le nom, l'email et le téléphone sont ceux du CONTACT (l'acheteur ou locataire potentiel), \
 jamais ceux de l'agence ni du portail.
@@ -3514,6 +3528,19 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
                 else:
                     champs = valides
                     extraction_effectuee = True
+
+        if champs and champs.get('est_demande_contact') is False:
+            # Deuxième filtre, après les mots-clés : l'IA confirme que ce
+            # n'est pas une vraie demande de contact (alerte, newsletter...).
+            # Pas de prospect créé, mais le message est retenu pour ne pas
+            # être réexaminé à chaque cycle. On ne facture pas l'extraction
+            # utilisée pour ce filtrage : elle n'a pas produit de prospect.
+            if message_id:
+                cur.execute("""INSERT INTO inbound_emails (message_id, user_id, source, received_at)
+                               VALUES (%s, %s, 'ia-non-contact', %s) ON CONFLICT (message_id) DO NOTHING""",
+                            (message_id, user_id, _maintenant()))
+            conn.commit()
+            return None
 
         nom = (champs or {}).get('nom')
         if not nom and expediteur and EMAIL_RE.match(expediteur):
