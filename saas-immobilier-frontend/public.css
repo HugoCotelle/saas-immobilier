@@ -584,7 +584,8 @@ body.pub {
 .price-feats svg { width: 13px; height: 13px; color: var(--sage-600); flex: none; }
 .price-card .btn { width: 100%; text-align: center; margin-left: 0; }
 .price-cta-note { margin-top: 10px; text-align: center; font-size: 12.5px; color: var(--muted); }
-.pricing-note { margin-top: 30px; text-align: center; color: var(--ink-2); font-size: 14.5px; }
+.pricing-compare { margin-top: 30px; margin-bottom: 6px; text-align: center; }
+.pricing-note { margin-top: 18px; text-align: center; color: var(--ink-2); font-size: 14.5px; }
 .pricing-note a { color: var(--sage-600); }
 @media (max-width: 900px) {
     .pricing-grid { grid-template-columns: 1fr; }
