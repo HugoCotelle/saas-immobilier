@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZELYRO - Connexion</title>
+    <meta name="robots" content="noindex">
     <script src="vendor/react.production.min.js"></script>
     <script src="vendor/react-dom.production.min.js"></script>
     <script src="vendor/babel.min.js"></script>
@@ -16,6 +17,16 @@
     </style>
 </head>
 <body class="auth">
+    <div class="auth-decor" aria-hidden="true">
+        <div class="auth-chip auth-chip-1">
+            <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M2.5 6.5l2.5 2.5 4.5-5.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Prospect qualifié</span>
+        </div>
+        <div class="auth-chip auth-chip-2">
+            <span class="auth-chip-score">86</span>
+            <span>Score de correspondance</span>
+        </div>
+    </div>
     <div id="root"></div>
     <script type="text/babel">
         const { useState, useEffect } = React;
@@ -106,7 +117,7 @@
             return (
                 <div className="auth-container">
                     <div className="auth-header">
-                        <h1>ZELYRO</h1>
+                        <h1><a href="/" aria-label="Zelyro, retour à l'accueil">ZELYRO</a></h1>
                         <p>Chaque lead. Chaque bien. Aucune opportunité perdue.</p>
                     </div>
 
@@ -202,6 +213,7 @@
                     <div className="auth-footer">
                         <a href="/">Accueil</a> · <a href="/mentions-legales.html">Mentions légales</a> · <a href="/confidentialite.html">Confidentialité</a> · <a href="/cgu.html">CGU</a>
                     </div>
+                    <p className="auth-trust">Hébergé en Europe · Données chiffrées · Conforme RGPD</p>
                 </div>
             );
         }

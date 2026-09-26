@@ -552,6 +552,7 @@ body.auth::before {
     letter-spacing: 0.14em;
     margin-bottom: 10px;
 }
+.auth-header h1 a { color: inherit; text-decoration: none; }
 .auth-header h1::before {
     content: "";
     width: 11px;
