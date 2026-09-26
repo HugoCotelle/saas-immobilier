@@ -1,9 +1,10 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
+import base64
 import hashlib
 import html as _html
 import threading
@@ -18,6 +19,8 @@ from functools import wraps
 import psycopg2
 import psycopg2.errors
 from psycopg2.extras import RealDictCursor
+from urllib.parse import urlencode
+from cryptography.fernet import Fernet
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -58,6 +61,23 @@ def _charger_secret():
 SECRET_KEY = _charger_secret()
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://hugocotelle@localhost:5432/saas_immobilier")
 PORT = int(os.getenv("PORT", 8888))
+
+# Connexion directe a Gmail (remplace le transfert manuel configure par
+# l'agent) : le compte Google Cloud "Zelyro" fournit ces identifiants une
+# fois pour toutes ; chaque agence n'a plus qu'a cliquer sur "Connecter
+# Gmail" et autoriser l'acces en lecture seule a sa boite.
+GOOGLE_CLIENT_ID = (os.getenv("GOOGLE_CLIENT_ID") or "").strip()
+GOOGLE_CLIENT_SECRET = (os.getenv("GOOGLE_CLIENT_SECRET") or "").strip()
+GOOGLE_OAUTH_REDIRECT_URI = (os.getenv("GOOGLE_OAUTH_REDIRECT_URI")
+                             or "https://saas-immobilier-921a.onrender.com/oauth/gmail/callback").strip()
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
+GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1"
+GOOGLE_GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+# Notifications LeBonCoin/SeLoger recentes : fenetre large (le tri des
+# doublons se fait par message_id dans inbound_emails, pas par la fenetre).
+REQUETE_GMAIL_PORTAILS = "from:(seloger.com OR leboncoin.fr) newer_than:7d"
 TOKEN_LIFETIME_HOURS = int(os.getenv("TOKEN_LIFETIME_HOURS", "24"))
 
 # Sites autorisés à appeler l'API depuis un navigateur. Les motifs des
@@ -220,6 +240,32 @@ def get_db_connection():
     conn = psycopg2.connect(DATABASE_URL)
     return conn
 
+
+def _cle_chiffrement():
+    """Clé Fernet qui chiffre les jetons Gmail au repos (colonne
+    refresh_token_enc). Comme SECRET_KEY, elle ne doit jamais avoir de
+    valeur par défaut écrite dans le code : quiconque lirait le dépôt
+    pourrait alors déchiffrer les jetons de toutes les agences.
+    Contrairement à SECRET_KEY, son absence ne bloque pas le démarrage du
+    serveur : elle n'est exigée qu'au moment où une agence connecte
+    réellement sa boîte Gmail."""
+    cle = (os.getenv("TOKEN_ENCRYPTION_KEY") or "").strip()
+    if not cle:
+        raise RuntimeError(
+            "TOKEN_ENCRYPTION_KEY absente. Générez-en une avec : python3 -c "
+            "\"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\" "
+            "puis ajoutez-la aux variables d'environnement du serveur."
+        )
+    return Fernet(cle.encode('utf-8'))
+
+
+def _chiffrer_jeton(valeur):
+    return _cle_chiffrement().encrypt(valeur.encode('utf-8')).decode('ascii')
+
+
+def _dechiffrer_jeton(valeur):
+    return _cle_chiffrement().decrypt(valeur.encode('ascii')).decode('utf-8')
+
 # Ce que la gestion des mots de passe ajoute à la base. Exécuté au premier
 # besoin de chaque processus (et par init-db) : IF NOT EXISTS le rend
 # inoffensif s'il est rejoué, et le verrou évite que les 4 processus de
@@ -381,6 +427,21 @@ _DDL_ACCES = (
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
     )""",
 )
+
+# Connexion Gmail par OAuth (remplace le transfert manuel) : une boîte
+# connectée par agence, avec son jeton de renouvellement chiffré. Le jeton
+# d'accès (une heure de validité) n'est jamais conservé : on le redemande à
+# chaque synchronisation.
+_DDL_GMAIL = (
+    """CREATE TABLE IF NOT EXISTS gmail_connections (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        google_email VARCHAR(255) NOT NULL,
+        refresh_token_enc TEXT NOT NULL,
+        last_synced_at TIMESTAMP,
+        last_error VARCHAR(500),
+        connected_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )""",
+)
 _schema_pret = False
 _schema_verrou = threading.Lock()
 
@@ -420,11 +481,13 @@ def _assurer_schema():
                        EXISTS (SELECT 1 FROM information_schema.columns
                                WHERE table_name = 'invitations' AND column_name = 'key_hint'),
                        to_regclass('usage_counters') IS NOT NULL,
-                       to_regclass('admin_log') IS NOT NULL
+                       to_regclass('admin_log') IS NOT NULL,
+                       to_regclass('gmail_connections') IS NOT NULL
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
-                for ddl in _DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION + _DDL_ACCES:
+                for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
+                            + _DDL_ACCES + _DDL_GMAIL):
                     cur.execute(ddl)
             conn.commit()
             _schema_pret = True
@@ -3357,21 +3420,36 @@ def _traiter_email_entrant(item):
 
     _assurer_schema()
     with _base() as (conn, cur):
-        if message_id:
-            cur.execute("SELECT id FROM inbound_emails WHERE message_id = %s", (message_id,))
-            if cur.fetchone():
-                return
         cur.execute("SELECT id FROM users WHERE mail_capture_token = %s AND is_active", (jeton,))
         agence = cur.fetchone()
         if not agence:
             return
         user_id = agence['id']
 
-        expediteur = ((item.get('From') or {}).get('Address') or '').strip()
-        portail = _source_portail(expediteur)
-        sujet = _texte_court(item.get('Subject'), 255) or ''
-        corps = _corps_texte_email(item)[:6000]
+    expediteur = ((item.get('From') or {}).get('Address') or '').strip()
+    portail = _source_portail(expediteur)
+    sujet = _texte_court(item.get('Subject'), 255) or ''
+    corps = _corps_texte_email(item)[:6000]
+    _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, message_id)
 
+
+def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, message_id):
+    """Cœur commun aux deux voies de réception d'un e-mail LeBonCoin/SeLoger :
+    le transfert manuel (_traiter_email_entrant, via le webhook Brevo) et la
+    boîte Gmail connectée (_synchroniser_gmail). Les deux ont déjà résolu
+    l'agence (user_id) et le portail avant d'arriver ici. Ne lève jamais.
+    Renvoie l'identifiant du prospect créé, ou None si rien n'a été créé
+    (doublon déjà traité, quota de prospects atteint...)."""
+    _assurer_schema()
+    lead_id = None
+    extraction_effectuee = False
+    email_contact = None
+    nom = None
+    with _base() as (conn, cur):
+        if message_id:
+            cur.execute("SELECT id FROM inbound_emails WHERE message_id = %s", (message_id,))
+            if cur.fetchone():
+                return None
 
         reste_leads, _ = _reste(cur, user_id, 'leads')
         if reste_leads == 0:
@@ -3380,10 +3458,9 @@ def _traiter_email_entrant(item):
                                VALUES (%s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING""",
                             (message_id, user_id, portail, _maintenant()))
             conn.commit()
-            return
+            return None
 
         champs = None
-        extraction_effectuee = False
         if corps and len(corps) >= 10 and (os.getenv('ANTHROPIC_API_KEY') or '').strip():
             reste_extr, _ = _reste(cur, user_id, 'extractions', verrouiller=False)
             if reste_extr != 0:
@@ -3459,6 +3536,7 @@ def _traiter_email_entrant(item):
     _lancer_en_arriere_plan(_alertes_matching, user_id, [lead_id], None, portail)
     if portail in ('leboncoin', 'seloger') and email_contact:
         _lancer_en_arriere_plan(_envoyer_email_completion, user_id, lead_id, nom, email_contact, portail)
+    return lead_id
 
 
 def _envoyer_email_completion(user_id, lead_id, nom, email_contact, portail):
@@ -3503,6 +3581,350 @@ def _envoyer_email_completion(user_id, lead_id, nom, email_contact, portail):
         _envoyer_email(email_contact, f"Précisez votre recherche — {agence}", texte, html, nom_expediteur=agence)
     except Exception:
         app.logger.exception("E-mail de complétion : échec d'envoi")
+
+
+# ===== CONNEXION GMAIL (OAuth) =====
+# Remplace le transfert manuel : l'agence autorise Zelyro à lire sa boîte
+# Gmail en lecture seule, et une tâche planifiée (voir /internal/gmail/sync-all)
+# va y chercher périodiquement les notifications LeBonCoin/SeLoger.
+
+def _rafraichir_jeton_gmail(refresh_token):
+    """Échange le refresh_token contre un jeton d'accès valable ~1h.
+    Renvoie (access_token, erreur) : erreur est None en cas de succès."""
+    try:
+        resp = requests.post(GOOGLE_TOKEN_URL, data={
+            'client_id': GOOGLE_CLIENT_ID,
+            'client_secret': GOOGLE_CLIENT_SECRET,
+            'refresh_token': refresh_token,
+            'grant_type': 'refresh_token',
+        }, timeout=10)
+    except requests.RequestException as exc:
+        return None, str(exc)
+    if resp.status_code != 200:
+        return None, f"{resp.status_code} {resp.text[:300]}"
+    jeton = (resp.json() or {}).get('access_token')
+    if not jeton:
+        return None, "Réponse Google sans jeton d'accès"
+    return jeton, None
+
+
+def _lister_messages_gmail(access_token, requete):
+    resp = requests.get(f"{GMAIL_API_BASE}/users/me/messages",
+                         headers={'Authorization': f'Bearer {access_token}'},
+                         params={'q': requete, 'maxResults': 25}, timeout=10)
+    resp.raise_for_status()
+    return (resp.json() or {}).get('messages') or []
+
+
+def _recuperer_message_gmail(access_token, gmail_id):
+    resp = requests.get(f"{GMAIL_API_BASE}/users/me/messages/{gmail_id}",
+                         headers={'Authorization': f'Bearer {access_token}'},
+                         params={'format': 'full'}, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _decoder_base64url(donnees):
+    if not donnees:
+        return ''
+    texte = donnees.replace('-', '+').replace('_', '/')
+    texte += '=' * (-len(texte) % 4)
+    try:
+        return base64.b64decode(texte).decode('utf-8', errors='replace')
+    except Exception:
+        return ''
+
+
+def _entete_gmail(headers, nom):
+    for h in (headers or []):
+        if (h.get('name') or '').lower() == nom.lower():
+            return h.get('value') or ''
+    return ''
+
+
+_ADRESSE_DANS_ENTETE_RE = re.compile(r'<([^<>@\s]+@[^<>@\s]+)>')
+
+
+def _adresse_depuis_entete(brut):
+    """Adresse e-mail dans un en-tête 'From' au format 'Nom <adresse>' ou
+    simplement 'adresse'."""
+    brut = (brut or '').strip()
+    m = _ADRESSE_DANS_ENTETE_RE.search(brut)
+    if m:
+        return m.group(1).strip().lower()
+    if EMAIL_RE.match(brut):
+        return brut.lower()
+    return ''
+
+
+def _corps_message_gmail(payload):
+    """Parcourt l'arbre MIME d'un message Gmail (format=full) pour en
+    extraire le texte : HTML nettoyé par _deshtmliser en priorité (garde les
+    vraies URL derrière les liens, comme pour les e-mails Brevo), texte brut
+    sinon."""
+    html_trouve, texte_trouve = '', ''
+    pile = [payload] if payload else []
+    while pile:
+        noeud = pile.pop(0)
+        mime = (noeud.get('mimeType') or '').lower()
+        data = (noeud.get('body') or {}).get('data')
+        if mime == 'text/html' and data and not html_trouve:
+            html_trouve = _decoder_base64url(data)
+        elif mime == 'text/plain' and data and not texte_trouve:
+            texte_trouve = _decoder_base64url(data)
+        pile.extend(noeud.get('parts') or [])
+    if html_trouve.strip():
+        return _deshtmliser(html_trouve.strip())
+    return texte_trouve.strip()
+
+
+def _synchroniser_gmail(user_id):
+    """Un cycle de synchronisation pour une agence : va chercher les
+    notifications LeBonCoin/SeLoger récentes sur sa boîte Gmail connectée et
+    les transforme en prospects, comme le fait le transfert manuel. Renvoie
+    (nb_prospects_crees, erreur) ; erreur est None en cas de succès (même
+    sans nouveau prospect). Ne lève jamais."""
+    _assurer_schema()
+    with _base() as (conn, cur):
+        cur.execute("SELECT * FROM gmail_connections WHERE user_id = %s", (user_id,))
+        connexion = cur.fetchone()
+    if not connexion:
+        return 0, "Aucune boîte Gmail connectée."
+
+    try:
+        refresh_token = _dechiffrer_jeton(connexion['refresh_token_enc'])
+    except Exception:
+        return 0, "Jeton illisible : reconnectez votre boîte Gmail."
+
+    access_token, erreur = _rafraichir_jeton_gmail(refresh_token)
+    if erreur:
+        app.logger.warning("Synchronisation Gmail (agence %s) : renouvellement refusé : %s", user_id, erreur)
+        message = "Google a refusé l'accès à cette boîte Gmail : reconnectez-la depuis votre compte."
+        with _base() as (conn, cur):
+            cur.execute("UPDATE gmail_connections SET last_error = %s WHERE user_id = %s",
+                        (message[:500], user_id))
+            conn.commit()
+        return 0, message
+
+    try:
+        messages = _lister_messages_gmail(access_token, REQUETE_GMAIL_PORTAILS)
+    except requests.RequestException as exc:
+        app.logger.warning("Synchronisation Gmail (agence %s) : liste injoignable : %s", user_id, exc)
+        return 0, "Gmail est momentanément injoignable, nouvel essai au prochain cycle."
+
+    crees = 0
+    for m in messages:
+        gmail_id = (m or {}).get('id')
+        if not gmail_id:
+            continue
+        message_id = f"gmail:{user_id}:{gmail_id}"
+        with _base() as (conn, cur):
+            cur.execute("SELECT id FROM inbound_emails WHERE message_id = %s", (message_id,))
+            deja_traite = cur.fetchone() is not None
+        if deja_traite:
+            continue
+        try:
+            detail = _recuperer_message_gmail(access_token, gmail_id)
+        except requests.RequestException:
+            continue
+        headers = ((detail or {}).get('payload') or {}).get('headers') or []
+        expediteur = _adresse_depuis_entete(_entete_gmail(headers, 'From'))
+        portail = _source_portail(expediteur)
+        sujet = _texte_court(_entete_gmail(headers, 'Subject'), 255) or ''
+        corps = _corps_message_gmail((detail or {}).get('payload'))[:6000]
+        if portail == 'portail':
+            # Pas une notification LeBonCoin/SeLoger (marketing du portail,
+            # ou tout autre mail qu'un "from:" large a laissé passer) : on
+            # ignore sans créer de prospect, mais on retient le message pour
+            # ne pas le réexaminer à chaque cycle.
+            with _base() as (conn, cur):
+                cur.execute("""INSERT INTO inbound_emails (message_id, user_id, source, received_at)
+                               VALUES (%s, %s, 'gmail-ignore', %s) ON CONFLICT (message_id) DO NOTHING""",
+                            (message_id, user_id, _maintenant()))
+                conn.commit()
+            continue
+        if _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, message_id):
+            crees += 1
+
+    with _base() as (conn, cur):
+        cur.execute("UPDATE gmail_connections SET last_synced_at = %s, last_error = NULL WHERE user_id = %s",
+                    (_maintenant(), user_id))
+        conn.commit()
+    return crees, None
+
+
+@app.route('/api/v1/gmail/connect', methods=['GET'])
+@token_required
+def gmail_connect():
+    """URL vers laquelle rediriger le navigateur pour que l'agence autorise
+    Zelyro à lire sa boîte Gmail (lecture seule)."""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        return jsonify({"message": "La connexion Gmail n'est pas encore configurée."}), 503
+    etat = jwt.encode({'uid': request.user_id, 'exp': datetime.utcnow() + timedelta(minutes=10)},
+                       SECRET_KEY, algorithm='HS256')
+    parametres = {
+        'client_id': GOOGLE_CLIENT_ID,
+        'redirect_uri': GOOGLE_OAUTH_REDIRECT_URI,
+        'response_type': 'code',
+        'scope': GOOGLE_GMAIL_SCOPE,
+        'access_type': 'offline',
+        'prompt': 'consent',
+        'include_granted_scopes': 'true',
+        'state': etat,
+    }
+    return jsonify({"url": GOOGLE_AUTH_URL + '?' + urlencode(parametres)}), 200
+
+
+@app.route('/oauth/gmail/callback', methods=['GET'])
+@limiter.limit("30 per hour")
+def gmail_callback():
+    """Google redirige ici le navigateur de l'agent après son consentement.
+    Pas de session à ce stade : l'agence est retrouvée via le paramètre
+    'state' signé, fabriqué par /api/v1/gmail/connect."""
+    site = _site_url() or ''
+    if request.args.get('error'):
+        return redirect(f"{site}/compte.html?gmail=refuse")
+    code = request.args.get('code')
+    etat = request.args.get('state')
+    if not code or not etat:
+        return redirect(f"{site}/compte.html?gmail=erreur")
+    try:
+        data = jwt.decode(etat, SECRET_KEY, algorithms=["HS256"], options={"require": ["exp", "uid"]})
+        user_id = data['uid']
+    except jwt.PyJWTError:
+        return redirect(f"{site}/compte.html?gmail=erreur")
+
+    try:
+        resp = requests.post(GOOGLE_TOKEN_URL, data={
+            'code': code,
+            'client_id': GOOGLE_CLIENT_ID,
+            'client_secret': GOOGLE_CLIENT_SECRET,
+            'redirect_uri': GOOGLE_OAUTH_REDIRECT_URI,
+            'grant_type': 'authorization_code',
+        }, timeout=10)
+    except requests.RequestException:
+        app.logger.exception("Callback Gmail : échange du code injoignable")
+        return redirect(f"{site}/compte.html?gmail=erreur")
+    if resp.status_code != 200:
+        app.logger.warning("Callback Gmail : échange du code refusé : %s", resp.text[:300])
+        return redirect(f"{site}/compte.html?gmail=erreur")
+
+    jetons = resp.json() or {}
+    refresh_token = jetons.get('refresh_token')
+    access_token = jetons.get('access_token')
+    if not refresh_token:
+        # Google n'en renvoie un que si le consentement vient d'être donné
+        # (prompt=consent le garantit à chaque fois côté /gmail/connect) :
+        # sans lui, impossible de se reconnecter plus tard sans repasser par
+        # un nouveau consentement.
+        app.logger.warning("Callback Gmail (agence %s) : pas de refresh_token dans la réponse", user_id)
+        return redirect(f"{site}/compte.html?gmail=erreur")
+
+    adresse_gmail = ''
+    try:
+        profil = requests.get(f"{GMAIL_API_BASE}/users/me/profile",
+                               headers={'Authorization': f'Bearer {access_token}'}, timeout=10)
+        profil.raise_for_status()
+        adresse_gmail = (profil.json() or {}).get('emailAddress') or ''
+    except requests.RequestException:
+        pass
+
+    try:
+        jeton_chiffre = _chiffrer_jeton(refresh_token)
+    except RuntimeError:
+        app.logger.error("Callback Gmail : TOKEN_ENCRYPTION_KEY absente, connexion non enregistrée")
+        return redirect(f"{site}/compte.html?gmail=erreur")
+
+    _assurer_schema()
+    with _base() as (conn, cur):
+        cur.execute("""
+            INSERT INTO gmail_connections (user_id, google_email, refresh_token_enc, connected_at)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (user_id) DO UPDATE
+                SET google_email = EXCLUDED.google_email,
+                    refresh_token_enc = EXCLUDED.refresh_token_enc,
+                    last_error = NULL,
+                    connected_at = EXCLUDED.connected_at
+        """, (user_id, adresse_gmail[:255], jeton_chiffre, _maintenant()))
+        conn.commit()
+
+    return redirect(f"{site}/compte.html?gmail=connecte")
+
+
+@app.route('/api/v1/gmail/status', methods=['GET'])
+@token_required
+def gmail_status():
+    _assurer_schema()
+    with _base() as (conn, cur):
+        cur.execute("""SELECT google_email, last_synced_at, last_error, connected_at
+                       FROM gmail_connections WHERE user_id = %s""", (request.user_id,))
+        connexion = cur.fetchone()
+    if not connexion:
+        return jsonify({"connected": False}), 200
+    return jsonify({
+        "connected": True,
+        "email": connexion['google_email'],
+        "last_synced_at": _iso(connexion['last_synced_at']),
+        "last_error": connexion['last_error'],
+        "connected_at": _iso(connexion['connected_at']),
+    }), 200
+
+
+@app.route('/api/v1/gmail/disconnect', methods=['POST'])
+@token_required
+def gmail_disconnect():
+    _assurer_schema()
+    with _base() as (conn, cur):
+        cur.execute("SELECT refresh_token_enc FROM gmail_connections WHERE user_id = %s", (request.user_id,))
+        ligne = cur.fetchone()
+        cur.execute("DELETE FROM gmail_connections WHERE user_id = %s", (request.user_id,))
+        conn.commit()
+    if ligne:
+        try:
+            jeton = _dechiffrer_jeton(ligne['refresh_token_enc'])
+            requests.post(GOOGLE_REVOKE_URL, data={'token': jeton}, timeout=10)
+        except Exception:
+            pass
+    return jsonify({"message": "Boîte Gmail déconnectée."}), 200
+
+
+@app.route('/api/v1/gmail/sync', methods=['POST'])
+@limiter.limit("10 per hour")
+@token_required
+def gmail_sync():
+    """Synchronisation immédiate à la demande (bouton "Synchroniser
+    maintenant" du compte), sans attendre le prochain passage de la tâche
+    planifiée."""
+    crees, erreur = _synchroniser_gmail(request.user_id)
+    if erreur:
+        return jsonify({"message": erreur, "created": crees}), 200
+    message = f"{crees} nouveau(x) prospect(s) importé(s)." if crees \
+        else "Aucune nouvelle notification LeBonCoin/SeLoger trouvée."
+    return jsonify({"message": message, "created": crees}), 200
+
+
+@app.route('/internal/gmail/sync-all', methods=['POST'])
+def gmail_sync_all():
+    """Appelé périodiquement par une tâche planifiée (Render Cron Job), pas
+    par un navigateur : protégé par une clé partagée plutôt qu'un jeton de
+    session, puisqu'il n'y a personne connecté derrière."""
+    cle = (os.getenv("CRON_SECRET") or "").strip()
+    if not cle or request.headers.get('X-Cron-Key') != cle:
+        return jsonify({"message": "Not found"}), 404
+    _assurer_schema()
+    with _base() as (conn, cur):
+        cur.execute("""SELECT gc.user_id FROM gmail_connections gc
+                       JOIN users u ON u.id = gc.user_id WHERE u.is_active""")
+        agences = [r['user_id'] for r in cur.fetchall()]
+    resultats = {}
+    for user_id in agences:
+        try:
+            crees, erreur = _synchroniser_gmail(user_id)
+            resultats[str(user_id)] = erreur or f"{crees} créé(s)"
+        except Exception:
+            app.logger.exception("Synchronisation Gmail : échec pour l'agence %s", user_id)
+            resultats[str(user_id)] = "erreur interne"
+    return jsonify({"agences": len(agences), "detail": resultats}), 200
 
 
 @app.route('/webhooks/email-inbound', methods=['POST'])
