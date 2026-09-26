@@ -34,6 +34,11 @@
             const [mailCapture, setMailCapture] = useState(null);
             const [messageMailCapture, setMessageMailCapture] = useState(null);
             const [confirmerMailCapture, setConfirmerMailCapture] = useState(false);
+            const [gmailStatus, setGmailStatus] = useState(null);
+            const [messageGmail, setMessageGmail] = useState(null);
+            const [connectingGmail, setConnectingGmail] = useState(false);
+            const [syncingGmail, setSyncingGmail] = useState(false);
+            const [confirmerDeconnexionGmail, setConfirmerDeconnexionGmail] = useState(false);
 
             const appel = async (chemin, options = {}) => {
                 const r = await fetch(`${API_URL}${chemin}`, {
@@ -66,6 +71,23 @@
                 appel('/api/v1/plan').then(setForfait).catch(() => {});
                 appel('/api/v1/capture-link').then(setLien).catch((e) => setMessageLien({ type: 'error', text: e.message }));
                 appel('/api/v1/mail-capture').then(setMailCapture).catch((e) => setMessageMailCapture({ type: 'error', text: e.message }));
+                appel('/api/v1/gmail/status').then(setGmailStatus).catch((e) => setMessageGmail({ type: 'error', text: e.message }));
+
+                // Google renvoie ici le navigateur après le consentement (ou son refus) :
+                // ?gmail=connecte|refuse|erreur. On affiche le message une fois puis on
+                // nettoie l'URL, pour ne pas le rejouer si la page est rechargée.
+                const parametresGmail = new URLSearchParams(window.location.search);
+                const resultatGmail = parametresGmail.get('gmail');
+                if (resultatGmail) {
+                    if (resultatGmail === 'connecte') {
+                        setMessageGmail({ type: 'success', text: 'Boîte Gmail connectée : Zelyro va maintenant y détecter automatiquement les notifications LeBonCoin et SeLoger.' });
+                    } else if (resultatGmail === 'refuse') {
+                        setMessageGmail({ type: 'error', text: 'Connexion annulée : l\'autorisation n\'a pas été accordée.' });
+                    } else {
+                        setMessageGmail({ type: 'error', text: 'La connexion à Gmail a échoué. Réessayez, ou contactez-nous si le problème persiste.' });
+                    }
+                    window.history.replaceState({}, '', window.location.pathname);
+                }
             }, []);
 
             const changerAlertes = async (valeur) => {
@@ -117,6 +139,42 @@
                     setMessageMailCapture({ type: 'success', text: 'Nouvelle adresse créée. L\'ancienne ne fonctionne plus : pensez à mettre à jour votre transfert.' });
                 } catch (e) {
                     setMessageMailCapture({ type: 'error', text: e.message });
+                }
+            };
+
+            const connecterGmail = async () => {
+                setConnectingGmail(true);
+                setMessageGmail(null);
+                try {
+                    const { url } = await appel('/api/v1/gmail/connect');
+                    window.location.href = url;
+                } catch (e) {
+                    setMessageGmail({ type: 'error', text: e.message });
+                    setConnectingGmail(false);
+                }
+            };
+
+            const synchroniserGmail = async () => {
+                setSyncingGmail(true);
+                try {
+                    const r = await appel('/api/v1/gmail/sync', { method: 'POST' });
+                    setMessageGmail({ type: 'success', text: r.message });
+                    setGmailStatus(await appel('/api/v1/gmail/status'));
+                } catch (e) {
+                    setMessageGmail({ type: 'error', text: e.message });
+                } finally {
+                    setSyncingGmail(false);
+                }
+            };
+
+            const deconnecterGmail = async () => {
+                setConfirmerDeconnexionGmail(false);
+                try {
+                    await appel('/api/v1/gmail/disconnect', { method: 'POST' });
+                    setGmailStatus({ connected: false });
+                    setMessageGmail({ type: 'success', text: 'Boîte Gmail déconnectée.' });
+                } catch (e) {
+                    setMessageGmail({ type: 'error', text: e.message });
                 }
             };
 
@@ -342,15 +400,60 @@
 
                             <div className="panel">
                                 <div className="panel-header">
-                                    <h2 className="panel-title">Leads LeBonCoin &amp; SeLoger</h2>
+                                    <h2 className="panel-title">Connexion à votre boîte Gmail</h2>
                                 </div>
                                 <p className="panel-note">
-                                    LeBonCoin et SeLoger ne proposent pas d'API pour récupérer vos contacts
-                                    automatiquement : la seule solution fiable est de transférer leurs e-mails de
-                                    notification vers l'adresse ci-dessous. Zelyro les lit et crée le prospect, avec
-                                    la bonne source. <strong>Cette adresse se configure dans votre messagerie
-                                    (Gmail, Outlook…), jamais dans les paramètres LeBonCoin ou SeLoger</strong> :
-                                    ces portails n'ont rien à savoir de Zelyro.
+                                    Zelyro se connecte directement à votre boîte Gmail (lecture seule) pour détecter
+                                    automatiquement les notifications LeBonCoin et SeLoger et créer les prospects —
+                                    rien à configurer dans votre messagerie.
+                                </p>
+                                {messageGmail && (
+                                    <div className={messageGmail.type === 'error' ? 'error' : 'success'}>{messageGmail.text}</div>
+                                )}
+                                {gmailStatus ? (
+                                    gmailStatus.connected ? (
+                                        <>
+                                            <p className="field-hint">
+                                                Connecté : <strong>{gmailStatus.email}</strong>
+                                                {gmailStatus.last_synced_at && (
+                                                    <> — dernière synchronisation {new Date(gmailStatus.last_synced_at).toLocaleString('fr-FR')}</>
+                                                )}
+                                            </p>
+                                            {gmailStatus.last_error && (
+                                                <div className="error">{gmailStatus.last_error}</div>
+                                            )}
+                                            <div className="btn-ligne" style={{ marginTop: '14px' }}>
+                                                <button className="btn secondary petit" onClick={synchroniserGmail} disabled={syncingGmail}>
+                                                    {syncingGmail ? 'Synchronisation…' : 'Synchroniser maintenant'}
+                                                </button>
+                                                {!confirmerDeconnexionGmail ? (
+                                                    <button className="btn secondary petit" onClick={() => setConfirmerDeconnexionGmail(true)}>Déconnecter</button>
+                                                ) : (
+                                                    <>
+                                                        <button className="btn danger plein petit" onClick={deconnecterGmail}>Confirmer la déconnexion</button>
+                                                        <button className="btn secondary petit" onClick={() => setConfirmerDeconnexionGmail(false)}>Annuler</button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <button className="btn plein" onClick={connecterGmail} disabled={connectingGmail}>
+                                            {connectingGmail ? 'Redirection…' : 'Connecter Gmail'}
+                                        </button>
+                                    )
+                                ) : <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}
+                            </div>
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Leads LeBonCoin &amp; SeLoger — autre messagerie que Gmail</h2>
+                                </div>
+                                <p className="panel-note">
+                                    Vous n'utilisez pas Gmail (Outlook, messagerie professionnelle…) ? Transférez les
+                                    e-mails de notification LeBonCoin et SeLoger vers l'adresse ci-dessous : Zelyro
+                                    les lit et crée le prospect, avec la bonne source. <strong>Cette adresse se
+                                    configure dans votre messagerie, jamais dans les paramètres LeBonCoin ou
+                                    SeLoger.</strong>
                                 </p>
                                 {messageMailCapture && (
                                     <div className={messageMailCapture.type === 'error' ? 'error' : 'success'}>{messageMailCapture.text}</div>
