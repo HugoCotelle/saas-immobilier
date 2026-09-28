@@ -3911,17 +3911,6 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
             conn.commit()
             return None
 
-        nom = (champs or {}).get('nom')
-        if not nom and expediteur and EMAIL_RE.match(expediteur):
-            nom = expediteur.split('@', 1)[0].replace('.', ' ').replace('_', ' ').title()
-        nom = nom or _PORTAIL_NOM_DEFAUT.get(portail, 'Contact')
-
-        notes = (champs or {}).get('notes')
-        if not champs and corps:
-            notes = corps[:2500]
-        if sujet and (not notes or sujet.lower() not in notes.lower()):
-            notes = f"{sujet} — {notes}" if notes else sujet
-
         email_contact = (champs or {}).get('email')
         # Le "From" d'un e-mail LeBonCoin/SeLoger est toujours l'adresse système
         # du portail (ex. info@service.seloger.com), jamais celle du contact : le
@@ -3932,6 +3921,37 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
         if (not email_contact and portail == 'portail' and expediteur
                 and EMAIL_RE.match(expediteur) and 'noreply' not in expediteur.lower()):
             email_contact = expediteur
+
+        if (portail in ('leboncoin', 'seloger') and champs
+                and not any([email_contact, champs.get('telephone'), champs.get('budget'),
+                             champs.get('secteur'), champs.get('type_bien'), champs.get('notes')])):
+            # L'IA a confirmé une vraie demande de contact, mais n'a rien pu en
+            # tirer : ni coordonnées, ni budget, ni secteur, ni type de bien, ni
+            # note. Une fois l'e-mail nettoyé de son HTML, il ne reste souvent
+            # qu'un lien de suivi ou de désinscription — aucun texte du
+            # prospect. Créer un prospect ici ne donnerait qu'une fiche vide à
+            # supprimer à la main, et sans e-mail on ne peut même pas lui
+            # écrire pour lui demander de préciser sa recherche
+            # (_envoyer_email_completion). On ne le crée pas, mais le message
+            # est retenu pour ne pas être réexaminé à chaque cycle — comme
+            # pour une alerte.
+            if message_id:
+                cur.execute("""INSERT INTO inbound_emails (message_id, user_id, source, received_at)
+                               VALUES (%s, %s, 'portail-vide', %s) ON CONFLICT (message_id) DO NOTHING""",
+                            (message_id, user_id, _maintenant()))
+            conn.commit()
+            return None
+
+        nom = (champs or {}).get('nom')
+        if not nom and expediteur and EMAIL_RE.match(expediteur):
+            nom = expediteur.split('@', 1)[0].replace('.', ' ').replace('_', ' ').title()
+        nom = nom or _PORTAIL_NOM_DEFAUT.get(portail, 'Contact')
+
+        notes = (champs or {}).get('notes')
+        if not champs and corps:
+            notes = corps[:2500]
+        if sujet and (not notes or sujet.lower() not in notes.lower()):
+            notes = f"{sujet} — {notes}" if notes else sujet
 
         cur.execute("""
             INSERT INTO leads
