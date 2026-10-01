@@ -4,9 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZELYRO - Importer des prospects</title>
+    <meta name="robots" content="noindex">
     <script src="vendor/react.production.min.js"></script>
     <script src="vendor/react-dom.production.min.js"></script>
     <script src="vendor/babel.min.js"></script>
+    <script src="vendor/lecteur-excel.js"></script>
     <meta name="theme-color" content="#F6F2EA">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="zelyro.css">
@@ -56,7 +58,7 @@
             name: 'Nom', email: 'E-mail', phone: 'Téléphone', budget: 'Budget', location: 'Secteur',
             property_type: 'Type de bien', financing_status: 'Financement', purchase_urgency: 'Échéance'
         };
-        const TYPES = ['Appartement', 'Maison', 'Villa', 'Studio', 'Penthouse', 'Terrain'];
+        const TYPES = ['Appartement', 'Maison', 'Villa', 'Studio', 'Penthouse', 'Terrain', 'Local commercial', 'Bureau'];
 
         // Lit un fichier CSV : séparateur virgule, point-virgule ou tabulation,
         // guillemets, retours à la ligne dans un champ.
@@ -86,6 +88,12 @@
             return lignes;
         }
 
+        // Excel stocke un numéro tapé sans apostrophe comme un nombre et perd le 0 du début :
+        // 612345678 (9 chiffres, sans 0) est un numéro français auquel il manque son 0.
+        function telephone(v) {
+            return /^[1-9]\d{8}$/.test(v) ? '0' + v : v;
+        }
+
         function versBudget(v) {
             let t = String(v || '').toLowerCase().replace(/[€\s\u00a0]/g, '');
             if (!t) return null;
@@ -98,6 +106,8 @@
         function versType(v) {
             const t = normaliser(v);
             if (!t) return null;
+            if (/^(bureaux?|plateau)/.test(t)) return 'Bureau';
+            if (/^(locaux|local|commerce|boutique)/.test(t)) return 'Local commercial';
             const trouve = TYPES.find((x) => normaliser(x) === t || (t.length >= 3 && normaliser(x).startsWith(t)));
             return trouve || (String(v).trim().charAt(0).toUpperCase() + String(v).trim().slice(1));
         }
@@ -138,7 +148,7 @@
                     ligne: n + 2,
                     name: nom,
                     email: lu(ligne, 'email'),
-                    phone: lu(ligne, 'phone'),
+                    phone: telephone(lu(ligne, 'phone')),
                     budget: versBudget(lu(ligne, 'budget')),
                     location: lu(ligne, 'location'),
                     property_type: versType(lu(ligne, 'property_type')),
@@ -187,12 +197,10 @@
                 setErreur(null); setResultat(null); setAnalyse(null);
                 if (!fichier) return;
                 if (fichier.size > MAX_OCTETS) { setErreur('Ce fichier dépasse 2 Mo. Découpez-le en plusieurs fichiers.'); return; }
-                if (/\.xlsx?$/i.test(fichier.name)) {
-                    setErreur('Ce format n\'est pas lu directement. Dans Excel : Fichier > Enregistrer sous > CSV UTF-8, puis importez ce fichier.');
-                    return;
-                }
                 try {
-                    const lignes = lireCsv(decoder(await fichier.arrayBuffer()));
+                    const contenu = await fichier.arrayBuffer();
+                    // Excel (.xlsx) ou CSV : le contenu du fichier décide, pas son extension.
+                    const lignes = typeDeFichier(contenu) === 'autre' ? lireCsv(decoder(contenu)) : await lireExcel(contenu);
                     if (lignes.length < 2) { setErreur('Le fichier ne contient aucune ligne de prospect.'); return; }
                     const a = analyser(lignes);
                     if (!a.nomTrouve) {
@@ -203,7 +211,8 @@
                     setNomFichier(fichier.name);
                     setAnalyse(a);
                 } catch (err) {
-                    setErreur('Ce fichier est illisible. Vérifiez qu\'il s\'agit bien d\'un CSV.');
+                    setErreur(err && err.message && /Excel|classeur|navigateur/.test(err.message) ? err.message
+                        : 'Ce fichier est illisible. Vérifiez qu\'il s\'agit bien d\'un fichier Excel (.xlsx) ou CSV.');
                 }
             };
 
@@ -319,13 +328,14 @@
                             <div className="panel">
                                 <div className="panel-title">1. Choisir le fichier</div>
                                 <div className="panel-note">
-                                    Un fichier CSV avec une ligne de titres : Nom, E-mail, Téléphone, Budget,
+                                    Un fichier Excel (.xlsx) ou CSV avec une ligne de titres : Nom, E-mail, Téléphone, Budget,
                                     Secteur, Type de bien, Financement, Échéance. Seul le nom est indispensable ;
-                                    les colonnes absentes sont simplement laissées vides. Depuis Excel : Fichier,
-                                    Enregistrer sous, CSV UTF-8. Maximum {MAX_LIGNES} prospects et 2 Mo par fichier.
+                                    les colonnes absentes sont simplement laissées vides. Si le classeur Excel a
+                                    plusieurs feuilles, la première feuille qui contient des données est lue.
+                                    Maximum {MAX_LIGNES} prospects et 2 Mo par fichier.
                                 </div>
                                 <label className="fichier-zone" style={{ cursor: 'pointer', textTransform: 'none', letterSpacing: 0, fontSize: '14px', fontWeight: 500 }}>
-                                    <input type="file" accept=".csv,.txt,text/csv" onChange={choisir} />
+                                    <input type="file" accept=".csv,.txt,.xlsx,.xlsm,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={choisir} />
                                     Cliquez ici pour choisir un fichier
                                 </label>
                                 <div style={{ marginTop: '16px' }}>

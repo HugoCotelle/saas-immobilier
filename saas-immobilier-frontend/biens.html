@@ -8,6 +8,7 @@
     <script src="vendor/react.production.min.js"></script>
     <script src="vendor/react-dom.production.min.js"></script>
     <script src="vendor/babel.min.js"></script>
+    <script src="vendor/lecteur-excel.js"></script>
     <meta name="theme-color" content="#F6F2EA">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="zelyro.css">
@@ -39,7 +40,7 @@
             property_type: '', description: ''
         };
 
-        // ---------- Lecture d'un fichier CSV (tout se passe dans le navigateur) ----------
+        // ---------- Lecture d'un fichier Excel ou CSV (tout se passe dans le navigateur) ----------
 
         const TAILLE_PAQUET = 300;     // même valeur que le serveur
         const MAX_LIGNES_FICHIER = 3000;
@@ -137,8 +138,8 @@
             return resultat;
         }
 
-        function analyserFichier(texte) {
-            const lignes = lireCSV(texte);
+        // Reçoit les lignes déjà lues (CSV ou Excel) : tableau de lignes, chacune un tableau de textes.
+        function analyserFichier(lignes) {
             if (lignes.length < 2) {
                 return { erreur: "Le fichier est vide, ou ne contient que la ligne des titres de colonnes." };
             }
@@ -151,7 +152,8 @@
             }
             const valeur = (ligne, champ) => (colonnes[champ] ? String(ligne[colonnes[champ].index] || '').trim() : '');
             const biens = lignes.slice(1).map((l) => {
-                const adresse = valeur(l, 'address'), cp = valeur(l, 'zip'), ville = valeur(l, 'city');
+                // Excel enregistre le code postal 01000 comme le nombre 1000 : on rend son 0 au code à 4 chiffres.
+                const adresse = valeur(l, 'address'), cp = valeur(l, 'zip').replace(/^(\d{4})$/, '0$1'), ville = valeur(l, 'city');
                 const parties = [adresse];
                 if (cp && !adresse.includes(cp)) parties.push(cp);
                 if (ville && !adresse.toLowerCase().includes(ville.toLowerCase())) parties.push(ville);
@@ -196,7 +198,10 @@
         }
 
         const prixLisible = (v) => {
-            const n = parseInt(String(v).replace(/[^0-9]/g, ''), 10);
+            // Même lecture que le serveur : « 245000.5 » ou « 245000,50 » = 245 000 (les 1 ou 2 derniers chiffres après un séparateur sont des décimales).
+            let t = String(v).replace(/[^\d.,]/g, '');
+            t = t.replace(/[.,]\d{1,2}$/, '').replace(/[.,]/g, '');
+            const n = parseInt(t, 10);
             return Number.isFinite(n) && v !== '' ? `${n.toLocaleString('fr-FR')} €` : '—';
         };
 
@@ -297,20 +302,20 @@
                 setAnalyse(null);
                 setError(null);
                 if (!fichier) return;
-                if (/\.xlsx?$/i.test(fichier.name)) {
-                    setError("Ce fichier est au format Excel. Ouvrez-le dans Excel puis choisissez Enregistrer sous, au format CSV (séparateur point-virgule).");
-                    return;
-                }
                 if (fichier.size > MAX_OCTETS) {
                     setError("Ce fichier dépasse 5 Mo. Découpez-le en plusieurs fichiers.");
                     return;
                 }
                 try {
-                    const resultat = analyserFichier(decoderTexte(await fichier.arrayBuffer()));
+                    const contenu = await fichier.arrayBuffer();
+                    // Excel (.xlsx) ou CSV : le contenu du fichier décide, pas son extension.
+                    const lignes = typeDeFichier(contenu) === 'autre' ? lireCSV(decoderTexte(contenu)) : await lireExcel(contenu);
+                    const resultat = analyserFichier(lignes);
                     if (resultat.erreur) { setError(resultat.erreur); return; }
                     setAnalyse({ nom: fichier.name, ...resultat });
                 } catch (err) {
-                    setError("Ce fichier ne peut pas être lu. Enregistrez-le au format CSV et réessayez.");
+                    setError(err && err.message && /Excel|classeur|navigateur/.test(err.message) ? err.message
+                        : "Ce fichier ne peut pas être lu. Choisissez un fichier Excel (.xlsx) ou CSV.");
                 }
             };
 
@@ -447,8 +452,9 @@
                                             reconnues : référence, titre, adresse, code postal, ville, prix,
                                             surface, pièces, type de bien, description. Seul le titre est
                                             indispensable, mais sans adresse ni type, un bien n'apparaîtra
-                                            dans aucune correspondance. Un fichier Excel doit d'abord être
-                                            enregistré au format CSV.
+                                            dans aucune correspondance. Le fichier peut être au format Excel
+                                            (.xlsx) ou CSV ; si le classeur a plusieurs feuilles, la première
+                                            feuille qui contient des données est lue.
                                         </div>
                                         <button className="btn secondary petit" onClick={telechargerModele}>
                                             Télécharger un modèle de fichier
@@ -458,8 +464,8 @@
                                     <div>
                                         <div className="import-etape-titre"><span>2.</span>Choisissez votre fichier</div>
                                         <div className="import-fichier">
-                                            <label htmlFor="fichier-biens" style={{ display: 'none' }}>Fichier CSV des biens</label>
-                                            <input id="fichier-biens" type="file" accept=".csv,.txt,text/csv"
+                                            <label htmlFor="fichier-biens" style={{ display: 'none' }}>Fichier Excel ou CSV des biens</label>
+                                            <input id="fichier-biens" type="file" accept=".csv,.txt,.xlsx,.xlsm,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                                                 onChange={choisirFichier} disabled={!!progression} />
                                         </div>
                                     </div>
@@ -559,7 +565,7 @@
                                                 <div className="import-avertissement">
                                                     Type de bien non reconnu : {bilan.unknown_types.map((t) => `« ${t} »`).join(', ')}.
                                                     Ces biens n'ont pas de type, donc moins de points de correspondance.
-                                                    Types connus : Appartement, Maison, Villa, Studio, Penthouse, Terrain.
+                                                    Types connus : Appartement, Maison, Villa, Studio, Penthouse, Terrain, Local commercial, Bureau.
                                                 </div>
                                             )}
                                             {(bilan.without_address > 0) && (
@@ -638,6 +644,8 @@
                                             <option value="Studio">Studio</option>
                                             <option value="Penthouse">Penthouse</option>
                                             <option value="Terrain">Terrain</option>
+                                            <option value="Local commercial">Local commercial</option>
+                                            <option value="Bureau">Bureau</option>
                                         </select>
                                     </div>
                                 </div>
