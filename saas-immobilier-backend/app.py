@@ -363,6 +363,15 @@ _DDL_COMPLETION = (
     "ON leads (completion_token) WHERE completion_token IS NOT NULL",
 )
 
+# Référence du bien (numéro de mandat ou d'annonce du logiciel de l'agence) :
+# elle permet de réimporter un fichier sans créer de doublons, en mettant à
+# jour les biens déjà présents. Unique par agence, sans tenir compte de la casse.
+_DDL_BIENS = (
+    "ALTER TABLE properties ADD COLUMN IF NOT EXISTS reference VARCHAR(60)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS properties_user_reference_idx "
+    "ON properties (user_id, lower(reference)) WHERE reference IS NOT NULL",
+)
+
 # Les forfaits : code, nom, prospects, biens, e-mails par mois, extractions IA
 # par mois (None = illimité), ordre d'affichage. Ces valeurs ne servent qu'à
 # remplir la table « plans » la première fois : ensuite, les limites se règlent
@@ -518,12 +527,14 @@ def _assurer_schema():
                        to_regclass('gmail_connections') IS NOT NULL,
                        EXISTS (SELECT 1 FROM information_schema.columns
                                WHERE table_name = 'users' AND column_name = 'role'),
-                       to_regclass('team_invitations') IS NOT NULL
+                       to_regclass('team_invitations') IS NOT NULL,
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'properties' AND column_name = 'reference')
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
                 for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
-                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE):
+                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS):
                     cur.execute(ddl)
             conn.commit()
             _schema_pret = True
@@ -696,7 +707,8 @@ def init_database(demo=False):
             "CREATE INDEX IF NOT EXISTS properties_user_id_idx ON properties (user_id)",
         ):
             cursor.execute(ddl)
-        for ddl in _DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_ACCES:
+        for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
+                    + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS):
             cursor.execute(ddl)
 
         # Vérifier si vide
@@ -1568,7 +1580,7 @@ def get_properties():
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, title, address, price, size, rooms, property_type, description FROM properties WHERE user_id = %s ORDER BY id", (request.agency_id,))
+        cur.execute("SELECT id, reference, title, address, price, size, rooms, property_type, description FROM properties WHERE user_id = %s ORDER BY id", (request.agency_id,))
         properties = cur.fetchall()
         cur.close()
         conn.close()
@@ -1598,19 +1610,28 @@ def create_property():
         def entier(cle):
             return _entier_borne(data.get(cle))
 
+        reference = _texte_court(data.get('reference'), 60)
+
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         reste, forfait = _reste(cur, request.agency_id, 'properties')
         if reste == 0:
             conn.close()
             return _refus_quota('properties', forfait)
+        if reference:
+            cur.execute("SELECT 1 FROM properties WHERE user_id = %s AND lower(reference) = lower(%s)",
+                        (request.agency_id, reference))
+            if cur.fetchone():
+                conn.close()
+                return jsonify({"message": "Un bien porte déjà cette référence."}), 409
         cur.execute("""
             INSERT INTO properties
-                (user_id, title, address, price, size, rooms, property_type, description)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id, title, address, price, size, rooms, property_type, description
+                (user_id, reference, title, address, price, size, rooms, property_type, description)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id, reference, title, address, price, size, rooms, property_type, description
         """, (
             request.agency_id,
+            reference,
             titre[:255],
             _texte_court(data.get('address'), 255),
             entier('price'),
@@ -1628,6 +1649,180 @@ def create_property():
         return jsonify(bien), 201
     except Exception:
         return erreur_interne()
+
+# ===== IMPORT DES BIENS (FICHIER CSV) =====
+# Le navigateur lit le fichier et envoie les lignes par paquets, comme pour les
+# prospects. Chaque ligne est un dictionnaire : reference, title, address,
+# price, size, rooms, property_type, description. Tout est relu ici : le
+# navigateur est modifiable par celui qui l'utilise.
+
+_SYNONYMES_TYPE = (
+    ('Terrain', ('terrain', 'parcelle', 'lotissement')),
+    ('Penthouse', ('penthouse', 'attique', 'toit terrasse')),
+    ('Studio', ('studio',)),
+    ('Villa', ('villa',)),
+    ('Maison', ('maison', 'pavillon', 'longere', 'fermette', 'chalet', 'bastide', 'mas')),
+    ('Appartement', ('appartement', 'appart', 'apt', 'flat', 'duplex', 'triplex', 'loft')),
+)
+
+
+def _type_bien(valeur):
+    """Le type tel que Zelyro le connait (Appartement, Maison...), ou None.
+    Les logiciels écrivent « appart », « T3 », « Pavillon » : sans cette
+    correspondance, le bien n'aurait pas les 30 points du type de bien."""
+    n = normaliser(str(valeur or ''))
+    if not n:
+        return None
+    for canonique, mots in _SYNONYMES_TYPE:
+        if any(re.search(r'\b' + re.escape(m) + r'\b', n) for m in mots):
+            return canonique
+    if re.search(r'\b[tf][1-9]\b', n):
+        return 'Appartement'
+    return None
+
+
+def _entier_souple(valeur, maxi=2_000_000_000):
+    """Entier lu dans une cellule de tableur : « 249 000 € », « 249000,00 »,
+    « 1.250.000 », « 68,5 m² ». Une valeur illisible donne None."""
+    if valeur is None or isinstance(valeur, bool):
+        return None
+    if isinstance(valeur, int):
+        return _entier_borne(valeur, maxi)
+    if isinstance(valeur, float):
+        return _entier_borne(int(valeur), maxi) if abs(valeur) < 1e12 else None
+    s = re.sub(r'[^\d.,]', '', str(valeur))
+    if re.search(r'[.,]\d{1,2}$', s):
+        s = s[:s.rfind('.') if s.rfind('.') > s.rfind(',') else s.rfind(',')]
+    s = re.sub(r'[.,]', '', s)
+    if not s or len(s) > 12:
+        return None
+    return _entier_borne(s, maxi)
+
+
+def _titre_bien(titre, type_bien, pieces, adresse):
+    """Le titre de la ligne, ou à défaut un titre composé (« Appartement
+    3 pièces — Senlis »). Beaucoup d'exports n'ont pas de colonne titre."""
+    if titre:
+        return titre
+    base = " ".join(x for x in (type_bien, f"{pieces} pièces" if pieces else None) if x)
+    if base and adresse:
+        return f"{base} — {adresse}"[:255]
+    return base or adresse or None
+
+
+@app.route('/api/v1/properties/import', methods=['POST'])
+@limiter.limit("20 per hour", key_func=_cle_utilisateur)
+@token_required
+def import_properties():
+    """Importer des biens depuis un fichier (lignes déjà lues par le navigateur).
+
+    Un bien dont la référence existe déjà est mis à jour : on peut réimporter
+    l'export du logiciel chaque semaine. Sans référence, un bien de même titre
+    et de même adresse est ignoré. Seuls les ajouts comptent dans la limite du
+    forfait : mettre à jour des biens reste possible quand le portefeuille est plein.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        lignes = data.get('rows')
+        if not isinstance(lignes, list) or not lignes:
+            return jsonify({"message": "Aucune ligne à importer"}), 400
+        if len(lignes) > MAX_LIGNES_IMPORT:
+            return jsonify({"message": f"{MAX_LIGNES_IMPORT} lignes maximum par envoi"}), 400
+        decalage = data.get('offset') if isinstance(data.get('offset'), int) and 0 <= data.get('offset') < 1_000_000 else 0
+
+        ajoutes, maj, doublons, hors_forfait = 0, 0, 0, 0
+        invalides, ids_nouveaux, ids_maj = [], [], []
+        types_inconnus, sans_adresse, sans_type = set(), 0, 0
+        with _base() as (conn, cur):
+            reste, forfait = _reste(cur, request.agency_id, 'properties')
+            cur.execute("""SELECT id, lower(reference) AS ref, lower(title) AS t,
+                                  lower(coalesce(address, '')) AS a
+                           FROM properties WHERE user_id = %s""", (request.agency_id,))
+            par_ref, par_cle = {}, {}
+            for r in cur.fetchall():
+                if r['ref']:
+                    par_ref[r['ref']] = r['id']
+                par_cle.setdefault((r['t'], r['a']), (r['id'], bool(r['ref'])))
+
+            for i, ligne in enumerate(lignes):
+                numero = decalage + i + 1
+                if not isinstance(ligne, dict):
+                    invalides.append({"ligne": numero, "raison": "Ligne illisible"})
+                    continue
+                reference = _texte_court(ligne.get('reference'), 60)
+                adresse = _texte_court(ligne.get('address'), 255)
+                prix = _entier_souple(ligne.get('price'))
+                surface = _entier_souple(ligne.get('size'), 1_000_000)
+                pieces = _entier_souple(ligne.get('rooms'), 1000)
+                type_brut = _texte_court(ligne.get('property_type'), 100)
+                type_bien = _type_bien(type_brut)
+                if type_brut and not type_bien:
+                    types_inconnus.add(type_brut[:40])
+                description = _texte_court(ligne.get('description'), 5000)
+                titre_saisi = _texte_court(ligne.get('title'), 255)
+
+                cible = par_ref.get(reference.lower()) if reference else None
+                if cible is None:
+                    titre = _titre_bien(titre_saisi, type_bien, pieces, adresse)
+                    existant = par_cle.get((titre.lower(), (adresse or '').lower())) if titre else None
+                    if existant:
+                        if reference and not existant[1]:
+                            cible = existant[0]      # bien saisi à la main : on lui donne sa référence
+                        elif not reference:
+                            doublons += 1
+                            continue
+
+                if cible is not None:
+                    cur.execute("""
+                        UPDATE properties SET
+                            reference = COALESCE(%s, reference), title = COALESCE(%s, title),
+                            address = COALESCE(%s, address), price = COALESCE(%s, price),
+                            size = COALESCE(%s, size), rooms = COALESCE(%s, rooms),
+                            property_type = COALESCE(%s, property_type),
+                            description = COALESCE(%s, description)
+                        WHERE id = %s AND user_id = %s
+                    """, (reference, titre_saisi, adresse, prix, surface, pieces, type_bien,
+                          description, cible, request.agency_id))
+                    if cible not in ids_maj and cible not in ids_nouveaux:
+                        maj += 1
+                    ids_maj.append(cible)
+                else:
+                    if not titre:
+                        invalides.append({"ligne": numero, "raison": "Titre manquant (ni type ni adresse pour en composer un)"})
+                        continue
+                    if reste is not None and ajoutes >= reste:
+                        hors_forfait += 1
+                        continue
+                    cur.execute("""
+                        INSERT INTO properties (user_id, reference, title, address, price, size, rooms,
+                                                property_type, description)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                    """, (request.agency_id, reference, titre, adresse, prix, surface, pieces, type_bien, description))
+                    nouvel_id = cur.fetchone()['id']
+                    ids_nouveaux.append(nouvel_id)
+                    ajoutes += 1
+                    if reference:
+                        par_ref[reference.lower()] = nouvel_id
+                    par_cle.setdefault((titre.lower(), (adresse or '').lower()), (nouvel_id, bool(reference)))
+                if not adresse:
+                    sans_adresse += 1
+                if not type_bien:
+                    sans_type += 1
+            conn.commit()
+
+        if ids_nouveaux or ids_maj:
+            _lancer_en_arriere_plan(_alertes_matching, request.agency_id, None, list(dict.fromkeys(ids_nouveaux + ids_maj)))
+        return jsonify({
+            "imported": ajoutes, "updated": maj, "duplicates": doublons,
+            "invalid": invalides[:50], "invalid_count": len(invalides),
+            "over_quota": hors_forfait,
+            "quota_message": (f"Limite du forfait {forfait['label']} atteinte ({_nombre(forfait['limits']['properties'])} biens) : "
+                              f"{hors_forfait} ligne(s) n'ont pas été importées.") if hors_forfait else None,
+            "unknown_types": sorted(types_inconnus)[:10],
+            "without_address": sans_adresse, "without_type": sans_type}), 200
+    except Exception:
+        return erreur_interne()
+
 
 @app.route('/api/v1/stats', methods=['GET'])
 @token_required
@@ -1667,6 +1862,7 @@ def get_lead_detail(lead_id):
         return erreur_interne()
 
 
+@app.route('/api/v1/leads/<int:lead_id>', methods=['PUT'])
 @app.route('/api/v1/leads/<int:lead_id>/update-financing', methods=['PUT'])
 @token_required
 def update_lead_financing(lead_id):
@@ -1676,43 +1872,84 @@ def update_lead_financing(lead_id):
     financement, de l'échéance et de la complétude du dossier par
     derive_lead_quality(). L'agent renseigne les faits, l'outil en tire le
     classement.
+
+    Les coordonnées (name, email, phone) ne changent que si la requête les
+    contient : un envoi sans ces clés les laisse intactes. Un autre prospect
+    de la même agence qui porte déjà cet e-mail ou ce numéro est signalé (409) ;
+    confirm_duplicate: true force l'enregistrement.
     """
     try:
         data = request.get_json(silent=True) or {}
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            UPDATE leads SET
-                budget = %s,
-                location = %s,
-                property_type = %s,
-                financing_status = %s,
-                purchase_urgency = %s,
-                financing_amount = %s,
-                notes = %s
-            WHERE id = %s AND user_id = %s
-        """, (
-            _entier_borne(data.get('budget')),
-            _texte_court(data.get('location'), 255),
-            _texte_court(data.get('property_type'), 100),
-            _choix(data.get('financing_status'), FINANCING_VALUES),
-            _choix(data.get('purchase_urgency'), URGENCY_VALUES),
-            _entier_borne(data.get('financing_amount')),
-            _texte_court(data.get('notes'), 2000),
-            lead_id,
-            request.agency_id
-        ))
-        modifiees = cur.rowcount
-        conn.commit()
-        cur.close()
-        conn.close()
 
-        # rowcount à zéro signifie que la fiche n'existe pas OU qu'elle
-        # appartient à une autre agence. On ne distingue pas les deux cas
-        # dans la réponse : révéler qu'un identifiant existe ailleurs
-        # renseignerait sur les données d'un autre compte.
-        if modifiees == 0:
-            return jsonify({"message": "Lead not found"}), 404
+        contact = {}
+        if 'name' in data:
+            nom = _texte_court(data.get('name'), 255)
+            if not nom:
+                return jsonify({"message": "Le nom du prospect est obligatoire"}), 400
+            contact['name'] = nom
+        if 'email' in data:
+            email = (_texte_court(data.get('email'), 255) or '').lower() or None
+            if email and not EMAIL_RE.match(email):
+                return jsonify({"message": "Adresse e-mail invalide"}), 400
+            contact['email'] = email
+        if 'phone' in data:
+            tel = str(data.get('phone') or '').strip()
+            if tel and (len(tel) > 20 or re.search(r'[^\d\s+().\-]', tel) or len(_chiffres(tel)) < 6):
+                return jsonify({"message": "Numéro de téléphone invalide (chiffres, espaces, + . - ( ) ; 20 caractères au maximum)"}), 400
+            contact['phone'] = tel or None
+
+        conn = get_db_connection()
+        try:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("SELECT email, phone FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.agency_id))
+            actuel = cur.fetchone()
+            # La fiche n'existe pas OU elle appartient à une autre agence. On ne
+            # distingue pas les deux cas dans la réponse : révéler qu'un
+            # identifiant existe ailleurs renseignerait sur les données d'un autre compte.
+            if actuel is None:
+                return jsonify({"message": "Lead not found"}), 404
+
+            if not data.get('confirm_duplicate'):
+                nouvel_email = contact.get('email')
+                nouveau_tel = _chiffres(contact.get('phone'))
+                email_change = nouvel_email and nouvel_email != (actuel['email'] or '').lower()
+                tel_change = len(nouveau_tel) >= 6 and nouveau_tel != _chiffres(actuel['phone'])
+                if email_change or tel_change:
+                    cur.execute("""SELECT name, lower(email) AS e, regexp_replace(coalesce(phone, ''), '\\D', '', 'g') AS t
+                                   FROM leads WHERE user_id = %s AND id <> %s""", (request.agency_id, lead_id))
+                    for autre in cur.fetchall():
+                        if email_change and autre['e'] == nouvel_email:
+                            return jsonify({"message": f"{autre['name']} a déjà cette adresse e-mail.", "duplicate": True}), 409
+                        if tel_change and autre['t'] == nouveau_tel:
+                            return jsonify({"message": f"{autre['name']} a déjà ce numéro de téléphone.", "duplicate": True}), 409
+
+            colonnes = ''.join(f"{c} = %s, " for c in contact)     # clés fixées plus haut, jamais issues de la requête
+            cur.execute(f"""
+                UPDATE leads SET
+                    {colonnes}
+                    budget = %s,
+                    location = %s,
+                    property_type = %s,
+                    financing_status = %s,
+                    purchase_urgency = %s,
+                    financing_amount = %s,
+                    notes = %s
+                WHERE id = %s AND user_id = %s
+            """, (
+                *contact.values(),
+                _entier_borne(data.get('budget')),
+                _texte_court(data.get('location'), 255),
+                _texte_court(data.get('property_type'), 100),
+                _choix(data.get('financing_status'), FINANCING_VALUES),
+                _choix(data.get('purchase_urgency'), URGENCY_VALUES),
+                _entier_borne(data.get('financing_amount')),
+                _texte_court(data.get('notes'), 2000),
+                lead_id,
+                request.agency_id
+            ))
+            conn.commit()
+        finally:
+            conn.close()
 
         return jsonify({"message": "Lead updated successfully"}), 200
     except Exception:
