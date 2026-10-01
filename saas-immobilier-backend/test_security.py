@@ -1133,9 +1133,9 @@ class TestImportBiens(Base):
 
     def test_avertit_des_types_inconnus_et_des_adresses_manquantes(self):
         t = self.jeton("imp-avert@x.fr")
-        d = self.importer(t, [{"title": "Local", "address": "Lille", "property_type": "Local commercial"},
+        d = self.importer(t, [{"title": "Péniche", "address": "Lille", "property_type": "Péniche"},
                               {"title": "Sans adresse", "property_type": "Maison"}]).get_json()
-        self.assertEqual(d["unknown_types"], ["Local commercial"])
+        self.assertEqual(d["unknown_types"], ["Péniche"])
         self.assertEqual((d["without_address"], d["without_type"]), (1, 1))
 
     def test_refuse_les_envois_mal_formes(self):
@@ -1171,8 +1171,37 @@ class TestImportBiens(Base):
         g = backend._type_bien
         for brut, attendu in (("appartement", "Appartement"), ("Appart", "Appartement"), ("T3", "Appartement"), ("F2", "Appartement"),
                               ("Pavillon", "Maison"), ("Maison de ville", "Maison"), ("Villa", "Villa"), ("Studio", "Studio"),
-                              ("Penthouse", "Penthouse"), ("Terrain à bâtir", "Terrain"), ("Local commercial", None), ("", None)):
+                              ("Penthouse", "Penthouse"), ("Terrain à bâtir", "Terrain"), ("Local commercial", "Local commercial"),
+                              ("Boutique", "Local commercial"), ("Local", "Local commercial"), ("Bureaux", "Bureau"),
+                              ("Plateau de bureaux", "Bureau"), ("Local professionnel", "Bureau"), ("Garage", None), ("", None)):
             self.assertEqual(g(brut), attendu, brut)
+
+    def test_locaux_commerciaux_et_bureaux(self):
+        t = self.jeton("imp-pro@x.fr")
+        r = self.importer(t, [
+            {"reference": "PRO-1", "title": "Boutique centre-ville", "address": "Senlis 60300", "price": "180000", "property_type": "Boutique"},
+            {"reference": "PRO-2", "title": "Plateau de bureaux", "address": "Chantilly 60500", "price": "320000", "property_type": "Bureaux"},
+            {"reference": "PRO-3", "title": "Terrain constructible", "address": "Creil 60100", "price": "90000", "property_type": "Terrain"},
+        ])
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(r.get_json()["unknown_types"], [])
+        b = {x["reference"]: x["property_type"] for x in self.biens(t)}
+        self.assertEqual(b, {"PRO-1": "Local commercial", "PRO-2": "Bureau", "PRO-3": "Terrain"})
+
+    def test_correspondance_local_commercial_et_bureau(self):
+        prospect = {"property_type": "Bureau", "budget": 300000, "location": "Senlis"}
+        bien = lambda t: {"property_type": t, "price": 300000, "address": "Senlis 60300", "title": "x"}
+        meme = backend.calculate_lead_score(prospect, bien("Bureau"))
+        voisin, raisons = backend._detail_score(prospect, bien("Local commercial"))
+        autre = backend.calculate_lead_score(prospect, bien("Maison"))
+        self.assertEqual(meme - voisin, 15)
+        self.assertEqual(voisin - autre, 15)
+        self.assertIn("Type voisin (local commercial ou bureau)", raisons)
+
+    def test_l_extraction_ia_connait_les_nouveaux_types(self):
+        self.assertIn("Local commercial", backend.TYPES_BIEN)
+        self.assertIn("Bureau", backend.TYPES_BIEN)
+        self.assertIn("Terrain", backend.TYPES_BIEN)
 
 
 # ---------------------------------------------------------------- modifier la fiche d'un prospect

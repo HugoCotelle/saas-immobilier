@@ -1379,6 +1379,9 @@ def _detail_score(lead, property_item):
     elif type_lead in ['Appartement', 'Maison'] and type_bien in ['Appartement', 'Maison']:
         score += 15
         raisons.append("Type voisin (appartement ou maison)")
+    elif type_lead in ['Local commercial', 'Bureau'] and type_bien in ['Local commercial', 'Bureau']:
+        score += 15
+        raisons.append("Type voisin (local commercial ou bureau)")
 
     # La localisation est le seul critère éliminatoire : un budget et un
     # type qui collent ne rattrapent pas une ville à 750 km.
@@ -1658,6 +1661,10 @@ def create_property():
 
 _SYNONYMES_TYPE = (
     ('Terrain', ('terrain', 'parcelle', 'lotissement')),
+    ('Local commercial', ('local commercial', 'locaux commerciaux', 'commerce', 'boutique',
+                          'local d activite', 'fonds de commerce', 'murs commerciaux')),
+    ('Bureau', ('bureau', 'bureaux', 'plateau de bureaux', 'local professionnel', 'locaux professionnels')),
+    ('Local commercial', ('local', 'locaux')),      # « local » seul : après Bureau, pour « local professionnel »
     ('Penthouse', ('penthouse', 'attique', 'toit terrasse')),
     ('Studio', ('studio',)),
     ('Villa', ('villa',)),
@@ -3685,7 +3692,7 @@ import requests
 # "T3" un jour où l'autre, et la comparaison avec la base échouera en
 # silence.
 BALISE = chr(96) * 3          # trois accents graves
-TYPES_BIEN = ['Appartement', 'Maison', 'Villa', 'Studio', 'Penthouse', 'Terrain']
+TYPES_BIEN = ['Appartement', 'Maison', 'Villa', 'Studio', 'Penthouse', 'Terrain', 'Local commercial', 'Bureau']
 ECHEANCES = ['immediate', '1-3_months', '3-6_months', '6plus_months']
 FINANCEMENTS = ['approved', 'in_progress', 'pending', 'rejected']
 
