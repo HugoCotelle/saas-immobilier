@@ -1048,5 +1048,212 @@ class TestEmailInbound(BaseInbound):
         self.assertEqual(len(leads), 0)
 
 
+# ---------------------------------------------------------------- import des biens
+class TestImportBiens(Base):
+    URL = "/api/v1/properties/import"
+
+    def importer(self, tok, rows, **kw):
+        return self.c.post(self.URL, json={"rows": rows, **kw}, headers=self.h(tok))
+
+    def biens(self, tok):
+        return self.c.get("/api/v1/properties", headers=self.h(tok)).get_json()
+
+    def test_exige_une_connexion(self):
+        self.assertEqual(self.c.post(self.URL, json={"rows": [{"title": "x"}]}).status_code, 401)
+
+    def test_cree_les_biens_et_lit_les_formats_francais(self):
+        t = self.jeton("imp-formats@x.fr")
+        r = self.importer(t, [
+            {"reference": "DP-1", "title": "Maison Senlis", "address": "Senlis 60300", "price": "395 000 €",
+             "size": "118,5 m²", "rooms": "5", "property_type": "Pavillon"},
+            {"reference": "DP-2", "address": "Chantilly", "price": "245.000", "rooms": "3", "property_type": "T3"},
+        ])
+        self.assertEqual(r.status_code, 200, r.get_json())
+        d = r.get_json()
+        self.assertEqual((d["imported"], d["updated"], d["duplicates"], d["invalid_count"]), (2, 0, 0, 0))
+        b = {x["reference"]: x for x in self.biens(t)}
+        self.assertEqual(b["DP-1"]["price"], 395000)
+        self.assertEqual(b["DP-1"]["size"], 118)
+        self.assertEqual(b["DP-1"]["property_type"], "Maison")
+        self.assertEqual(b["DP-2"]["price"], 245000)
+        self.assertEqual(b["DP-2"]["property_type"], "Appartement")
+        self.assertEqual(b["DP-2"]["title"], "Appartement 3 pièces — Chantilly")
+
+    def test_reimporter_met_a_jour_sans_dupliquer(self):
+        t = self.jeton("imp-maj@x.fr")
+        self.importer(t, [{"reference": "ABC-1", "title": "T2 centre", "address": "Lille", "price": 150000}])
+        r = self.importer(t, [{"reference": "abc-1", "price": "140 000", "description": "Baisse de prix"}])
+        d = r.get_json()
+        self.assertEqual((d["imported"], d["updated"]), (0, 1))
+        biens = self.biens(t)
+        self.assertEqual(len(biens), 1)
+        self.assertEqual(biens[0]["price"], 140000)
+        self.assertEqual(biens[0]["title"], "T2 centre")          # une cellule vide n'efface rien
+        self.assertEqual(biens[0]["address"], "Lille")
+        self.assertEqual(biens[0]["description"], "Baisse de prix")
+
+    def test_donne_sa_reference_a_un_bien_saisi_a_la_main(self):
+        t = self.jeton("imp-main@x.fr")
+        self.c.post("/api/v1/properties", json={"title": "Villa du port", "address": "Nice"}, headers=self.h(t))
+        r = self.importer(t, [{"reference": "V-9", "title": "Villa du port", "address": "Nice", "price": 900000}])
+        d = r.get_json()
+        self.assertEqual((d["imported"], d["updated"]), (0, 1))
+        biens = self.biens(t)
+        self.assertEqual(len(biens), 1)
+        self.assertEqual((biens[0]["reference"], biens[0]["price"]), ("V-9", 900000))
+
+    def test_sans_reference_un_meme_bien_est_ignore(self):
+        t = self.jeton("imp-doublon@x.fr")
+        ligne = {"title": "Studio gare", "address": "Lille", "price": 90000}
+        self.importer(t, [ligne])
+        d = self.importer(t, [ligne, {**ligne, "title": "Studio gare bis"}]).get_json()
+        self.assertEqual((d["imported"], d["duplicates"]), (1, 1))
+        self.assertEqual(len(self.biens(t)), 2)
+
+    def test_une_reference_est_propre_a_chaque_agence(self):
+        ta, tb = self.jeton("imp-iso-a@x.fr"), self.jeton("imp-iso-b@x.fr")
+        self.importer(ta, [{"reference": "R-1", "title": "Bien de A", "price": 100000}])
+        d = self.importer(tb, [{"reference": "R-1", "title": "Bien de B", "price": 200000}]).get_json()
+        self.assertEqual((d["imported"], d["updated"]), (1, 0))
+        self.assertEqual(self.biens(ta)[0]["price"], 100000)
+        self.assertEqual(self.biens(tb)[0]["price"], 200000)
+
+    def test_saisie_manuelle_refuse_une_reference_deja_prise(self):
+        t = self.jeton("imp-manuel@x.fr")
+        self.assertEqual(self.c.post("/api/v1/properties", json={"title": "A", "reference": "M-1"}, headers=self.h(t)).status_code, 201)
+        self.assertEqual(self.c.post("/api/v1/properties", json={"title": "B", "reference": "m-1"}, headers=self.h(t)).status_code, 409)
+
+    def test_lignes_invalides_signalees(self):
+        t = self.jeton("imp-invalides@x.fr")
+        d = self.importer(t, [{"title": "Bon bien", "address": "Paris"}, {"price": 100}, "texte", {"title": "Autre", "address": "Lyon"}],
+                          offset=10).get_json()
+        self.assertEqual(d["imported"], 2)
+        self.assertEqual(d["invalid_count"], 2)
+        self.assertEqual([l["ligne"] for l in d["invalid"]], [12, 13])
+
+    def test_avertit_des_types_inconnus_et_des_adresses_manquantes(self):
+        t = self.jeton("imp-avert@x.fr")
+        d = self.importer(t, [{"title": "Local", "address": "Lille", "property_type": "Local commercial"},
+                              {"title": "Sans adresse", "property_type": "Maison"}]).get_json()
+        self.assertEqual(d["unknown_types"], ["Local commercial"])
+        self.assertEqual((d["without_address"], d["without_type"]), (1, 1))
+
+    def test_refuse_les_envois_mal_formes(self):
+        t = self.jeton("imp-forme@x.fr")
+        self.assertEqual(self.c.post(self.URL, json={}, headers=self.h(t)).status_code, 400)
+        self.assertEqual(self.c.post(self.URL, json={"rows": []}, headers=self.h(t)).status_code, 400)
+        self.assertEqual(self.c.post(self.URL, json={"rows": "x"}, headers=self.h(t)).status_code, 400)
+        trop = [{"title": f"Bien {i}"} for i in range(backend.MAX_LIGNES_IMPORT + 1)]
+        self.assertEqual(self.importer(t, trop).status_code, 400)
+
+    def test_limite_du_forfait_et_mises_a_jour_toujours_possibles(self):
+        t = self.jeton("imp-quota@x.fr")           # forfait Essentiel : 100 biens
+        lignes = [{"reference": f"Q-{i}", "title": f"Bien {i}", "address": "Lille"} for i in range(101)]
+        d = self.importer(t, lignes).get_json()
+        self.assertEqual((d["imported"], d["over_quota"]), (100, 1))
+        self.assertIn("Essentiel", d["quota_message"])
+        self.assertEqual(len(self.biens(t)), 100)
+        d = self.importer(t, [{"reference": "Q-3", "price": 123000}, {"reference": "Q-new", "title": "Un de trop"}]).get_json()
+        self.assertEqual((d["imported"], d["updated"], d["over_quota"]), (0, 1, 1))
+
+    def test_donnees_lues_en_texte_pas_en_sql(self):
+        t = self.jeton("imp-sql@x.fr")
+        d = self.importer(t, [{"title": "x'); DROP TABLE properties;--", "address": "Lille"}]).get_json()
+        self.assertEqual(d["imported"], 1)
+        self.assertEqual(len(self.biens(t)), 1)
+
+    def test_conversion_des_nombres_et_des_types(self):
+        f = backend._entier_souple
+        for brut, attendu in (("249 000 €", 249000), ("249000,00", 249000), ("1.250.000", 1250000), ("1.250,00", 1250),
+                              ("68,5", 68), ("  72 m² ", 72), (3, 3), (12.0, 12), ("", None), ("abc", None), (None, None),
+                              (True, None), ("99999999999999", None)):
+            self.assertEqual(f(brut), attendu, brut)
+        g = backend._type_bien
+        for brut, attendu in (("appartement", "Appartement"), ("Appart", "Appartement"), ("T3", "Appartement"), ("F2", "Appartement"),
+                              ("Pavillon", "Maison"), ("Maison de ville", "Maison"), ("Villa", "Villa"), ("Studio", "Studio"),
+                              ("Penthouse", "Penthouse"), ("Terrain à bâtir", "Terrain"), ("Local commercial", None), ("", None)):
+            self.assertEqual(g(brut), attendu, brut)
+
+
+# ---------------------------------------------------------------- modifier la fiche d'un prospect
+class TestModifierProspect(Base):
+    def creer(self, tok, nom="Alice Martin", **kw):
+        r = self.c.post("/api/v1/leads", json={"name": nom, **kw}, headers=self.h(tok))
+        self.assertEqual(r.status_code, 201)
+        return r.get_json()["id"]
+
+    def lire(self, tok, lead_id):
+        return self.c.get(f"/api/v1/leads/{lead_id}", headers=self.h(tok)).get_json()
+
+    def modifier(self, tok, lead_id, **corps):
+        return self.c.put(f"/api/v1/leads/{lead_id}", json=corps, headers=self.h(tok))
+
+    def test_change_le_telephone_l_email_et_le_nom(self):
+        t = self.jeton("edit-base@x.fr")
+        i = self.creer(t, phone="06 01 02 03 04", email="alice@x.fr", budget=300000)
+        r = self.modifier(t, i, name="Alice Martin-Durand", phone="+33 6 05 06 07 08", email="Alice.Nouvelle@X.fr", budget=320000)
+        self.assertEqual(r.status_code, 200, r.get_json())
+        f = self.lire(t, i)
+        self.assertEqual((f["name"], f["phone"], f["email"], f["budget"]),
+                         ("Alice Martin-Durand", "+33 6 05 06 07 08", "alice.nouvelle@x.fr", 320000))
+
+    def test_l_ancienne_route_laisse_les_coordonnees_intactes(self):
+        t = self.jeton("edit-ancienne@x.fr")
+        i = self.creer(t, phone="0601020304", email="alice@x.fr")
+        r = self.c.put(f"/api/v1/leads/{i}/update-financing", json={"budget": 250000}, headers=self.h(t))
+        self.assertEqual(r.status_code, 200)
+        f = self.lire(t, i)
+        self.assertEqual((f["name"], f["phone"], f["email"], f["budget"]), ("Alice Martin", "0601020304", "alice@x.fr", 250000))
+
+    def test_vider_l_email_ou_le_telephone(self):
+        t = self.jeton("edit-vider@x.fr")
+        i = self.creer(t, phone="0601020304", email="alice@x.fr")
+        self.assertEqual(self.modifier(t, i, email="", phone=None).status_code, 200)
+        f = self.lire(t, i)
+        self.assertEqual((f["email"], f["phone"]), (None, None))
+
+    def test_refuse_les_valeurs_invalides(self):
+        t = self.jeton("edit-invalide@x.fr")
+        i = self.creer(t, phone="0601020304", email="alice@x.fr")
+        for corps in ({"name": "  "}, {"email": "pas-un-email"}, {"phone": "abc"}, {"phone": "12"}, {"phone": "0" * 25}):
+            self.assertEqual(self.modifier(t, i, **corps).status_code, 400, corps)
+        f = self.lire(t, i)
+        self.assertEqual((f["name"], f["phone"], f["email"]), ("Alice Martin", "0601020304", "alice@x.fr"))
+
+    def test_signale_un_numero_ou_un_email_deja_utilise(self):
+        t = self.jeton("edit-doublon@x.fr")
+        i = self.creer(t, phone="0601020304", email="alice@x.fr")
+        self.creer(t, nom="Bob Durand", phone="06 99 99 99 99", email="bob@x.fr")
+        r = self.modifier(t, i, phone="0699999999")
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("Bob Durand", r.get_json()["message"])
+        self.assertEqual(self.modifier(t, i, email="BOB@x.fr").status_code, 409)
+        self.assertEqual(self.lire(t, i)["phone"], "0601020304")
+        # l'agent confirme : c'est bien le même prospect saisi deux fois
+        self.assertEqual(self.modifier(t, i, phone="0699999999", confirm_duplicate=True).status_code, 200)
+        self.assertEqual(self.lire(t, i)["phone"], "0699999999")
+
+    def test_reenvoyer_ses_propres_coordonnees_n_est_pas_un_doublon(self):
+        t = self.jeton("edit-meme@x.fr")
+        i = self.creer(t, phone="06 01 02 03 04", email="alice@x.fr")
+        self.assertEqual(self.modifier(t, i, phone="06 01 02 03 04", email="alice@x.fr", notes="Rappeler lundi").status_code, 200)
+
+    def test_une_agence_ne_modifie_pas_le_prospect_d_une_autre(self):
+        ta, tb = self.jeton("edit-iso-a@x.fr"), self.jeton("edit-iso-b@x.fr")
+        i = self.creer(ta, phone="0601020304")
+        self.assertEqual(self.modifier(tb, i, name="Intrus", phone="0611111111").status_code, 404)
+        f = self.lire(ta, i)
+        self.assertEqual((f["name"], f["phone"]), ("Alice Martin", "0601020304"))
+
+    def test_les_doublons_ne_se_comparent_qu_au_sein_de_l_agence(self):
+        ta, tb = self.jeton("edit-sep-a@x.fr"), self.jeton("edit-sep-b@x.fr")
+        self.creer(ta, nom="Chez A", phone="0602030405")
+        i = self.creer(tb, nom="Chez B")
+        self.assertEqual(self.modifier(tb, i, phone="0602030405").status_code, 200)
+
+    def test_exige_une_connexion(self):
+        self.assertEqual(self.c.put("/api/v1/leads/1", json={"phone": "0601020304"}).status_code, 401)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
