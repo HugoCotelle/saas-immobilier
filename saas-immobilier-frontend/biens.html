@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZELYRO - Biens</title>
+    <meta name="robots" content="noindex">
     <script src="vendor/react.production.min.js"></script>
     <script src="vendor/react-dom.production.min.js"></script>
     <script src="vendor/babel.min.js"></script>
@@ -12,6 +13,18 @@
     <link rel="stylesheet" href="zelyro.css">
     <style>
         .recherche { margin-bottom: 24px; }
+        .import-etapes { display: grid; gap: 22px; }
+        .import-etape-titre { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 8px; }
+        .import-etape-titre span { color: var(--sage-600); margin-right: 6px; }
+        .import-fichier { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+        .import-fichier input[type=file] { width: auto; max-width: 100%; padding: 10px; background: var(--surface); }
+        .colonnes-reconnues { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+        .colonnes-ignorees { font-size: 12px; color: var(--ink-3); margin-bottom: 14px; }
+        .import-resultat p { margin: 0 0 6px; }
+        .import-resultat ul { margin: 6px 0 0 18px; padding: 0; font-size: 13px; }
+        .import-avertissement { background: #F3E9CF; color: #7A5C14; border: 1px solid #E6D6A8; border-radius: var(--radius-sm); padding: 12px 16px; font-size: 13px; line-height: 1.6; margin-bottom: 14px; }
+        .apercu-table td { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ref-bien { font-size: 12px; color: var(--ink-3); margin-top: -8px; margin-bottom: 10px; }
     </style>
 </head>
 <body>
@@ -22,8 +35,169 @@
         const API_URL = 'https://saas-immobilier-921a.onrender.com';
 
         const VIDE = {
-            title: '', address: '', price: '', size: '', rooms: '',
+            reference: '', title: '', address: '', price: '', size: '', rooms: '',
             property_type: '', description: ''
+        };
+
+        // ---------- Lecture d'un fichier CSV (tout se passe dans le navigateur) ----------
+
+        const TAILLE_PAQUET = 300;     // même valeur que le serveur
+        const MAX_LIGNES_FICHIER = 3000;
+        const MAX_OCTETS = 5 * 1024 * 1024;
+
+        // Un export Excel français est souvent en Windows-1252 : on essaie
+        // l'UTF-8 strict d'abord, puis on se rabat sur Windows-1252.
+        function decoderTexte(buffer) {
+            try {
+                return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+            } catch (e) {
+                return new TextDecoder('windows-1252').decode(buffer);
+            }
+        }
+
+        // Lecture CSV avec guillemets, séparateur détecté (point-virgule, tabulation ou virgule).
+        function lireCSV(texte) {
+            if (texte.charCodeAt(0) === 0xFEFF) texte = texte.slice(1);
+            const premiere = texte.split(/\r?\n/, 1)[0];
+            const nb = (c) => premiere.split(c).length - 1;
+            const sep = [';', '\t', ','].reduce((meilleur, c) => (nb(c) > nb(meilleur) ? c : meilleur), ';');
+            const lignes = [];
+            let ligne = [], champ = '', guillemets = false;
+            const finLigne = () => {
+                ligne.push(champ);
+                champ = '';
+                if (ligne.some((x) => x.trim() !== '')) lignes.push(ligne);
+                ligne = [];
+            };
+            for (let i = 0; i < texte.length; i++) {
+                const c = texte[i];
+                if (guillemets) {
+                    if (c === '"') {
+                        if (texte[i + 1] === '"') { champ += '"'; i++; } else guillemets = false;
+                    } else champ += c;
+                } else if (c === '"') guillemets = true;
+                else if (c === sep) { ligne.push(champ); champ = ''; }
+                else if (c === '\n' || c === '\r') {
+                    if (c === '\r' && texte[i + 1] === '\n') i++;
+                    finLigne();
+                } else champ += c;
+            }
+            if (champ !== '' || ligne.length > 0) finLigne();
+            return lignes;
+        }
+
+        const sansAccents = (t) => String(t || '').normalize('NFKD').replace(/[̀-ͯ]/g, '')
+            .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+        // Les titres de colonnes que les logiciels immobiliers utilisent le plus souvent.
+        const SYNONYMES = {
+            reference: ['reference', 'ref', 'reference bien', 'numero mandat', 'n mandat', 'no mandat', 'mandat', 'code bien', 'id annonce', 'reference annonce', 'numero'],
+            title: ['titre', 'titre annonce', 'intitule', 'libelle', 'designation', 'annonce'],
+            address: ['adresse', 'adresse du bien', 'localisation', 'secteur'],
+            city: ['ville', 'commune'],
+            zip: ['code postal', 'cp'],
+            price: ['prix', 'prix de vente', 'prix fai', 'prix net vendeur', 'montant'],
+            size: ['surface', 'surface habitable', 'superficie', 'm2'],
+            rooms: ['pieces', 'nb pieces', 'nombre de pieces', 'nombre pieces', 'nb de pieces'],
+            property_type: ['type de bien', 'type bien', 'nature', 'categorie', 'type'],
+            description: ['description', 'descriptif', 'texte annonce', 'texte', 'commentaire']
+        };
+
+        const NOMS_CHAMPS = {
+            reference: 'Référence', title: 'Titre', address: 'Adresse', city: 'Ville', zip: 'Code postal',
+            price: 'Prix', size: 'Surface', rooms: 'Pièces', property_type: 'Type de bien', description: 'Description'
+        };
+
+        // Pour chaque champ, la colonne dont le titre ressemble le plus (le synonyme le plus long gagne).
+        function reconnaitreColonnes(entetes) {
+            const meilleur = {};
+            entetes.forEach((brut, index) => {
+                const h = sansAccents(brut);
+                if (!h) return;
+                Object.keys(SYNONYMES).forEach((champ) => {
+                    SYNONYMES[champ].forEach((syn) => {
+                        if (h === syn || h.startsWith(syn + ' ')) {
+                            if (!meilleur[champ] || syn.length > meilleur[champ].force) {
+                                meilleur[champ] = { index, force: syn.length, entete: String(brut).trim() };
+                            }
+                        }
+                    });
+                });
+            });
+            // Une colonne ne sert qu'à un seul champ : la plus précise l'emporte.
+            const prises = {};
+            Object.keys(meilleur).forEach((champ) => {
+                const m = meilleur[champ];
+                if (!prises[m.index] || prises[m.index].force < m.force) prises[m.index] = { champ, force: m.force };
+            });
+            const resultat = {};
+            Object.keys(meilleur).forEach((champ) => {
+                if (prises[meilleur[champ].index].champ === champ) resultat[champ] = meilleur[champ];
+            });
+            return resultat;
+        }
+
+        function analyserFichier(texte) {
+            const lignes = lireCSV(texte);
+            if (lignes.length < 2) {
+                return { erreur: "Le fichier est vide, ou ne contient que la ligne des titres de colonnes." };
+            }
+            const colonnes = reconnaitreColonnes(lignes[0]);
+            if (!colonnes.title && !colonnes.reference && !colonnes.address && !colonnes.property_type) {
+                return { erreur: "Aucune colonne reconnue. La première ligne du fichier doit contenir les titres des colonnes (titre, adresse, prix...). Téléchargez le modèle pour voir le format attendu." };
+            }
+            if (lignes.length - 1 > MAX_LIGNES_FICHIER) {
+                return { erreur: `Ce fichier contient plus de ${MAX_LIGNES_FICHIER} biens. Découpez-le en plusieurs fichiers.` };
+            }
+            const valeur = (ligne, champ) => (colonnes[champ] ? String(ligne[colonnes[champ].index] || '').trim() : '');
+            const biens = lignes.slice(1).map((l) => {
+                const adresse = valeur(l, 'address'), cp = valeur(l, 'zip'), ville = valeur(l, 'city');
+                const parties = [adresse];
+                if (cp && !adresse.includes(cp)) parties.push(cp);
+                if (ville && !adresse.toLowerCase().includes(ville.toLowerCase())) parties.push(ville);
+                return {
+                    reference: valeur(l, 'reference'),
+                    title: valeur(l, 'title'),
+                    address: parties.filter(Boolean).join(' '),
+                    price: valeur(l, 'price'),
+                    size: valeur(l, 'size'),
+                    rooms: valeur(l, 'rooms'),
+                    property_type: valeur(l, 'property_type'),
+                    description: valeur(l, 'description')
+                };
+            });
+            const utilisees = Object.keys(colonnes).map((c) => colonnes[c].index);
+            return {
+                biens,
+                reconnues: Object.keys(colonnes).map((c) => ({ champ: c, entete: colonnes[c].entete })),
+                ignorees: lignes[0].map((e) => String(e).trim()).filter((e, i) => e && !utilisees.includes(i)),
+                sansAdresse: biens.filter((b) => !b.address).length,
+                sansType: biens.filter((b) => !b.property_type).length
+            };
+        }
+
+        // Modèle de fichier : séparateur point-virgule et BOM, pour s'ouvrir correctement dans Excel en français.
+        const MODELE_CSV = '﻿' + [
+            'reference;titre;adresse;code postal;ville;prix;surface;pieces;type;description',
+            'DP-1042;Maison familiale avec jardin;12 rue des Tilleuls;60300;Senlis;395000;120;5;Maison;Jardin de 420 m², garage',
+            'DP-1038;Appartement T3 lumineux;8 avenue du Maréchal Foch;60500;Chantilly;245000;68;3;Appartement;Balcon, cave'
+        ].join('\r\n') + '\r\n';
+
+        function telechargerModele() {
+            const blob = new Blob([MODELE_CSV], { type: 'text/csv;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'modele-biens-zelyro.csv';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        const prixLisible = (v) => {
+            const n = parseInt(String(v).replace(/[^0-9]/g, ''), 10);
+            return Number.isFinite(n) && v !== '' ? `${n.toLocaleString('fr-FR')} €` : '—';
         };
 
         function BiensApp() {
@@ -36,6 +210,10 @@
             const [formOuvert, setFormOuvert] = useState(false);
             const [form, setForm] = useState(VIDE);
             const [saving, setSaving] = useState(false);
+            const [importOuvert, setImportOuvert] = useState(false);
+            const [analyse, setAnalyse] = useState(null);
+            const [progression, setProgression] = useState(null);
+            const [bilan, setBilan] = useState(null);
 
             useEffect(() => {
                 const token = localStorage.getItem('token');
@@ -86,6 +264,7 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                         body: JSON.stringify({
+                            reference: form.reference.trim() || null,
                             title: form.title.trim(),
                             address: form.address.trim() || null,
                             price: form.price === '' ? null : parseInt(form.price, 10),
@@ -111,6 +290,85 @@
                 }
             };
 
+            const choisirFichier = async (e) => {
+                const fichier = e.target.files && e.target.files[0];
+                e.target.value = '';
+                setBilan(null);
+                setAnalyse(null);
+                setError(null);
+                if (!fichier) return;
+                if (/\.xlsx?$/i.test(fichier.name)) {
+                    setError("Ce fichier est au format Excel. Ouvrez-le dans Excel puis choisissez Enregistrer sous, au format CSV (séparateur point-virgule).");
+                    return;
+                }
+                if (fichier.size > MAX_OCTETS) {
+                    setError("Ce fichier dépasse 5 Mo. Découpez-le en plusieurs fichiers.");
+                    return;
+                }
+                try {
+                    const resultat = analyserFichier(decoderTexte(await fichier.arrayBuffer()));
+                    if (resultat.erreur) { setError(resultat.erreur); return; }
+                    setAnalyse({ nom: fichier.name, ...resultat });
+                } catch (err) {
+                    setError("Ce fichier ne peut pas être lu. Enregistrez-le au format CSV et réessayez.");
+                }
+            };
+
+            const lancerImport = async () => {
+                const token = localStorage.getItem('token');
+                const lignes = analyse.biens;
+                const total = lignes.length;
+                const cumul = {
+                    imported: 0, updated: 0, duplicates: 0, invalid: [], invalid_count: 0, over_quota: 0,
+                    quota_message: null, unknown_types: [], without_address: 0, without_type: 0
+                };
+                let echec = null;
+                setError(null);
+                setProgression({ fait: 0, total });
+                try {
+                    for (let i = 0; i < total; i += TAILLE_PAQUET) {
+                        const response = await fetch(`${API_URL}/api/v1/properties/import`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                            body: JSON.stringify({ rows: lignes.slice(i, i + TAILLE_PAQUET), offset: i })
+                        });
+                        if (response.status === 401) {
+                            localStorage.removeItem('token');
+                            localStorage.removeItem('user');
+                            window.location.href = '/login.html';
+                            return;
+                        }
+                        if (!response.ok) {
+                            const d = await response.json().catch(() => ({}));
+                            throw new Error(response.status === 429
+                                ? "Trop d'imports en peu de temps. Réessayez dans une heure."
+                                : (d.message || `Import impossible (${response.status})`));
+                        }
+                        const d = await response.json();
+                        cumul.imported += d.imported;
+                        cumul.updated += d.updated;
+                        cumul.duplicates += d.duplicates;
+                        cumul.over_quota += d.over_quota;
+                        cumul.invalid_count += d.invalid_count;
+                        cumul.invalid = cumul.invalid.concat(d.invalid).slice(0, 50);
+                        cumul.quota_message = d.quota_message || cumul.quota_message;
+                        cumul.without_address += d.without_address;
+                        cumul.without_type += d.without_type;
+                        d.unknown_types.forEach((t) => { if (!cumul.unknown_types.includes(t)) cumul.unknown_types.push(t); });
+                        setProgression({ fait: Math.min(i + TAILLE_PAQUET, total), total });
+                    }
+                } catch (err) {
+                    echec = err.message;
+                }
+                setProgression(null);
+                setAnalyse(null);
+                setBilan(cumul);
+                if (echec) {
+                    setError(`${echec} Les lignes déjà envoyées ont bien été enregistrées : vous pouvez relancer l'import, rien ne sera dupliqué.`);
+                }
+                await fetchBiens(token);
+            };
+
             const handleLogout = () => {
                 localStorage.removeItem('token');
                 localStorage.removeItem('user');
@@ -123,6 +381,7 @@
             const biensFiltres = f
                 ? biens.filter((b) =>
                     (b.title || '').toLowerCase().includes(f) ||
+                    (b.reference || '').toLowerCase().includes(f) ||
                     (b.address || '').toLowerCase().includes(f) ||
                     (b.property_type || '').toLowerCase().includes(f))
                 : biens;
@@ -156,13 +415,163 @@
                                     {biens.length} bien{biens.length > 1 ? 's' : ''} au portefeuille
                                 </p>
                             </div>
-                            <button className="btn" onClick={() => { setFormOuvert(!formOuvert); setMessage(null); }}>
-                                {formOuvert ? 'Fermer' : '+ Ajouter un bien'}
-                            </button>
+                            <div className="btn-ligne">
+                                <button className="btn secondary" onClick={() => { setImportOuvert(!importOuvert); setFormOuvert(false); setMessage(null); setBilan(null); setAnalyse(null); }}>
+                                    {importOuvert ? 'Fermer l\u2019import' : 'Importer un fichier'}
+                                </button>
+                                <button className="btn" onClick={() => { setFormOuvert(!formOuvert); setImportOuvert(false); setMessage(null); }}>
+                                    {formOuvert ? 'Fermer' : '+ Ajouter un bien'}
+                                </button>
+                            </div>
                         </div>
 
                         {error && <div className="error">{error}</div>}
                         {message && <div className="success">{message}</div>}
+
+                        {importOuvert && (
+                            <div className="panel">
+                                <div className="panel-title">Importer des biens depuis un fichier</div>
+                                <div className="panel-note">
+                                    Votre logiciel (Netty, Hektor, Apimo, AC3...) sait en général exporter
+                                    votre stock en CSV ou en Excel. Chargez ce fichier ici : les biens sont
+                                    ajoutés au portefeuille et proposés aux prospects qui correspondent.
+                                    Vous pouvez réimporter le même fichier plus tard : les biens qui ont
+                                    la même référence sont mis à jour, pas dupliqués.
+                                </div>
+
+                                <div className="import-etapes">
+                                    <div>
+                                        <div className="import-etape-titre"><span>1.</span>Préparez le fichier</div>
+                                        <div className="panel-note" style={{ marginBottom: '12px' }}>
+                                            La première ligne contient les titres des colonnes. Colonnes
+                                            reconnues : référence, titre, adresse, code postal, ville, prix,
+                                            surface, pièces, type de bien, description. Seul le titre est
+                                            indispensable, mais sans adresse ni type, un bien n'apparaîtra
+                                            dans aucune correspondance. Un fichier Excel doit d'abord être
+                                            enregistré au format CSV.
+                                        </div>
+                                        <button className="btn secondary petit" onClick={telechargerModele}>
+                                            Télécharger un modèle de fichier
+                                        </button>
+                                    </div>
+
+                                    <div>
+                                        <div className="import-etape-titre"><span>2.</span>Choisissez votre fichier</div>
+                                        <div className="import-fichier">
+                                            <label htmlFor="fichier-biens" style={{ display: 'none' }}>Fichier CSV des biens</label>
+                                            <input id="fichier-biens" type="file" accept=".csv,.txt,text/csv"
+                                                onChange={choisirFichier} disabled={!!progression} />
+                                        </div>
+                                    </div>
+
+                                    {analyse && (
+                                        <div>
+                                            <div className="import-etape-titre"><span>3.</span>Vérifiez, puis importez</div>
+                                            <div className="panel-note" style={{ marginBottom: '4px' }}>
+                                                {analyse.nom} : {analyse.biens.length} bien{analyse.biens.length > 1 ? 's' : ''} trouvé{analyse.biens.length > 1 ? 's' : ''}.
+                                                Colonnes reconnues :
+                                            </div>
+                                            <div className="colonnes-reconnues">
+                                                {analyse.reconnues.map((c) => (
+                                                    <span key={c.champ} className="pastille">
+                                                        {NOMS_CHAMPS[c.champ]} ← {c.entete}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                            {analyse.ignorees.length > 0 && (
+                                                <div className="colonnes-ignorees">
+                                                    Colonnes ignorées : {analyse.ignorees.join(', ')}
+                                                </div>
+                                            )}
+                                            {(analyse.sansAdresse > 0 || analyse.sansType > 0) && (
+                                                <div className="import-avertissement">
+                                                    {analyse.sansAdresse > 0 && <div>{analyse.sansAdresse} bien{analyse.sansAdresse > 1 ? 's' : ''} sans adresse.</div>}
+                                                    {analyse.sansType > 0 && <div>{analyse.sansType} bien{analyse.sansType > 1 ? 's' : ''} sans type de bien.</div>}
+                                                    Ils seront importés, mais ne seront proposés à aucun prospect tant qu'il manque ces informations.
+                                                </div>
+                                            )}
+                                            <div className="table-scroll" style={{ marginBottom: '18px' }}>
+                                                <table className="admin-table apercu-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Réf.</th><th>Titre</th><th>Adresse</th><th>Prix</th><th>Pièces</th><th>Type</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {analyse.biens.slice(0, 5).map((b, i) => (
+                                                            <tr key={i}>
+                                                                <td>{b.reference || '—'}</td>
+                                                                <td>{b.title || '—'}</td>
+                                                                <td>{b.address || '—'}</td>
+                                                                <td>{prixLisible(b.price)}</td>
+                                                                <td>{b.rooms || '—'}</td>
+                                                                <td>{b.property_type || '—'}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            {analyse.biens.length > 5 && (
+                                                <div className="colonnes-ignorees">
+                                                    Aperçu des 5 premières lignes sur {analyse.biens.length}.
+                                                </div>
+                                            )}
+                                            <div className="btn-ligne">
+                                                <button className="btn" onClick={lancerImport} disabled={!!progression}>
+                                                    {progression
+                                                        ? `Import en cours (${progression.fait} sur ${progression.total})...`
+                                                        : `Importer ${analyse.biens.length} bien${analyse.biens.length > 1 ? 's' : ''}`}
+                                                </button>
+                                                <button className="btn secondary" onClick={() => setAnalyse(null)} disabled={!!progression}>
+                                                    Annuler
+                                                </button>
+                                            </div>
+                                            {progression && (
+                                                <div className="usage-piste" style={{ marginTop: '14px' }}>
+                                                    <div className="usage-barre" style={{ width: `${Math.round(100 * progression.fait / progression.total)}%` }}></div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {bilan && (
+                                        <div className="import-resultat">
+                                            <div className="success">
+                                                <p>
+                                                    {bilan.imported} bien{bilan.imported > 1 ? 's' : ''} ajouté{bilan.imported > 1 ? 's' : ''}
+                                                    {bilan.updated > 0 && `, ${bilan.updated} mis à jour`}
+                                                    {bilan.duplicates > 0 && `, ${bilan.duplicates} déjà présent${bilan.duplicates > 1 ? 's' : ''} (ignoré${bilan.duplicates > 1 ? 's' : ''})`}.
+                                                </p>
+                                                {bilan.invalid_count > 0 && (
+                                                    <>
+                                                        <p>{bilan.invalid_count} ligne{bilan.invalid_count > 1 ? 's' : ''} non importée{bilan.invalid_count > 1 ? 's' : ''} :</p>
+                                                        <ul>
+                                                            {bilan.invalid.slice(0, 5).map((l, i) => (
+                                                                <li key={i}>ligne {l.ligne + 1} : {l.raison}</li>
+                                                            ))}
+                                                            {bilan.invalid_count > 5 && <li>et {bilan.invalid_count - 5} autre{bilan.invalid_count - 5 > 1 ? 's' : ''}.</li>}
+                                                        </ul>
+                                                    </>
+                                                )}
+                                            </div>
+                                            {bilan.quota_message && <div className="error">{bilan.quota_message}</div>}
+                                            {bilan.unknown_types.length > 0 && (
+                                                <div className="import-avertissement">
+                                                    Type de bien non reconnu : {bilan.unknown_types.map((t) => `« ${t} »`).join(', ')}.
+                                                    Ces biens n'ont pas de type, donc moins de points de correspondance.
+                                                    Types connus : Appartement, Maison, Villa, Studio, Penthouse, Terrain.
+                                                </div>
+                                            )}
+                                            {(bilan.without_address > 0) && (
+                                                <div className="import-avertissement">
+                                                    {bilan.without_address} bien{bilan.without_address > 1 ? 's' : ''} sans adresse : sans elle, ils n'apparaîtront dans aucune correspondance.
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
 
                         {formOuvert && (
                             <div className="panel">
@@ -170,7 +579,18 @@
                                 <div className="panel-note">
                                     Seul le titre est obligatoire. Mais l'adresse et le type
                                     déterminent à quels prospects le bien sera proposé : sans eux,
-                                    il n'apparaîtra dans aucune correspondance.
+                                    il n'apparaîtra dans aucune correspondance. La référence (numéro
+                                    de mandat ou d'annonce) permet de retrouver ce bien quand vous
+                                    importerez un fichier.
+                                </div>
+
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>Référence</label>
+                                        <input type="text" value={form.reference}
+                                            onChange={(e) => set('reference', e.target.value)}
+                                            placeholder="N° de mandat ou d'annonce" />
+                                    </div>
                                 </div>
 
                                 <div className="form-row">
@@ -238,7 +658,7 @@
                         {!loading && biens.length > 0 && (
                             <input className="recherche" type="text" value={filtre}
                                 onChange={(e) => setFiltre(e.target.value)}
-                                placeholder="Filtrer par titre, adresse ou type..." />
+                                placeholder="Filtrer par titre, référence, adresse ou type..." />
                         )}
 
                         {loading ? (
@@ -272,6 +692,7 @@
                                         <div className="bien-adresse">
                                             {b.address || 'Adresse non renseignée'}
                                         </div>
+                                        {b.reference && <div className="ref-bien">Réf. {b.reference}</div>}
                                         <div className="bien-field">
                                             <span className="bien-label">Surface :</span>
                                             <span className="bien-value">{b.size ? `${b.size} m²` : 'N/A'}</span>

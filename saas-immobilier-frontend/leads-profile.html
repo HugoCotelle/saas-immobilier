@@ -97,6 +97,7 @@
             const [saving, setSaving] = useState(false);
             const [error, setError] = useState(null);
             const [saved, setSaved] = useState(false);
+            const [doublon, setDoublon] = useState(null);
             const [user, setUser] = useState(null);
             const [notes, setNotes] = useState([]);
             const [rappels, setRappels] = useState([]);
@@ -229,6 +230,9 @@
                     const data = await response.json();
                     setLead(data);
                     setForm({
+                        name: data.name ?? '',
+                        email: data.email ?? '',
+                        phone: data.phone ?? '',
                         budget: data.budget ?? '',
                         location: data.location ?? '',
                         property_type: data.property_type ?? '',
@@ -245,15 +249,24 @@
                 }
             };
 
-            const handleSave = async () => {
+            const handleSave = async (confirmerDoublon) => {
                 const token = localStorage.getItem('token');
+                if (!form.name.trim()) {
+                    setError('Le nom du prospect est obligatoire.');
+                    return;
+                }
                 setSaving(true);
                 setSaved(false);
+                setDoublon(null);
                 try {
                     const response = await fetch(`${API_URL}/api/v1/leads/${leadId}/update-financing`, {
                         method: 'PUT',
                         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                         body: JSON.stringify({
+                            name: form.name.trim(),
+                            email: form.email.trim() || null,
+                            phone: form.phone.trim() || null,
+                            confirm_duplicate: confirmerDoublon === true,
                             budget: form.budget === '' ? null : parseInt(form.budget, 10),
                             location: form.location || null,
                             property_type: form.property_type || null,
@@ -263,7 +276,16 @@
                             notes: form.notes || null
                         })
                     });
-                    if (!response.ok) throw new Error(`Enregistrement impossible (${response.status})`);
+                    if (!response.ok) {
+                        const d = await response.json().catch(() => ({}));
+                        if (response.status === 409 && d.duplicate) {
+                            // Un autre prospect porte déjà cet e-mail ou ce numéro : on laisse l'agent décider.
+                            setDoublon(d.message);
+                            setError(null);
+                            return;
+                        }
+                        throw new Error(d.message || `Enregistrement impossible (${response.status})`);
+                    }
                     setSaved(true);
                     setError(null);
                     // On relit la fiche : la qualité est recalculée par le
@@ -282,7 +304,7 @@
                 window.location.replace('/login.html');
             };
 
-            const set = (k, v) => { setForm({ ...form, [k]: v }); setSaved(false); };
+            const set = (k, v) => { setForm({ ...form, [k]: v }); setSaved(false); setDoublon(null); };
 
             const apercu = form ? expliquerQualite({
                 financing_status: form.financing_status,
@@ -332,9 +354,52 @@
 
                                 {error && <div className="error">{error}</div>}
                                 {saved && <div className="success">Fiche enregistrée. Le classement a été recalculé.</div>}
+                                {doublon && (
+                                    <div className="error" style={{ textAlign: 'left' }}>
+                                        {doublon} Il s'agit peut-être du même prospect.
+                                        <div className="btn-ligne" style={{ marginTop: '12px' }}>
+                                            <button className="btn danger petit" onClick={() => handleSave(true)} disabled={saving}>
+                                                Enregistrer quand même
+                                            </button>
+                                            <button className="btn secondary petit" onClick={() => setDoublon(null)}>
+                                                Corriger
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
 
                                 <div className="content-wrapper">
                                     <div>
+                                        <div className="panel">
+                                            <div className="panel-title">Coordonnées</div>
+                                            <div className="panel-note">
+                                                Le prospect a changé de numéro ou d'adresse e-mail ? Corrigez-le
+                                                ici, puis cliquez sur Enregistrer en bas de la page.
+                                            </div>
+
+                                            <div className="form-group">
+                                                <label>Nom <span className="obligatoire">*</span></label>
+                                                <input type="text" value={form.name}
+                                                    onChange={(e) => set('name', e.target.value)}
+                                                    placeholder="Prénom et nom" />
+                                            </div>
+
+                                            <div className="form-row">
+                                                <div className="form-group">
+                                                    <label>Téléphone</label>
+                                                    <input type="tel" value={form.phone}
+                                                        onChange={(e) => set('phone', e.target.value)}
+                                                        placeholder="06 12 34 56 78" />
+                                                </div>
+                                                <div className="form-group">
+                                                    <label>E-mail</label>
+                                                    <input type="email" value={form.email}
+                                                        onChange={(e) => set('email', e.target.value)}
+                                                        placeholder="prenom.nom@exemple.fr" />
+                                                </div>
+                                            </div>
+                                        </div>
+
                                         <div className="panel">
                                             <div className="panel-title">Sa recherche</div>
                                             <div className="panel-note">
@@ -419,7 +484,7 @@
                                                     placeholder="Ce que le prospect a dit, ce qu'il faut retenir pour le prochain appel..."></textarea>
                                             </div>
 
-                                            <button className="btn" onClick={handleSave} disabled={saving}>
+                                            <button className="btn" onClick={() => handleSave(false)} disabled={saving}>
                                                 {saving ? 'Enregistrement...' : 'Enregistrer'}
                                             </button>
                                             <a href="/matching.html" className="btn secondary"
