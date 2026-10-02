@@ -199,6 +199,61 @@ STATUTS_LIBELLES = {
 }
 STATUTS_CLOS = ('signe', 'perdu')
 SOURCES = {'manuel', 'import', 'formulaire', 'extraction', 'leboncoin', 'seloger', 'portail'}
+
+# Vente ou location, pour les prospects (achat / location) comme pour les biens.
+TRANSACTIONS = ('vente', 'location')
+
+
+def _transaction(valeur, defaut=None):
+    """'vente' ou 'location' pour une valeur de formulaire, de fichier ou de
+    l'IA (« achat », « à louer », « Location »...). Autre chose : le défaut."""
+    if valeur is None or isinstance(valeur, (bool, list, dict)):
+        return defaut
+    n = re.sub(r'[^a-z ]', ' ', normaliser(str(valeur)))
+    mots = set(n.split())
+    if mots & {'location', 'louer', 'locataire', 'locatif', 'bail', 'loyer', 'locations'}:
+        return 'location'
+    if mots & {'vente', 'vendre', 'achat', 'acheter', 'acquerir', 'acquisition', 'acheteur', 'vendu'}:
+        return 'vente'
+    return defaut
+
+
+# Situation professionnelle d'un locataire.
+SITUATIONS_PRO = {
+    'cdi': 'CDI',
+    'fonctionnaire': 'Fonctionnaire',
+    'cdd': 'CDD ou intérim',
+    'independant': "Indépendant ou chef d'entreprise",
+    'retraite': 'Retraité',
+    'etudiant': 'Étudiant',
+    'autre': 'Autre',
+}
+_SYNONYMES_SITUATION = (
+    ('fonctionnaire', ('fonctionnaire', 'fonction publique', 'titulaire')),
+    ('cdi', ('cdi', 'contrat a duree indeterminee', 'salarie')),
+    ('cdd', ('cdd', 'interim', 'interimaire', 'alternance', 'alternant', 'apprenti', 'stagiaire', 'intermittent')),
+    ('independant', ('independant', 'freelance', 'auto entrepreneur', 'autoentrepreneur', 'micro entrepreneur',
+                     'chef d entreprise', 'gerant', 'dirigeant', 'profession liberale', 'liberal', 'commercant', 'artisan')),
+    ('retraite', ('retraite', 'retraitee', 'pension', 'pensionne')),
+    ('etudiant', ('etudiant', 'etudiante', 'etudes', 'eleve')),
+    ('autre', ('autre', 'sans emploi', 'chomage', 'chomeur')),
+)
+
+
+def _situation_pro(valeur):
+    """Le code de situation (« cdi », « etudiant »...) pour une valeur de
+    formulaire, de fichier ou de l'IA, ou None si on ne la reconnaît pas."""
+    if valeur is None or isinstance(valeur, (bool, list, dict)):
+        return None
+    n = re.sub(r'[^a-z0-9]+', ' ', normaliser(str(valeur))).strip()
+    if not n:
+        return None
+    if n in SITUATIONS_PRO:
+        return n
+    for code, mots in _SYNONYMES_SITUATION:
+        if any(re.search(r'\b' + re.escape(m) + r'\b', n) for m in mots):
+            return code
+    return None
 # Score à partir duquel un bien est signalé par e-mail à l'agent.
 ALERTE_SCORE_MIN = int(os.getenv("ALERT_MIN_SCORE", "70"))
 
@@ -379,7 +434,21 @@ _DDL_BIENS = (
 # Même logique pour l'activité que le prospect veut y exercer, et, côté bien,
 # les activités autorisées et la présence d'une extraction d'air (conduit de
 # ventilation qui permet d'installer une cuisine de restaurant).
+#
+# Location : un prospect cherche à acheter ou à louer, un bien est à vendre ou
+# à louer (« transaction »). En location, « budget » est le loyer mensuel
+# maximum du prospect et « price » le loyer mensuel du bien. Les prospects et
+# biens déjà présents restent en vente. Le locataire renseigne ses revenus
+# mensuels nets, ses garants et sa situation ; il peut préférer un logement
+# meublé ou non (NULL : indifférent). Le bien est meublé, non meublé ou inconnu.
 _DDL_SURFACE = (
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS transaction VARCHAR(10) NOT NULL DEFAULT 'vente'",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS revenus INTEGER",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS garants INTEGER",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS situation_pro VARCHAR(20)",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS meuble_souhaite BOOLEAN",
+    "ALTER TABLE properties ADD COLUMN IF NOT EXISTS transaction VARCHAR(10) NOT NULL DEFAULT 'vente'",
+    "ALTER TABLE properties ADD COLUMN IF NOT EXISTS meuble BOOLEAN",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS surface_min INTEGER",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS activite VARCHAR(30)",
     "ALTER TABLE properties ADD COLUMN IF NOT EXISTS activites_autorisees TEXT[]",
@@ -549,7 +618,11 @@ def _assurer_schema():
                        EXISTS (SELECT 1 FROM information_schema.columns
                                WHERE table_name = 'leads' AND column_name = 'activite'),
                        EXISTS (SELECT 1 FROM information_schema.columns
-                               WHERE table_name = 'properties' AND column_name = 'extraction_air')
+                               WHERE table_name = 'properties' AND column_name = 'extraction_air'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'leads' AND column_name = 'transaction'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'properties' AND column_name = 'transaction')
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
@@ -1323,6 +1396,9 @@ def derive_lead_quality(lead):
     correctement, il faudrait demander à un directeur d'agence de classer
     une vingtaine de ses leads et ajuster jusqu'à retrouver son classement.
     """
+    if _transaction(lead.get('transaction'), 'vente') == 'location':
+        return _qualite_locataire(lead)
+
     points = 0
 
     financing = lead.get('financing_status') or 'unknown'
@@ -1377,6 +1453,119 @@ def _points_budget(budget, prix):
     if ecart < 0.30:
         return 8, f"Prix à {pct} % du budget, à discuter"
     return 0, None
+
+
+# ===== LOCATION =====
+# Un locataire n'a pas de financement à faire valider : ce qui rassure un
+# propriétaire, c'est le dossier. La règle courante des agences est des
+# revenus d'au moins trois fois le loyer, complétés au besoin par un garant ;
+# la situation professionnelle et le caractère meublé viennent ensuite. Pour
+# un prospect en location, `budget` est le loyer mensuel maximum, `revenus`
+# les revenus mensuels nets du foyer et `purchase_urgency` la date d'emménagement.
+COEF_REVENUS_LOYER = 3
+PLAFOND_MEUBLE_DIFFERENT = 60      # meublé / non meublé qui ne correspond pas : proposé, jamais en alerte
+
+
+def _est_location(x):
+    return _transaction(x.get('transaction'), 'vente') == 'location'
+
+
+def _ratio_txt(r):
+    return f"{r:.1f}".replace('.', ',').replace(',0', '')
+
+
+def _points_loyer(budget, loyer):
+    """(points sur 20, phrase) : le loyer du bien face au loyer maximum du
+    prospect. Un loyer sous le plafond convient toujours ; au-dessus, la
+    tolérance est faible, un loyer ne se négocie guère."""
+    if not budget or loyer is None:
+        return 0, None
+    if loyer <= budget:
+        return 20, f"Loyer dans le budget : {loyer} €/mois pour {budget} € maximum"
+    ecart = (loyer - budget) / budget
+    pct = round(ecart * 100)
+    if ecart <= 0.05:
+        return 12, f"Loyer légèrement au-dessus du budget (+{pct} %)"
+    if ecart <= 0.10:
+        return 6, f"Loyer au-dessus du budget (+{pct} %)"
+    return 0, None
+
+
+def _points_solvabilite(lead, loyer):
+    """(points sur 20, phrase) : revenus rapportés au loyer, garants en renfort."""
+    revenus = lead.get('revenus')
+    garants = lead.get('garants') or 0
+    if not revenus or not loyer:
+        if garants:
+            return 12, "Revenus non précisés, garant disponible"
+        return 8, None
+    r = revenus / loyer
+    if r >= COEF_REVENUS_LOYER:
+        pts, phrase = 16, f"Revenus de {_ratio_txt(r)} fois le loyer (3 fois exigés)"
+    elif r >= 2.5:
+        pts, phrase = 11, f"Revenus de {_ratio_txt(r)} fois le loyer, un peu sous les 3 fois exigés"
+    elif r >= 2:
+        pts, phrase = 6, f"Revenus de {_ratio_txt(r)} fois le loyer, sous les 3 fois exigés"
+    else:
+        pts, phrase = 1, f"Revenus insuffisants : {_ratio_txt(r)} fois le loyer"
+    if garants:
+        pts += 4 if r >= COEF_REVENUS_LOYER else 6
+        phrase += " + garant"
+    return min(20, pts), phrase
+
+
+_POINTS_SITUATION = {'cdi': 5, 'fonctionnaire': 5, 'retraite': 4, 'independant': 3, 'cdd': 2, 'etudiant': 2, 'autre': 1}
+
+
+def _points_situation(lead):
+    """(points sur 5, phrase) pour la situation professionnelle du locataire."""
+    code = lead.get('situation_pro')
+    if code not in _POINTS_SITUATION:
+        return 2, None
+    return _POINTS_SITUATION[code], f"Situation : {SITUATIONS_PRO[code]}"
+
+
+def _compat_meuble(lead, bien):
+    """(points sur 5, phrase, incompatible)."""
+    voulu = lead.get('meuble_souhaite')
+    propose = bien.get('meuble')
+    if voulu is None or propose is None:
+        return 3, None, False
+    libelle = lambda v: 'meublé' if v else 'non meublé'
+    if voulu == propose:
+        return 5, f"Bien {libelle(propose)}, comme souhaité", False
+    return 0, f"Bien {libelle(propose)} alors que le prospect cherche du {libelle(voulu)}", True
+
+
+def _qualite_locataire(lead):
+    """Qualité d'un prospect en location : solidité du dossier + échéance +
+    complétude. Mêmes seuils que pour un acquéreur (chaud 80, tiède 45)."""
+    points = 0
+    loyer = lead.get('budget')
+    revenus = lead.get('revenus')
+    garants = lead.get('garants') or 0
+    if revenus and loyer:
+        r = revenus / loyer
+        points += 30 if r >= COEF_REVENUS_LOYER else 20 if r >= 2.5 else 10 if r >= 2 else 3
+        if garants:
+            points += 5 if r >= COEF_REVENUS_LOYER else 12
+    elif garants:
+        points += 15
+    points += {'cdi': 15, 'fonctionnaire': 15, 'retraite': 12, 'independant': 9, 'cdd': 6,
+               'etudiant': 5, 'autre': 2}.get(lead.get('situation_pro'), 0)
+    urgency = lead.get('purchase_urgency') or 'unknown'
+    points += {'immediate': 30, '1-3_months': 24, '3-6_months': 13, '6plus_months': 4}.get(urgency, 0)
+    if lead.get('budget'):
+        points += 8
+    if lead.get('location'):
+        points += 7
+    if lead.get('property_type'):
+        points += 5
+    if points >= 80:
+        return 'hot'
+    if points >= 45:
+        return 'warm'
+    return 'cold'
 
 
 # Locaux commerciaux et bureaux : on ne les achète pas comme un logement. Le
@@ -1549,7 +1738,11 @@ def _detail_score_pro(lead, property_item):
     elif not lead.get('location'):
         raisons.append("Prospect ouvert sur le secteur")
 
-    points_budget, raison_budget = _points_budget(lead.get('budget'), property_item.get('price'))
+    location = _est_location(lead)
+    if location:
+        points_budget, raison_budget = _points_loyer(lead.get('budget'), property_item.get('price'))
+    else:
+        points_budget, raison_budget = _points_budget(lead.get('budget'), property_item.get('price'))
     score += points_budget
     if raison_budget:
         raisons.append(raison_budget)
@@ -1567,17 +1760,26 @@ def _detail_score_pro(lead, property_item):
     score += points_surface
     raisons.append(raison_surface)
 
-    financement = lead.get('financing_status') or 'unknown'
-    points, raison = {'approved': (12, "Financement validé"), 'in_progress': (9, "Financement en cours"),
-                      'pending': (6, "Financement en attente")}.get(financement, (3, None))
+    if location:
+        pts_solv, raison = _points_solvabilite(lead, property_item.get('price'))
+        points = round(pts_solv * 12 / 20)
+    else:
+        financement = lead.get('financing_status') or 'unknown'
+        points, raison = {'approved': (12, "Financement validé"), 'in_progress': (9, "Financement en cours"),
+                          'pending': (6, "Financement en attente")}.get(financement, (3, None))
     score += points
     if raison:
         raisons.append(raison)
 
     echeance = lead.get('purchase_urgency') or 'unknown'
-    points, raison = {'immediate': (8, "Achat immédiat"), '1-3_months': (6, "Achat prévu sous 1 à 3 mois"),
-                      '3-6_months': (4, "Achat prévu sous 3 à 6 mois"),
-                      '6plus_months': (2, "Achat prévu dans plus de 6 mois")}.get(echeance, (2, None))
+    mots = ({'immediate': "Emménagement immédiat", '1-3_months': "Emménagement prévu sous 1 à 3 mois",
+             '3-6_months': "Emménagement prévu sous 3 à 6 mois", '6plus_months': "Emménagement dans plus de 6 mois"}
+            if location else
+            {'immediate': "Achat immédiat", '1-3_months': "Achat prévu sous 1 à 3 mois",
+             '3-6_months': "Achat prévu sous 3 à 6 mois", '6plus_months': "Achat prévu dans plus de 6 mois"})
+    points, raison = {'immediate': (8, mots['immediate']), '1-3_months': (6, mots['1-3_months']),
+                      '3-6_months': (4, mots['3-6_months']),
+                      '6plus_months': (2, mots['6plus_months'])}.get(echeance, (2, None))
     score += points
     if raison:
         raisons.append(raison)
@@ -1598,8 +1800,13 @@ def _detail_score(lead, property_item):
     raisons sont nouvelles : elles permettent à l'agent de voir pourquoi
     un bien remonte, et de contester le classement s'il n'est pas d'accord.
     """
+    # Un acheteur ne se voit pas proposer une location, ni l'inverse.
+    if _transaction(lead.get('transaction'), 'vente') != _transaction(property_item.get('transaction'), 'vente'):
+        return 0, ["Vente et location ne correspondent pas"]
     if _profil_pro(lead, property_item):
         return _detail_score_pro(lead, property_item)
+    if _est_location(lead):
+        return _detail_score_location(lead, property_item)
 
     score = 0
     raisons = []
@@ -1665,6 +1872,69 @@ def _detail_score(lead, property_item):
     # l'urgence sont déjà comptés ci-dessus, les réappliquer les comptait
     # deux fois.
     return min(100, max(0, int(score))), raisons
+
+
+def _detail_score_location(lead, property_item):
+    """Même contrat que _detail_score, pour un logement à louer. Barème sur
+    100 : loyer 20, type 20, secteur 20, dossier (revenus, garants) 20,
+    échéance 10, situation 5, meublé 5. Comme à la vente, le secteur élimine."""
+    score = 0
+    raisons = []
+
+    points, raison = _points_loyer(lead.get('budget'), property_item.get('price'))
+    score += points
+    if raison:
+        raisons.append(raison)
+
+    type_lead = lead.get('property_type')
+    type_bien = property_item.get('property_type')
+    if type_lead and type_lead == type_bien:
+        score += 20
+        raisons.append(f"Même type de bien : {type_lead}")
+    elif type_lead in ['Appartement', 'Maison'] and type_bien in ['Appartement', 'Maison']:
+        score += 10
+        raisons.append("Type voisin (appartement ou maison)")
+    elif not type_lead:
+        score += 6
+
+    points_loc, hors_secteur = score_localisation(lead, property_item)
+    if hors_secteur:
+        return 0, ["Hors du secteur recherché"]
+    score += points_loc
+    if points_loc == 20:
+        raisons.append(f"Secteur recherché : {lead.get('location')}")
+    elif points_loc == 15:
+        raisons.append("Même ville, autre arrondissement")
+    elif not lead.get('location'):
+        raisons.append("Prospect ouvert sur le secteur")
+
+    points, raison = _points_solvabilite(lead, property_item.get('price'))
+    score += points
+    if raison:
+        raisons.append(raison)
+
+    echeance = lead.get('purchase_urgency') or 'unknown'
+    points, raison = {'immediate': (10, "Emménagement immédiat"), '1-3_months': (8, "Emménagement prévu sous 1 à 3 mois"),
+                      '3-6_months': (5, "Emménagement prévu sous 3 à 6 mois"),
+                      '6plus_months': (2, "Emménagement dans plus de 6 mois")}.get(echeance, (4, None))
+    score += points
+    if raison:
+        raisons.append(raison)
+
+    points, raison = _points_situation(lead)
+    score += points
+    if raison:
+        raisons.append(raison)
+
+    points, raison, meuble_different = _compat_meuble(lead, property_item)
+    score += points
+    if raison:
+        raisons.append(raison)
+
+    score = min(100, max(0, int(score)))
+    if meuble_different:
+        score = min(score, PLAFOND_MEUBLE_DIFFERENT)
+    return score, raisons
 
 
 def calculate_lead_score(lead, property_item):
@@ -1741,6 +2011,7 @@ def get_leads():
         cur.execute("""
             SELECT id, name, email, phone, budget, location, property_type, surface_min, activite, status,
                    financing_status, purchase_urgency, source, created_at,
+                   transaction, revenus, garants, situation_pro, meuble_souhaite,
                    (SELECT MIN(r.due_date) FROM lead_reminders r
                      WHERE r.lead_id = leads.id AND r.done_at IS NULL) AS next_reminder
             FROM leads WHERE user_id = %s ORDER BY id
@@ -1785,10 +2056,12 @@ def create_lead():
         cur.execute("""
             INSERT INTO leads
                 (user_id, name, email, phone, budget, location, property_type, surface_min, activite,
-                 status, financing_status, purchase_urgency, source)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s)
+                 status, financing_status, purchase_urgency, source,
+                 transaction, revenus, garants, situation_pro, meuble_souhaite)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id, name, email, phone, budget, location, property_type, surface_min, activite,
-                      status, financing_status, purchase_urgency, source
+                      status, financing_status, purchase_urgency, source,
+                      transaction, revenus, garants, situation_pro, meuble_souhaite
         """, (
             request.agency_id,
             nom[:255],
@@ -1801,7 +2074,12 @@ def create_lead():
             _activite(data.get('activite')),
             _choix(data.get('financing_status'), FINANCING_VALUES),
             _choix(data.get('purchase_urgency'), URGENCY_VALUES),
-            _choix(data.get('source'), SOURCES, 'manuel')
+            _choix(data.get('source'), SOURCES, 'manuel'),
+            _transaction(data.get('transaction'), 'vente'),
+            _entier_souple(data.get('revenus')),
+            _entier_borne(data.get('garants'), 50),
+            _situation_pro(data.get('situation_pro')),
+            _booleen_souple(data.get('meuble_souhaite'))
         ))
         lead = cur.fetchone()
         conn.commit()
@@ -1816,7 +2094,7 @@ def create_lead():
 
 # Colonnes d'un bien renvoyées par l'API (liste, création, modification).
 COLONNES_BIEN = ("id, reference, title, address, price, size, rooms, property_type, description, "
-                 "activites_autorisees, extraction_air")
+                 "activites_autorisees, extraction_air, transaction, meuble")
 
 
 @app.route('/api/v1/properties', methods=['GET'])
@@ -1873,8 +2151,8 @@ def create_property():
         cur.execute(f"""
             INSERT INTO properties
                 (user_id, reference, title, address, price, size, rooms, property_type, description,
-                 activites_autorisees, extraction_air)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 activites_autorisees, extraction_air, transaction, meuble)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING {COLONNES_BIEN}
         """, (
             request.agency_id,
@@ -1887,7 +2165,9 @@ def create_property():
             _texte_court(data.get('property_type'), 100),
             _texte_court(data.get('description'), 5000),
             _activites_liste(data.get('activites_autorisees')),
-            _booleen_souple(data.get('extraction_air'))
+            _booleen_souple(data.get('extraction_air')),
+            _transaction(data.get('transaction'), 'vente'),
+            _booleen_souple(data.get('meuble'))
         ))
         bien = cur.fetchone()
         conn.commit()
@@ -1939,6 +2219,10 @@ def update_property(property_id):
             champs['activites_autorisees'] = _activites_liste(data.get('activites_autorisees'))
         if 'extraction_air' in data:
             champs['extraction_air'] = _booleen_souple(data.get('extraction_air'))
+        if 'transaction' in data:
+            champs['transaction'] = _transaction(data.get('transaction'), 'vente')
+        if 'meuble' in data:
+            champs['meuble'] = _booleen_souple(data.get('meuble'))
         if not champs:
             return jsonify({"message": "Aucune modification à enregistrer"}), 400
 
@@ -2056,6 +2340,8 @@ def import_properties():
         if len(lignes) > MAX_LIGNES_IMPORT:
             return jsonify({"message": f"{MAX_LIGNES_IMPORT} lignes maximum par envoi"}), 400
         decalage = data.get('offset') if isinstance(data.get('offset'), int) and 0 <= data.get('offset') < 1_000_000 else 0
+        # Choix fait sur la page quand tout le fichier est de la vente ou de la location.
+        transaction_defaut = _transaction(data.get('default_transaction'))
 
         ajoutes, maj, doublons, hors_forfait = 0, 0, 0, 0
         invalides, ids_nouveaux, ids_maj = [], [], []
@@ -2089,6 +2375,8 @@ def import_properties():
                 titre_saisi = _texte_court(ligne.get('title'), 255)
                 activites = _activites_liste(ligne.get('activites_autorisees'))
                 extraction = _booleen_souple(ligne.get('extraction_air'))
+                transaction = _transaction(ligne.get('transaction')) or transaction_defaut
+                meuble = _booleen_souple(ligne.get('meuble'))
 
                 cible = par_ref.get(reference.lower()) if reference else None
                 if cible is None:
@@ -2110,10 +2398,12 @@ def import_properties():
                             property_type = COALESCE(%s, property_type),
                             description = COALESCE(%s, description),
                             activites_autorisees = COALESCE(%s, activites_autorisees),
-                            extraction_air = COALESCE(%s, extraction_air)
+                            extraction_air = COALESCE(%s, extraction_air),
+                            transaction = COALESCE(%s, transaction),
+                            meuble = COALESCE(%s, meuble)
                         WHERE id = %s AND user_id = %s
                     """, (reference, titre_saisi, adresse, prix, surface, pieces, type_bien,
-                          description, activites, extraction, cible, request.agency_id))
+                          description, activites, extraction, transaction, meuble, cible, request.agency_id))
                     if cible not in ids_maj and cible not in ids_nouveaux:
                         maj += 1
                     ids_maj.append(cible)
@@ -2126,10 +2416,11 @@ def import_properties():
                         continue
                     cur.execute("""
                         INSERT INTO properties (user_id, reference, title, address, price, size, rooms,
-                                                property_type, description, activites_autorisees, extraction_air)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                                                property_type, description, activites_autorisees, extraction_air,
+                                                transaction, meuble)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
                     """, (request.agency_id, reference, titre, adresse, prix, surface, pieces, type_bien, description,
-                          activites, extraction))
+                          activites, extraction, transaction or 'vente', meuble))
                     nouvel_id = cur.fetchone()['id']
                     ids_nouveaux.append(nouvel_id)
                     ajoutes += 1
@@ -2183,7 +2474,7 @@ def get_lead_detail(lead_id):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, user_id, name, email, phone, budget, location, property_type, surface_min, activite, status, financing_status, purchase_urgency, lead_quality, financing_amount, notes, created_at, source, status_changed_at, first_contact_at, consent_at FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.agency_id))
+        cur.execute("SELECT id, user_id, name, email, phone, budget, location, property_type, surface_min, activite, status, financing_status, purchase_urgency, lead_quality, financing_amount, notes, created_at, source, status_changed_at, first_contact_at, consent_at, transaction, revenus, garants, situation_pro, meuble_souhaite FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.agency_id))
         lead = cur.fetchone()
         cur.close()
         conn.close()
@@ -2235,6 +2526,17 @@ def update_lead_financing(lead_id):
             contact['surface_min'] = _entier_borne(data.get('surface_min'), 1_000_000)
         if 'activite' in data:
             contact['activite'] = _activite(data.get('activite'))
+        # Vente ou location et dossier du locataire : même règle (seulement si présents).
+        if 'transaction' in data:
+            contact['transaction'] = _transaction(data.get('transaction'), 'vente')
+        if 'revenus' in data:
+            contact['revenus'] = _entier_souple(data.get('revenus'))
+        if 'garants' in data:
+            contact['garants'] = _entier_borne(data.get('garants'), 50)
+        if 'situation_pro' in data:
+            contact['situation_pro'] = _situation_pro(data.get('situation_pro'))
+        if 'meuble_souhaite' in data:
+            contact['meuble_souhaite'] = _booleen_souple(data.get('meuble_souhaite'))
 
         conn = get_db_connection()
         try:
@@ -2300,7 +2602,7 @@ def get_leads_by_quality(quality):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, name, email, phone, budget, location, property_type, financing_status, purchase_urgency FROM leads WHERE user_id = %s ORDER BY created_at DESC", (request.agency_id,))
+        cur.execute("SELECT id, name, email, phone, budget, location, property_type, financing_status, purchase_urgency, transaction, revenus, garants, situation_pro FROM leads WHERE user_id = %s ORDER BY created_at DESC", (request.agency_id,))
         leads = cur.fetchall()
         cur.close()
         conn.close()
@@ -2319,9 +2621,9 @@ def get_improved_matches():
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, name, email, phone, budget, location, property_type, surface_min, activite, financing_status, purchase_urgency FROM leads WHERE user_id = %s ORDER BY created_at DESC", (request.agency_id,))
+        cur.execute("SELECT id, name, email, phone, budget, location, property_type, surface_min, activite, financing_status, purchase_urgency, transaction, revenus, garants, situation_pro, meuble_souhaite FROM leads WHERE user_id = %s ORDER BY created_at DESC", (request.agency_id,))
         leads = cur.fetchall()
-        cur.execute("SELECT id, title, address, price, rooms, size, property_type, description, activites_autorisees, extraction_air FROM properties WHERE user_id = %s", (request.agency_id,))
+        cur.execute("SELECT id, title, address, price, rooms, size, property_type, description, activites_autorisees, extraction_air, transaction, meuble FROM properties WHERE user_id = %s", (request.agency_id,))
         properties = cur.fetchall()
         cur.close()
         conn.close()
@@ -2331,9 +2633,9 @@ def get_improved_matches():
             for prop in properties:
                 score, raisons = _detail_score(lead, prop)
                 if score > 30:
-                    matches.append({"property_id": prop['id'], "address": prop['address'], "title": prop['title'], "type": prop['property_type'], "price": prop['price'], "rooms": prop['rooms'], "size": prop['size'], "score": score, "reasons": raisons})
+                    matches.append({"property_id": prop['id'], "address": prop['address'], "title": prop['title'], "type": prop['property_type'], "price": prop['price'], "rooms": prop['rooms'], "size": prop['size'], "transaction": prop['transaction'], "score": score, "reasons": raisons})
             matches.sort(key=lambda x: x['score'], reverse=True)
-            result.append({"id": lead['id'], "name": lead['name'], "email": lead['email'], "phone": lead['phone'], "budget": lead['budget'], "location": lead['location'], "property_type": lead['property_type'], "financing_status": lead['financing_status'], "purchase_urgency": lead['purchase_urgency'], "lead_quality": derive_lead_quality(lead), "matches": matches})
+            result.append({"id": lead['id'], "name": lead['name'], "email": lead['email'], "phone": lead['phone'], "budget": lead['budget'], "location": lead['location'], "property_type": lead['property_type'], "financing_status": lead['financing_status'], "purchase_urgency": lead['purchase_urgency'], "transaction": lead['transaction'], "revenus": lead['revenus'], "garants": lead['garants'], "situation_pro": lead['situation_pro'], "meuble_souhaite": lead['meuble_souhaite'], "lead_quality": derive_lead_quality(lead), "matches": matches})
         # Les leads les plus chauds d'abord.
         ordre = {'hot': 0, 'warm': 1, 'cold': 2}
         result.sort(key=lambda x: ordre.get(x['lead_quality'], 3))
@@ -2673,6 +2975,7 @@ def import_leads():
         if len(lignes) > MAX_LIGNES_IMPORT:
             return jsonify({"message": f"{MAX_LIGNES_IMPORT} lignes maximum par envoi"}), 400
         decalage = data.get('offset') if isinstance(data.get('offset'), int) and 0 <= data.get('offset') < 1_000_000 else 0
+        transaction_defaut = _transaction(data.get('default_transaction'), 'vente')
 
         importes, doublons, invalides, ids, hors_forfait = 0, 0, [], [], 0
         with _base() as (conn, cur):
@@ -2715,8 +3018,9 @@ def import_leads():
                     continue
                 cur.execute("""
                     INSERT INTO leads (user_id, name, email, phone, budget, location, property_type, surface_min,
-                                       activite, status, financing_status, purchase_urgency, source)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, 'import')
+                                       activite, status, financing_status, purchase_urgency, source,
+                                       transaction, revenus, garants, situation_pro, meuble_souhaite)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, 'import', %s, %s, %s, %s, %s)
                     RETURNING id
                 """, (request.agency_id, nom, email, tel,
                       _entier_borne(ligne.get('budget')),
@@ -2725,7 +3029,12 @@ def import_leads():
                       _entier_souple(ligne.get('surface_min'), 1_000_000),
                       _activite(ligne.get('activite')),
                       _choix(ligne.get('financing_status'), FINANCING_VALUES),
-                      _choix(ligne.get('purchase_urgency'), URGENCY_VALUES)))
+                      _choix(ligne.get('purchase_urgency'), URGENCY_VALUES),
+                      _transaction(ligne.get('transaction'), transaction_defaut),
+                      _entier_souple(ligne.get('revenus')),
+                      _entier_souple(ligne.get('garants'), 50),
+                      _situation_pro(ligne.get('situation_pro')),
+                      _booleen_souple(ligne.get('meuble_souhaite'))))
                 ids.append(cur.fetchone()['id'])
                 importes += 1
                 if email:
@@ -2924,8 +3233,9 @@ def capture_lead(token):
             maintenant = _maintenant()
             cur.execute("""
                 INSERT INTO leads (user_id, name, email, phone, budget, location, property_type, surface_min,
-                                   activite, status, financing_status, purchase_urgency, source, consent_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, 'formulaire', %s)
+                                   activite, status, financing_status, purchase_urgency, source, consent_at,
+                                   transaction, revenus, garants, situation_pro, meuble_souhaite)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, 'formulaire', %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (agence['id'], nom, email, tel,
                   _entier_borne(data.get('budget')),
@@ -2935,7 +3245,12 @@ def capture_lead(token):
                   _activite(data.get('activite')),
                   _choix(data.get('financing_status'), FINANCEMENT_FORMULAIRE),
                   _choix(data.get('purchase_urgency'), URGENCY_VALUES),
-                  maintenant))
+                  maintenant,
+                  _transaction(data.get('transaction'), 'vente'),
+                  _entier_souple(data.get('revenus')),
+                  _entier_borne(data.get('garants'), 50),
+                  _situation_pro(data.get('situation_pro')),
+                  _booleen_souple(data.get('meuble_souhaite'))))
             lead_id = cur.fetchone()['id']
             if message:
                 cur.execute("""
@@ -2963,7 +3278,7 @@ def completer_info(token):
         _assurer_schema()
         with _base() as (conn, cur):
             cur.execute("""
-                SELECT u.company_name, l.name FROM leads l
+                SELECT u.company_name, l.name, l.transaction FROM leads l
                 JOIN users u ON u.id = l.user_id
                 WHERE l.completion_token = %s AND u.is_active
             """, (token,))
@@ -2971,7 +3286,8 @@ def completer_info(token):
         if not ligne:
             return jsonify({"message": "Not found"}), 404
         prenom = (ligne['name'] or '').split(' ')[0] if ligne['name'] else ''
-        return jsonify({"agence": ligne['company_name'] or "", "prenom": prenom}), 200
+        return jsonify({"agence": ligne['company_name'] or "", "prenom": prenom,
+                        "transaction": ligne['transaction'] or 'vente'}), 200
     except Exception:
         return erreur_interne()
 
@@ -3024,7 +3340,12 @@ def completer_lead(token):
                     purchase_urgency = %s,
                     email = COALESCE(email, %s),
                     phone = COALESCE(phone, %s),
-                    consent_at = COALESCE(consent_at, %s)
+                    consent_at = COALESCE(consent_at, %s),
+                    transaction = COALESCE(%s, transaction),
+                    revenus = COALESCE(%s, revenus),
+                    garants = COALESCE(%s, garants),
+                    situation_pro = COALESCE(%s, situation_pro),
+                    meuble_souhaite = COALESCE(%s, meuble_souhaite)
                 WHERE id = %s
             """, (
                 _entier_borne(data.get('budget')),
@@ -3035,6 +3356,11 @@ def completer_lead(token):
                 _choix(data.get('financing_status'), FINANCEMENT_FORMULAIRE),
                 _choix(data.get('purchase_urgency'), URGENCY_VALUES),
                 email, tel, _maintenant(),
+                _transaction(data.get('transaction')),
+                _entier_souple(data.get('revenus')),
+                _entier_borne(data.get('garants'), 50),
+                _situation_pro(data.get('situation_pro')),
+                _booleen_souple(data.get('meuble_souhaite')),
                 lead['id'],
             ))
             if message:
@@ -3084,10 +3410,11 @@ def _alertes_matching(user_id, lead_ids=None, property_ids=None, origine=None):
             if not agent or not agent['alerts_enabled']:
                 return
             cur.execute("""SELECT id, name, email, phone, budget, location, property_type, surface_min, activite,
-                                  financing_status, purchase_urgency, status
+                                  financing_status, purchase_urgency, status,
+                                  transaction, revenus, garants, situation_pro, meuble_souhaite
                            FROM leads WHERE user_id = %s""", (user_id,))
             prospects = [l for l in cur.fetchall() if (l['status'] or 'nouveau') not in STATUTS_CLOS]
-            cur.execute("SELECT id, title, address, price, size, property_type, activites_autorisees, extraction_air FROM properties WHERE user_id = %s", (user_id,))
+            cur.execute("SELECT id, title, address, price, size, property_type, activites_autorisees, extraction_air, transaction, meuble FROM properties WHERE user_id = %s", (user_id,))
             biens = cur.fetchall()
 
             ids_prospects, ids_biens = set(lead_ids or []), set(property_ids or [])
@@ -3120,9 +3447,12 @@ def _alertes_matching(user_id, lead_ids=None, property_ids=None, origine=None):
                 contact = " · ".join(x for x in (nouveau['email'], nouveau['phone']) if x)
                 if contact:
                     paragraphes.append(f"Contact : {contact}")
+                en_location = _est_location(nouveau)
                 recherche = " · ".join(x for x in (
+                    "Location" if en_location else None,
                     nouveau['property_type'], nouveau['location'],
-                    f"budget {nouveau['budget']:,} €".replace(',', ' ') if nouveau['budget'] else None) if x)
+                    (f"loyer max {nouveau['budget']:,} €/mois" if en_location else f"budget {nouveau['budget']:,} €").replace(',', ' ')
+                    if nouveau['budget'] else None) if x)
                 if recherche:
                     paragraphes.append(f"Recherche : {recherche}")
                 bouton = ("Ouvrir la fiche du prospect", f"{site}/leads-profile.html?id={nouveau['id']}")
@@ -3793,12 +4123,13 @@ def get_proposals():
             cur.execute("SELECT company_name FROM users WHERE id = %s", (request.agency_id,))
             agence = cur.fetchone() or {}
             cur.execute("""SELECT id, name, email, phone, budget, location, property_type, surface_min, activite,
-                                  financing_status, purchase_urgency, status
+                                  financing_status, purchase_urgency, status,
+                                  transaction, revenus, garants, situation_pro, meuble_souhaite
                            FROM leads WHERE user_id = %s""", (request.agency_id,))
             prospects = [l for l in cur.fetchall()
                          if (l['status'] or 'nouveau') not in STATUTS_CLOS and _prospect_complet(l)]
             cur.execute("""SELECT id, title, address, price, rooms, size, property_type,
-                                  activites_autorisees, extraction_air
+                                  activites_autorisees, extraction_air, transaction, meuble
                            FROM properties WHERE user_id = %s""", (request.agency_id,))
             biens = cur.fetchall()
             cur.execute("""SELECT m.lead_id, l.name, l.email, m.subject, m.property_ids, m.sent_at
@@ -3824,13 +4155,15 @@ def get_proposals():
                 if score >= PROPOSITION_SCORE_MIN:
                     candidats.append({"property_id": b['id'], "title": b['title'], "address": b['address'],
                                       "type": b['property_type'], "price": b['price'], "rooms": b['rooms'],
-                                      "size": b['size'], "score": score, "reasons": raisons})
+                                      "size": b['size'], "transaction": b['transaction'],
+                                      "score": score, "reasons": raisons})
             if not candidats:
                 continue
             candidats.sort(key=lambda c: -c['score'])
             a_envoyer.append({
                 "lead": {"id": l['id'], "name": l['name'], "email": l['email'], "phone": l['phone'],
-                         "budget": l['budget'], "location": l['location'], "property_type": l['property_type']},
+                         "budget": l['budget'], "location": l['location'], "property_type": l['property_type'],
+                         "transaction": l['transaction']},
                 "lead_quality": derive_lead_quality(l),
                 "biens": candidats[:5],
                 "deja_proposes": len(deja.get(l['id'], ())),
@@ -3966,11 +4299,15 @@ def get_dashboard():
     try:
         with _base() as (conn, cur):
             cur.execute("""SELECT id, status, source, created_at, first_contact_at, budget, location,
-                                  property_type, financing_status, purchase_urgency
+                                  property_type, financing_status, purchase_urgency,
+                                  transaction, revenus, garants, situation_pro
                            FROM leads WHERE user_id = %s""", (request.agency_id,))
             prospects = cur.fetchall()
-            cur.execute("""SELECT COUNT(*) AS n FROM properties WHERE user_id = %s""", (request.agency_id,))
-            nb_biens = cur.fetchone()['n']
+            cur.execute("""SELECT COUNT(*) AS n,
+                                  COUNT(*) FILTER (WHERE transaction = 'location') AS n_location
+                           FROM properties WHERE user_id = %s""", (request.agency_id,))
+            ligne_biens = cur.fetchone()
+            nb_biens, nb_biens_location = ligne_biens['n'], ligne_biens['n_location']
             # « Maintenant » sur l'horloge de la base, celle de created_at.
             cur.execute("SELECT NOW()::timestamp AS maintenant")
             maintenant = cur.fetchone()['maintenant']
@@ -4008,6 +4345,8 @@ def get_dashboard():
         return jsonify({
             "total_leads": total,
             "total_properties": nb_biens,
+            "leads_location": sum(1 for p in prospects if _est_location(p)),
+            "properties_location": nb_biens_location,
             "pipeline": pipeline,
             "quality": qualite,
             "sources": sources,
@@ -4043,7 +4382,7 @@ texte autour.
 Date du jour : {date}
 
 Champs : nom, email, telephone, transaction, budget, secteurs, type_bien, \
-nombre_pieces, surface_min, activite, echeance, financement, garants, profession, notes
+nombre_pieces, surface_min, activite, echeance, financement, garants, profession, revenus, meuble, notes
 
 Règles strictes :
 - N'invente jamais. Information non explicite dans le message = null.
@@ -4060,7 +4399,9 @@ veut y exercer : exactement l'une de {activites}, ou null.
 - echeance : l'un de {echeances}, ou null. Calcule par rapport à la date du jour.
 - financement : l'un de {financements}, ou null.
 - garants : nombre de garants mentionnés, ou null.
-- profession : situation professionnelle citée, ou null.
+- profession : situation professionnelle citée (CDI, étudiant, indépendant...), ou null.
+- revenus : revenus mensuels nets du foyer en euros, entier, si le message en donne, sinon null.
+- meuble : true si la personne cherche un logement meublé, false si elle le veut vide, sinon null.
 - notes : une phrase résumant ce qui n'entre dans aucun champ, ou null.
 
 Message :
@@ -4147,6 +4488,9 @@ def _valider(brut):
         'financement': dans('financement', FINANCEMENTS),
         'garants': _entier(brut.get('garants')),
         'profession': texte('profession', 120),
+        'situation_pro': _situation_pro(brut.get('profession')),
+        'revenus': _entier_souple(brut.get('revenus')),
+        'meuble': _booleen_souple(brut.get('meuble')),
         'notes': texte('notes', 1000),
     }
 
@@ -4282,7 +4626,7 @@ commentaire ni texte autour.
 Date du jour : {date}
 
 Champs : est_demande_contact, nom, email, telephone, transaction, budget, secteurs, \
-type_bien, nombre_pieces, surface_min, activite, echeance, financement, garants, profession, notes
+type_bien, nombre_pieces, surface_min, activite, echeance, financement, garants, profession, revenus, meuble, notes
 
 Règles strictes :
 - est_demande_contact : true si c'est une vraie demande de contact d'une personne \
@@ -4306,7 +4650,9 @@ exactement l'une de {activites}, ou null.
 - echeance : l'un de {echeances}, ou null.
 - financement : l'un de {financements}, ou null.
 - garants : nombre de garants mentionnés, ou null.
-- profession : situation professionnelle citée, ou null.
+- profession : situation professionnelle citée (CDI, étudiant, indépendant...), ou null.
+- revenus : revenus mensuels nets du foyer en euros, entier, si le message en donne, sinon null.
+- meuble : true si la personne cherche un logement meublé, false si elle le veut vide, sinon null.
 - notes : le message du contact et l'annonce concernée (titre, référence ou adresse) si \
 identifiable, résumés en une ou deux phrases. null si rien d'utile.
 
@@ -4549,8 +4895,9 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
         cur.execute("""
             INSERT INTO leads
                 (user_id, name, email, phone, budget, location, property_type, surface_min, activite,
-                 status, financing_status, purchase_urgency, source)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s)
+                 status, financing_status, purchase_urgency, source,
+                 transaction, revenus, garants, situation_pro, meuble_souhaite)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
             user_id, nom[:255],
@@ -4564,6 +4911,11 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
             _choix((champs or {}).get('financement'), FINANCING_VALUES),
             _choix((champs or {}).get('echeance'), URGENCY_VALUES),
             portail,
+            _transaction((champs or {}).get('transaction'), 'vente'),
+            (champs or {}).get('revenus'),
+            _entier_borne((champs or {}).get('garants'), 50),
+            (champs or {}).get('situation_pro'),
+            (champs or {}).get('meuble'),
         ))
         lead_id = cur.fetchone()['id']
         if notes:

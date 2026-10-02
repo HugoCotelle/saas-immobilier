@@ -1655,5 +1655,320 @@ class TestModifierBien(Base):
         self.assertEqual(len(b["title"]), 255)
 
 
+class TestLocationScoring(unittest.TestCase):
+    """Barème d'un locataire : loyer, secteur, dossier (revenus, garants), échéance, situation, meublé."""
+    LOC = {"transaction": "location", "property_type": "Appartement", "budget": 900, "location": "Senlis",
+           "revenus": 3000, "garants": 0, "situation_pro": "cdi", "purchase_urgency": "immediate",
+           "meuble_souhaite": None}
+    BIEN = {"transaction": "location", "property_type": "Appartement", "price": 850, "title": "T2",
+            "address": "5 rue Vieille 60300 Senlis", "meuble": None}
+
+    def score(self, lead=None, bien=None):
+        return backend._detail_score({**self.LOC, **(lead or {})}, {**self.BIEN, **(bien or {})})
+
+    def test_lecture_de_la_transaction(self):
+        f = backend._transaction
+        for brut, attendu in (("location", "location"), ("À louer", "location"), ("Locataire", "location"),
+                              ("achat", "vente"), ("Vente", "vente"), ("acheteur", "vente"),
+                              ("", None), ("autre chose", None), (None, None), (True, None)):
+            self.assertEqual(f(brut), attendu, brut)
+        self.assertEqual(f("???", "vente"), "vente")
+        s = backend._situation_pro
+        for brut, attendu in (("CDI", "cdi"), ("Fonctionnaire", "fonctionnaire"), ("intérim", "cdd"), ("étudiante", "etudiant"),
+                              ("auto-entrepreneur", "independant"), ("retraité", "retraite"), ("", None), ("xyz", None)):
+            self.assertEqual(s(brut), attendu, brut)
+
+    def test_un_acheteur_ne_voit_pas_une_location_et_inversement(self):
+        score, raisons = self.score({"transaction": "vente"})
+        self.assertEqual(score, 0)
+        self.assertIn("Vente et location ne correspondent pas", raisons)
+        self.assertEqual(self.score(bien={"transaction": "vente"})[0], 0)
+        # sans information, tout est de la vente : l'existant ne change pas
+        self.assertGreater(backend._detail_score({"budget": 300000, "property_type": "Maison", "location": "Senlis"},
+                                                 {"price": 300000, "property_type": "Maison", "address": "Senlis"})[0], 50)
+
+    def test_dossier_ideal(self):
+        score, raisons = self.score({"garants": 1})
+        self.assertGreaterEqual(score, 90)
+        self.assertIn("Loyer dans le budget : 850 €/mois pour 900 € maximum", raisons)
+        self.assertTrue(any("fois le loyer" in r for r in raisons))
+
+    def test_regle_des_trois_fois_le_loyer(self):
+        ok = self.score({"revenus": 2550})[0]          # 3,0 fois 850
+        limite = self.score({"revenus": 2200})[0]      # 2,6 fois
+        faible = self.score({"revenus": 1700})[0]      # 2 fois
+        tres_faible = self.score({"revenus": 1000})[0]
+        self.assertGreater(ok, limite)
+        self.assertGreater(limite, faible)
+        self.assertGreater(faible, tres_faible)
+        # le garant compense des revenus insuffisants
+        self.assertGreater(self.score({"revenus": 1700, "garants": 1})[0], faible)
+        self.assertLess(self.score({"revenus": 1700, "garants": 1})[0], self.score({"revenus": 2550, "garants": 1})[0])
+
+    def test_loyer_au_dessus_du_budget(self):
+        dedans = self.score(bien={"price": 900})[0]
+        un_peu = self.score(bien={"price": 940})[0]
+        trop = self.score(bien={"price": 1200})[0]
+        self.assertGreater(dedans, un_peu)
+        self.assertGreater(un_peu, trop)
+        # un loyer bien en dessous du plafond convient aussi
+        self.assertGreaterEqual(self.score(bien={"price": 500})[0], dedans)
+
+    def test_meuble(self):
+        sans_avis = self.score()[0]
+        ok = self.score({"meuble_souhaite": True}, {"meuble": True})
+        non = self.score({"meuble_souhaite": True}, {"meuble": False})
+        self.assertGreater(ok[0], sans_avis)
+        self.assertLessEqual(non[0], backend.PLAFOND_MEUBLE_DIFFERENT)
+        self.assertLess(non[0], backend.ALERTE_SCORE_MIN)
+        self.assertGreaterEqual(non[0], 0)
+        self.assertIn("Bien non meublé alors que le prospect cherche du meublé", non[1])
+        # information manquante d'un côté : pas de pénalité
+        self.assertEqual(self.score({"meuble_souhaite": True}, {"meuble": None})[0], sans_avis)
+
+    def test_situation_professionnelle(self):
+        cdi = self.score({"situation_pro": "cdi"})[0]
+        cdd = self.score({"situation_pro": "cdd"})[0]
+        self.assertGreater(cdi, cdd)
+        self.assertEqual(self.score({"situation_pro": None})[0], self.score({"situation_pro": "xxx"})[0])
+
+    def test_autre_ville_elimine(self):
+        self.assertEqual(self.score(bien={"address": "3 rue de la Paix 75002 Paris"})[0], 0)
+
+    def test_type_voisin_et_type_different(self):
+        maison = self.score(bien={"property_type": "Maison"})[0]
+        self.assertLess(maison, self.score()[0])
+        self.assertGreater(maison, self.score(bien={"property_type": "Terrain"})[0])
+
+    def test_qualite_du_locataire(self):
+        q = backend.derive_lead_quality
+        self.assertEqual(q({**self.LOC, "garants": 1}), "hot")
+        self.assertEqual(q({"transaction": "location"}), "cold")
+        self.assertEqual(q({**self.LOC, "revenus": 800, "garants": 0, "situation_pro": "autre",
+                            "purchase_urgency": "6plus_months"}), "cold")
+        # un dossier moyen et un emménagement lointain restent tièdes
+        self.assertEqual(q({**self.LOC, "purchase_urgency": "3-6_months", "situation_pro": "cdd"}), "warm")
+        # un acheteur n'est pas jugé sur les revenus
+        self.assertEqual(q({"revenus": 9000, "garants": 3, "situation_pro": "cdi"}), "cold")
+
+    def test_local_commercial_en_location(self):
+        lead = {"transaction": "location", "property_type": "Local commercial", "budget": 2000, "location": "Senlis",
+                "revenus": 7000, "garants": 0, "purchase_urgency": "immediate", "surface_min": 60, "activite": None}
+        bien = {"transaction": "location", "property_type": "Local commercial", "price": 1900, "size": 70,
+                "address": "Senlis 60300", "title": "Boutique"}
+        score, raisons = backend._detail_score(lead, bien)
+        self.assertGreater(score, 70)
+        self.assertIn("Loyer dans le budget : 1900 €/mois pour 2000 € maximum", raisons)
+        self.assertIn("Emménagement immédiat", raisons)
+        trop_cher = backend._detail_score(lead, {**bien, "price": 3000})[0]
+        self.assertLess(trop_cher, score)
+        # une location de local ne se propose pas à un acquéreur de local
+        self.assertEqual(backend._detail_score({**lead, "transaction": "vente"}, bien)[0], 0)
+        # l'extraction d'air reste exigée pour une cuisine
+        r = backend._detail_score({**lead, "activite": "restauration"}, {**bien, "extraction_air": False})
+        self.assertLessEqual(r[0], backend.PLAFOND_ACTIVITE_INCOMPATIBLE)
+
+
+class TestLocationApi(Base):
+    def lead(self, tok, **kw):
+        r = self.c.post("/api/v1/leads", json={"name": "Camille Martin", **kw}, headers=self.h(tok))
+        self.assertEqual(r.status_code, 201, r.get_json())
+        return r.get_json()
+
+    def bien(self, tok, **kw):
+        r = self.c.post("/api/v1/properties", json={"title": "T2 Senlis", "address": "5 rue Vieille 60300 Senlis",
+                                                    "property_type": "Appartement", **kw}, headers=self.h(tok))
+        self.assertEqual(r.status_code, 201, r.get_json())
+        return r.get_json()
+
+    def test_valeurs_par_defaut_et_creation(self):
+        t = self.jeton("loc-1@x.fr")
+        v = self.lead(t, name="Acheteur")
+        self.assertEqual((v["transaction"], v["revenus"], v["garants"], v["situation_pro"], v["meuble_souhaite"]),
+                         ("vente", None, None, None, None))
+        l = self.lead(t, transaction="location", budget=900, revenus="3 000", garants=1, situation_pro="CDI",
+                      meuble_souhaite="oui")
+        self.assertEqual((l["transaction"], l["budget"], l["garants"], l["situation_pro"], l["meuble_souhaite"]),
+                         ("location", 900, 1, "cdi", True))
+        self.assertEqual(l["revenus"], 3000)
+        b = self.bien(t)
+        self.assertEqual((b["transaction"], b["meuble"]), ("vente", None))
+        b2 = self.bien(t, title="T3", transaction="Location", meuble=True, price=850)
+        self.assertEqual((b2["transaction"], b2["meuble"], b2["price"]), ("location", True, 850))
+        # valeurs fantaisistes : ramenées à la vente / inconnu
+        b3 = self.bien(t, title="T4", transaction="n'importe quoi", meuble="peut-être")
+        self.assertEqual((b3["transaction"], b3["meuble"]), ("vente", None))
+
+    def test_liste_et_detail_exposent_les_champs(self):
+        t = self.jeton("loc-2@x.fr")
+        l = self.lead(t, transaction="location", budget=900, revenus=3000, garants=2, situation_pro="cdi")
+        liste = self.c.get("/api/v1/leads", headers=self.h(t)).get_json()
+        x = next(i for i in liste if i["id"] == l["id"])
+        self.assertEqual((x["transaction"], x["revenus"], x["garants"], x["situation_pro"]), ("location", 3000, 2, "cdi"))
+        d = self.c.get(f"/api/v1/leads/{l['id']}", headers=self.h(t)).get_json()
+        self.assertEqual((d["transaction"], d["revenus"], d["garants"], d["situation_pro"]), ("location", 3000, 2, "cdi"))
+        self.assertIn(x["lead_quality"], ("hot", "warm", "cold"))
+
+    def test_modifier_un_prospect_vers_la_location(self):
+        t = self.jeton("loc-3@x.fr")
+        l = self.lead(t, budget=250000)
+        r = self.c.put(f"/api/v1/leads/{l['id']}", json={"budget": 900, "transaction": "location", "revenus": 2800,
+                                                        "garants": 1, "situation_pro": "cdd", "meuble_souhaite": False},
+                       headers=self.h(t))
+        self.assertEqual(r.status_code, 200, r.get_json())
+        d = self.c.get(f"/api/v1/leads/{l['id']}", headers=self.h(t)).get_json()
+        self.assertEqual((d["transaction"], d["revenus"], d["garants"], d["situation_pro"], d["meuble_souhaite"]),
+                         ("location", 2800, 1, "cdd", False))
+        # un envoi sans ces clés ne les touche pas (anciennes pages)
+        self.c.put(f"/api/v1/leads/{l['id']}", json={"budget": 950}, headers=self.h(t))
+        d = self.c.get(f"/api/v1/leads/{l['id']}", headers=self.h(t)).get_json()
+        self.assertEqual((d["transaction"], d["revenus"], d["garants"], d["budget"]), ("location", 2800, 1, 950))
+
+    def test_modifier_un_bien_vente_location(self):
+        t = self.jeton("loc-4@x.fr")
+        b = self.bien(t, price=300000)
+        r = self.c.put(f"/api/v1/properties/{b['id']}", json={"transaction": "location", "price": 900, "meuble": True},
+                       headers=self.h(t))
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual((r.get_json()["transaction"], r.get_json()["price"], r.get_json()["meuble"]), ("location", 900, True))
+        r = self.c.put(f"/api/v1/properties/{b['id']}", json={"price": 880}, headers=self.h(t))
+        self.assertEqual(r.get_json()["transaction"], "location")
+
+    def test_matching_separe_vente_et_location(self):
+        t = self.jeton("loc-5@x.fr")
+        locataire = self.lead(t, name="Locataire", transaction="location", budget=900, location="Senlis",
+                              property_type="Appartement", revenus=3000, situation_pro="cdi", purchase_urgency="immediate")
+        acheteur = self.lead(t, name="Acheteur", transaction="vente", budget=300000, location="Senlis",
+                             property_type="Appartement", financing_status="approved", purchase_urgency="immediate")
+        a_louer = self.bien(t, title="À louer", transaction="location", price=850)
+        a_vendre = self.bien(t, title="À vendre", transaction="vente", price=300000)
+        res = {r["name"]: r for r in self.c.get("/api/v1/improved-matches", headers=self.h(t)).get_json()}
+        self.assertEqual([m["property_id"] for m in res["Locataire"]["matches"]], [a_louer["id"]])
+        self.assertEqual([m["property_id"] for m in res["Acheteur"]["matches"]], [a_vendre["id"]])
+        self.assertEqual(res["Locataire"]["matches"][0]["transaction"], "location")
+        self.assertEqual(res["Locataire"]["transaction"], "location")
+        self.assertEqual(res["Locataire"]["lead_quality"], "hot")
+        self.assertTrue(any("fois le loyer" in r for r in res["Locataire"]["matches"][0]["reasons"]))
+
+    def test_import_de_prospects_en_location(self):
+        t = self.jeton("loc-6@x.fr")
+        r = self.c.post("/api/v1/leads/import", headers=self.h(t), json={"rows": [
+            {"name": "Loc Un", "email": "un@x.fr", "budget": "850 €", "transaction": "Location", "revenus": "2 700 €",
+             "garants": "1", "situation_pro": "CDI", "meuble_souhaite": "oui"},
+            {"name": "Loc Deux", "email": "deux@x.fr", "budget": 700},
+            {"name": "Acheteur", "email": "tr@x.fr", "budget": 200000, "transaction": "achat"}]})
+        self.assertEqual(r.get_json()["imported"], 3, r.get_json())
+        liste = {l["name"]: l for l in self.c.get("/api/v1/leads", headers=self.h(t)).get_json()}
+        self.assertEqual((liste["Loc Un"]["transaction"], liste["Loc Un"]["revenus"], liste["Loc Un"]["garants"],
+                          liste["Loc Un"]["situation_pro"], liste["Loc Un"]["meuble_souhaite"]), ("location", 2700, 1, "cdi", True))
+        self.assertEqual(liste["Loc Deux"]["transaction"], "vente")
+        self.assertEqual(liste["Acheteur"]["transaction"], "vente")
+        # choix fait sur la page : tout le fichier est de la location
+        r = self.c.post("/api/v1/leads/import", headers=self.h(t), json={"default_transaction": "location", "rows": [
+            {"name": "Loc Trois", "email": "trois@x.fr"},
+            {"name": "Vendeur", "email": "v@x.fr", "transaction": "vente"}]})
+        self.assertEqual(r.get_json()["imported"], 2)
+        liste = {l["name"]: l for l in self.c.get("/api/v1/leads", headers=self.h(t)).get_json()}
+        self.assertEqual((liste["Loc Trois"]["transaction"], liste["Vendeur"]["transaction"]), ("location", "vente"))
+
+    def test_import_de_biens_en_location(self):
+        t = self.jeton("loc-7@x.fr")
+        r = self.c.post("/api/v1/properties/import", headers=self.h(t), json={"default_transaction": "location", "rows": [
+            {"reference": "L1", "title": "Studio", "address": "Senlis", "price": "620 €", "property_type": "Studio", "meuble": "oui"},
+            {"reference": "V1", "title": "Maison", "address": "Senlis", "price": 300000, "transaction": "Vente"}]})
+        self.assertEqual(r.get_json()["imported"], 2, r.get_json())
+        biens = {b["reference"]: b for b in self.c.get("/api/v1/properties", headers=self.h(t)).get_json()}
+        self.assertEqual((biens["L1"]["transaction"], biens["L1"]["meuble"], biens["L1"]["price"]), ("location", True, 620))
+        self.assertEqual(biens["V1"]["transaction"], "vente")
+        # réimport sans colonne ni choix : la transaction déjà enregistrée est conservée
+        r = self.c.post("/api/v1/properties/import", headers=self.h(t), json={"rows": [
+            {"reference": "L1", "title": "Studio", "price": 640}]})
+        self.assertEqual(r.get_json()["updated"], 1)
+        biens = {b["reference"]: b for b in self.c.get("/api/v1/properties", headers=self.h(t)).get_json()}
+        self.assertEqual((biens["L1"]["transaction"], biens["L1"]["price"]), ("location", 640))
+
+    def test_formulaire_public_et_completion(self):
+        t = self.jeton("loc-8@x.fr")
+        jeton = self.c.get("/api/v1/capture-link", headers=self.h(t)).get_json()["token"]
+        r = self.c.post(f"/public/capture/{jeton}", json={"name": "Visiteur", "email": "v@x.fr", "consent": True,
+                                                         "transaction": "location", "budget": 800, "revenus": 2600,
+                                                         "garants": 1, "situation_pro": "etudiant", "meuble_souhaite": True})
+        self.assertEqual(r.status_code, 201, r.get_json())
+        v = next(l for l in self.c.get("/api/v1/leads", headers=self.h(t)).get_json() if l["name"] == "Visiteur")
+        self.assertEqual((v["transaction"], v["revenus"], v["garants"], v["situation_pro"], v["meuble_souhaite"]),
+                         ("location", 2600, 1, "etudiant", True))
+        # sans le champ : vente
+        self.c.post(f"/public/capture/{jeton}", json={"name": "Autre", "email": "a@x.fr", "consent": True})
+        a = next(l for l in self.c.get("/api/v1/leads", headers=self.h(t)).get_json() if l["name"] == "Autre")
+        self.assertEqual(a["transaction"], "vente")
+
+    def test_extraction_ia_lit_le_dossier_locataire(self):
+        brut = {"transaction": "location", "budget": 850, "revenus": "2 900 €", "garants": 1, "profession": "CDI",
+                "meuble": "oui"}
+        champs = backend._valider(brut)
+        self.assertEqual((champs["transaction"], champs["revenus"], champs["situation_pro"], champs["meuble"], champs["garants"]),
+                         ("location", 2900, "cdi", True, 1))
+        vide = backend._valider({})
+        self.assertEqual((vide["revenus"], vide["situation_pro"], vide["meuble"]), (None, None, None))
+        self.assertIn("revenus", backend.CONSIGNE)
+        self.assertIn("meuble", backend.CONSIGNE_PORTAIL)
+
+    def test_page_de_completion_preselectionne_et_enregistre_la_location(self):
+        t = self.jeton("loc-11@x.fr")
+        l = self.lead(t, name="Contact Annonce", transaction="location")
+        jeton = "tok-" + "a" * 30
+        conn = backend.get_db_connection()
+        cur = conn.cursor()
+        cur.execute("UPDATE leads SET completion_token = %s WHERE id = %s", (jeton, l["id"]))
+        conn.commit()
+        conn.close()
+        info = self.c.get(f"/public/completer/{jeton}").get_json()
+        self.assertEqual(info["transaction"], "location")
+        r = self.c.post(f"/public/completer/{jeton}", json={"consent": True, "budget": 750, "revenus": 2400, "garants": 1,
+                                                          "situation_pro": "cdi", "meuble_souhaite": True,
+                                                          "transaction": "location"})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        d = self.c.get(f"/api/v1/leads/{l['id']}", headers=self.h(t)).get_json()
+        self.assertEqual((d["transaction"], d["budget"], d["revenus"], d["garants"], d["situation_pro"], d["meuble_souhaite"]),
+                         ("location", 750, 2400, 1, "cdi", True))
+        # une complétion qui ne parle pas de location ne change pas le type de recherche
+        self.c.post(f"/public/completer/{jeton}", json={"consent": True, "location": "Senlis"})
+        self.assertEqual(self.c.get(f"/api/v1/leads/{l['id']}", headers=self.h(t)).get_json()["transaction"], "location")
+
+    def test_alerte_mail_pour_un_nouveau_locataire(self):
+        t = self.jeton("loc-12@x.fr")
+        self.lead(t, name="Locataire Alerte", transaction="location", budget=800, location="Senlis",
+                  property_type="Appartement", revenus=2800, situation_pro="cdi", purchase_urgency="immediate")
+        self.bien(t, title="T2 à louer", transaction="location", price=750, meuble=None)
+        self.bien(t, title="Maison à vendre", transaction="vente", price=300000)
+        envoyes = []
+        with mock.patch.object(backend, "_envoi_configure", return_value=True), \
+                mock.patch.object(backend, "_envoyer_email", side_effect=lambda *a, **k: envoyes.append(a) or True):
+            uid = pyjwt.decode(t, SECRET, algorithms=["HS256"])["id"]
+            backend._alertes_matching(uid, None, None, None)
+            ids = [l["id"] for l in self.c.get("/api/v1/leads", headers=self.h(t)).get_json()]
+            backend._alertes_matching(uid, ids, None, None)
+        textes = " ".join(str(a[2]) for a in envoyes)
+        self.assertIn("T2 à louer", textes)
+        self.assertNotIn("Maison à vendre", textes)
+
+    def test_isolation_entre_agences(self):
+        a, b = self.jeton("loc-9a@x.fr"), self.jeton("loc-9b@x.fr")
+        l = self.lead(a, transaction="location")
+        r = self.c.put(f"/api/v1/leads/{l['id']}", json={"transaction": "vente", "revenus": 1}, headers=self.h(b))
+        self.assertEqual(r.status_code, 404)
+        d = self.c.get(f"/api/v1/leads/{l['id']}", headers=self.h(a)).get_json()
+        self.assertEqual(d["transaction"], "location")
+
+    def test_tableau_de_bord_compte_la_location(self):
+        t = self.jeton("loc-10@x.fr")
+        self.lead(t, transaction="location")
+        self.lead(t, name="Autre")
+        self.bien(t, transaction="location", price=700)
+        self.bien(t, title="Vente", price=100000)
+        d = self.c.get("/api/v1/dashboard", headers=self.h(t)).get_json()
+        self.assertEqual((d["total_leads"], d["leads_location"], d["total_properties"], d["properties_location"]), (2, 1, 2, 1))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
