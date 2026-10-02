@@ -26,6 +26,9 @@
         .import-avertissement { background: #F3E9CF; color: #7A5C14; border: 1px solid #E6D6A8; border-radius: var(--radius-sm); padding: 12px 16px; font-size: 13px; line-height: 1.6; margin-bottom: 14px; }
         .apercu-table td { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .ref-bien { font-size: 12px; color: var(--ink-3); margin-top: -8px; margin-bottom: 10px; }
+        .cases { display: flex; flex-wrap: wrap; gap: 10px 22px; margin-top: 4px; }
+        .cases label { display: flex; align-items: center; gap: 8px; margin: 0; text-transform: none; letter-spacing: 0; font-size: 14px; font-weight: 400; color: var(--ink-2); cursor: pointer; }
+        .cases input[type=checkbox] { width: auto; margin: 0; }
         .bien-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
         .bien-actions .btn { margin-left: 0; }
     </style>
@@ -39,8 +42,17 @@
 
         const VIDE = {
             reference: '', title: '', address: '', price: '', size: '', rooms: '',
-            property_type: '', description: ''
+            property_type: '', description: '', activites_autorisees: [], extraction_air: ''
         };
+
+        // Pour un local commercial ou un bureau : activités autorisées et extraction d'air.
+        const TYPES_PRO = ['Local commercial', 'Bureau'];
+        const ACTIVITES = [
+            ['commerce', 'Commerce de détail'], ['restauration', 'Restauration'],
+            ['services', 'Services ou profession libérale'], ['bureau', 'Bureaux'],
+            ['artisanat', 'Artisanat ou activité'], ['autre', 'Autre']
+        ];
+        const libelleActivite = (code) => (ACTIVITES.find((a) => a[0] === code) || [code, code])[1];
 
         // ---------- Lecture d'un fichier Excel ou CSV (tout se passe dans le navigateur) ----------
 
@@ -103,7 +115,9 @@
             size: ['surface', 'surface habitable', 'superficie', 'm2'],
             rooms: ['pieces', 'nb pieces', 'nombre de pieces', 'nombre pieces', 'nb de pieces'],
             property_type: ['type de bien', 'type bien', 'nature', 'categorie', 'type'],
-            description: ['description', 'descriptif', 'texte annonce', 'texte', 'commentaire']
+            description: ['description', 'descriptif', 'texte annonce', 'texte', 'commentaire'],
+            activites_autorisees: ['activites autorisees', 'activite autorisee', 'activites', 'destination', 'usage'],
+            extraction_air: ['extraction', 'extraction d air', 'extraction air', 'conduit d extraction', 'hotte', 'ventilation']
         };
 
         const NOMS_CHAMPS = {
@@ -167,7 +181,9 @@
                     size: valeur(l, 'size'),
                     rooms: valeur(l, 'rooms'),
                     property_type: valeur(l, 'property_type'),
-                    description: valeur(l, 'description')
+                    description: valeur(l, 'description'),
+                    activites_autorisees: valeur(l, 'activites_autorisees'),
+                    extraction_air: valeur(l, 'extraction_air')
                 };
             });
             const utilisees = Object.keys(colonnes).map((c) => colonnes[c].index);
@@ -280,7 +296,12 @@
                             size: form.size === '' ? null : parseInt(form.size, 10),
                             rooms: form.rooms === '' ? null : parseInt(form.rooms, 10),
                             property_type: form.property_type || null,
-                            description: form.description.trim() || null
+                            description: form.description.trim() || null,
+                            // Hors local commercial / bureau, ces champs sont cachés : on ne touche pas à ce qui est enregistré.
+                            ...(TYPES_PRO.includes(form.property_type) ? {
+                                activites_autorisees: form.activites_autorisees,
+                                extraction_air: form.extraction_air === '' ? null : form.extraction_air === 'oui'
+                            } : {})
                         })
                     });
                     if (!response.ok) {
@@ -394,12 +415,18 @@
                 setEditionId(null); setForm(VIDE); setFormOuvert(true);
                 setImportOuvert(false); setMessage(null); setError(null);
             };
+            const basculerActivite = (code) => {
+                const actuelles = form.activites_autorisees;
+                set('activites_autorisees', actuelles.includes(code) ? actuelles.filter((c) => c !== code) : [...actuelles, code]);
+            };
             const fermerFormulaire = () => { setFormOuvert(false); setEditionId(null); setForm(VIDE); setError(null); };
             const modifierBien = (b) => {
                 setForm({
                     reference: b.reference ?? '', title: b.title ?? '', address: b.address ?? '',
                     price: b.price ?? '', size: b.size ?? '', rooms: b.rooms ?? '',
-                    property_type: b.property_type ?? '', description: b.description ?? ''
+                    property_type: b.property_type ?? '', description: b.description ?? '',
+                    activites_autorisees: b.activites_autorisees ?? [],
+                    extraction_air: b.extraction_air === true ? 'oui' : b.extraction_air === false ? 'non' : ''
                 });
                 setEditionId(b.id); setFormOuvert(true);
                 setImportOuvert(false); setMessage(null); setError(null);
@@ -474,7 +501,8 @@
                                         <div className="panel-note" style={{ marginBottom: '12px' }}>
                                             La première ligne contient les titres des colonnes. Colonnes
                                             reconnues : référence, titre, adresse, code postal, ville, prix,
-                                            surface, pièces, type de bien, description. Seul le titre est
+                                            surface, pièces, type de bien, description et, pour les locaux commerciaux et
+                                            bureaux, activités autorisées et extraction d'air (oui ou non). Seul le titre est
                                             indispensable, mais sans adresse ni type, un bien n'apparaîtra
                                             dans aucune correspondance. Le fichier peut être au format Excel
                                             (.xlsx) ou CSV ; si le classeur a plusieurs feuilles, la première
@@ -679,6 +707,40 @@
                                     </div>
                                 </div>
 
+                                {TYPES_PRO.includes(form.property_type) && (
+                                    <>
+                                        <div className="form-row">
+                                            <div className="form-group">
+                                                <label>Extraction d'air (ventilation pour une cuisine)</label>
+                                                <select value={form.extraction_air}
+                                                    onChange={(e) => set('extraction_air', e.target.value)}>
+                                                    <option value="">Non renseigné</option>
+                                                    <option value="oui">Oui, une extraction existe</option>
+                                                    <option value="non">Non, pas d'extraction</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div className="form-group">
+                                            <label>Activités autorisées dans le local</label>
+                                            <div className="cases">
+                                                {ACTIVITES.map(([code, libelle]) => (
+                                                    <label key={code}>
+                                                        <input type="checkbox" checked={form.activites_autorisees.includes(code)}
+                                                            onChange={() => basculerActivite(code)} />
+                                                        {libelle}
+                                                    </label>
+                                                ))}
+                                            </div>
+                                            <div className="panel-note" style={{ marginTop: '8px' }}>
+                                                D'après la destination du local, le règlement de copropriété ou le bail.
+                                                Sans extraction d'air, un restaurant ne peut pas y installer de cuisine :
+                                                le bien ne lui sera pas proposé. Laissez vide si vous ne savez pas, le bien
+                                                ne sera alors pas écarté.
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+
                                 <div className="form-group">
                                     <label>Description</label>
                                     <textarea value={form.description}
@@ -743,6 +805,18 @@
                                             <span className="bien-label">Pièces :</span>
                                             <span className="bien-value">{b.rooms || 'N/A'}</span>
                                         </div>
+                                        {TYPES_PRO.includes(b.property_type) && (b.extraction_air !== null && b.extraction_air !== undefined) && (
+                                            <div className="bien-field">
+                                                <span className="bien-label">Extraction d'air :</span>
+                                                <span className="bien-value">{b.extraction_air ? 'Oui' : 'Non'}</span>
+                                            </div>
+                                        )}
+                                        {b.activites_autorisees && b.activites_autorisees.length > 0 && (
+                                            <div className="bien-field">
+                                                <span className="bien-label">Activités :</span>
+                                                <span className="bien-value">{b.activites_autorisees.map(libelleActivite).join(', ')}</span>
+                                            </div>
+                                        )}
                                         {b.description && (
                                             <div className="bien-desc">{b.description}</div>
                                         )}

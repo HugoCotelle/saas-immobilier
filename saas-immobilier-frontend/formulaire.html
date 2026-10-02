@@ -78,6 +78,18 @@
                     <label for="surface_min">Surface minimale recherchée (m²)</label>
                     <input id="surface_min" name="surface_min" type="number" min="0" max="1000000" inputmode="numeric" placeholder="120">
                 </div>
+                <div class="form-group">
+                    <label for="activite">Activité envisagée</label>
+                    <select id="activite" name="activite">
+                        <option value="">Non précisée</option>
+                        <option value="commerce">Commerce de détail</option>
+                        <option value="restauration">Restauration</option>
+                        <option value="services">Services ou profession libérale</option>
+                        <option value="bureau">Bureaux</option>
+                        <option value="artisanat">Artisanat ou activité</option>
+                        <option value="autre">Autre</option>
+                    </select>
+                </div>
             </div>
             <div class="form-row">
                 <div class="form-group">
@@ -196,6 +208,7 @@
                         location: $('location').value.trim() || null,
                         property_type: $('property_type').value || null,
                         surface_min: surface,
+                        activite: typePro() && $('activite').value ? $('activite').value : null,
                         financing_status: $('financing_status').value,
                         purchase_urgency: $('purchase_urgency').value,
                         message: $('message-libre').value.trim() || null,

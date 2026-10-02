@@ -237,6 +237,7 @@
                         location: data.location ?? '',
                         property_type: data.property_type ?? '',
                         surface_min: data.surface_min ?? '',
+                        activite: data.activite ?? '',
                         financing_status: data.financing_status ?? 'unknown',
                         purchase_urgency: data.purchase_urgency ?? 'unknown',
                         financing_amount: data.financing_amount ?? '',
@@ -272,6 +273,7 @@
                             location: form.location || null,
                             property_type: form.property_type || null,
                             surface_min: ['Local commercial', 'Bureau'].includes(form.property_type) && form.surface_min !== '' ? parseInt(form.surface_min, 10) : null,
+                            activite: ['Local commercial', 'Bureau'].includes(form.property_type) && form.activite ? form.activite : null,
                             financing_status: form.financing_status,
                             purchase_urgency: form.purchase_urgency,
                             financing_amount: form.financing_amount === '' ? null : parseInt(form.financing_amount, 10),
@@ -446,6 +448,20 @@
                                                     <input type="number" min="0" value={form.surface_min}
                                                         onChange={(e) => set('surface_min', e.target.value)}
                                                         placeholder="Non renseignée" />
+                                                </div>
+                                            )}
+                                            {['Local commercial', 'Bureau'].includes(form.property_type) && (
+                                                <div className="form-group">
+                                                    <label>Activité envisagée</label>
+                                                    <select value={form.activite} onChange={(e) => set('activite', e.target.value)}>
+                                                        <option value="">Non précisée</option>
+                                                        <option value="commerce">Commerce de détail</option>
+                                                        <option value="restauration">Restauration</option>
+                                                        <option value="services">Services ou profession libérale</option>
+                                                        <option value="bureau">Bureaux</option>
+                                                        <option value="artisanat">Artisanat ou activité</option>
+                                                        <option value="autre">Autre</option>
+                                                    </select>
                                                 </div>
                                             )}
                                         </div>

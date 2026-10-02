@@ -51,13 +51,14 @@
             budget: ['budget', 'budget max', 'prix max', 'budget maximum'],
             location: ['secteur', 'ville', 'localisation', 'zone', 'location', 'secteur recherche'],
             property_type: ['type', 'type de bien', 'bien', 'property type', 'type de bien recherche'],
+            activite: ['activite', 'activite envisagee', 'activite prevue', 'activite souhaitee'],
             surface_min: ['surface', 'surface min', 'surface mini', 'surface minimum', 'surface minimale', 'surface recherchee', 'surface souhaitee', 'm2'],
             financing_status: ['financement', 'financing', 'statut financement'],
             purchase_urgency: ['echeance', 'urgence', 'delai', 'echeance d achat', 'delai d achat']
         };
         const NOMS_COLONNES = {
             name: 'Nom', email: 'E-mail', phone: 'Téléphone', budget: 'Budget', location: 'Secteur',
-            surface_min: 'Surface min.', property_type: 'Type de bien', financing_status: 'Financement', purchase_urgency: 'Échéance'
+            surface_min: 'Surface min.', activite: 'Activité', property_type: 'Type de bien', financing_status: 'Financement', purchase_urgency: 'Échéance'
         };
         const TYPES = ['Appartement', 'Maison', 'Villa', 'Studio', 'Penthouse', 'Terrain', 'Local commercial', 'Bureau'];
 
@@ -153,12 +154,13 @@
                     budget: versBudget(lu(ligne, 'budget')),
                     location: lu(ligne, 'location'),
                     property_type: versType(lu(ligne, 'property_type')),
+                    activite: lu(ligne, 'activite') || null,           // « Restaurant », « profession libérale » : reconnu par le serveur
                     surface_min: lu(ligne, 'surface_min') || null,      // « 120 », « 120 m² » : lu par le serveur
                     financing_status: versFinancement(lu(ligne, 'financing_status')),
                     purchase_urgency: versEcheance(lu(ligne, 'purchase_urgency'))
                 };
             });
-            const reconnues = ['name', 'email', 'phone', 'budget', 'location', 'property_type', 'surface_min', 'financing_status', 'purchase_urgency']
+            const reconnues = ['name', 'email', 'phone', 'budget', 'location', 'property_type', 'surface_min', 'activite', 'financing_status', 'purchase_urgency']
                 .filter((c) => (c === 'name' ? (indice.name !== undefined || deuxColonnes) : indice[c] !== undefined));
             return { prospects, reconnues, nomTrouve: indice.name !== undefined || deuxColonnes };
         }
