@@ -66,7 +66,7 @@
 
         const VIDE = {
             name: '', email: '', phone: '', budget: '',
-            location: '', property_type: '',
+            location: '', property_type: '', surface_min: '',
             financing_status: 'unknown', purchase_urgency: 'unknown'
         };
 
@@ -137,6 +137,7 @@
                             budget: form.budget === '' ? null : parseInt(form.budget, 10),
                             location: form.location.trim() || null,
                             property_type: form.property_type || null,
+                            surface_min: ['Local commercial', 'Bureau'].includes(form.property_type) && form.surface_min !== '' ? parseInt(form.surface_min, 10) : null,
                             financing_status: form.financing_status,
                             purchase_urgency: form.purchase_urgency
                         })
@@ -273,6 +274,17 @@
                                         </select>
                                     </div>
                                 </div>
+
+                                {['Local commercial', 'Bureau'].includes(form.property_type) && (
+                                    <div className="form-row">
+                                        <div className="form-group">
+                                            <label>Surface minimale recherchée (m²)</label>
+                                            <input type="number" min="0" value={form.surface_min}
+                                                onChange={(e) => set('surface_min', e.target.value)}
+                                                placeholder="120" />
+                                        </div>
+                                    </div>
+                                )}
 
                                 <div className="form-row">
                                     <div className="form-group">

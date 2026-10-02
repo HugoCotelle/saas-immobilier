@@ -73,6 +73,12 @@
                     <input id="location" name="location" type="text" maxlength="255" placeholder="Ville ou quartier">
                 </div>
             </div>
+            <div class="form-row masque" id="bloc-surface">
+                <div class="form-group">
+                    <label for="surface_min">Surface minimale recherchée (m²)</label>
+                    <input id="surface_min" name="surface_min" type="number" min="0" max="1000000" inputmode="numeric" placeholder="120">
+                </div>
+            </div>
             <div class="form-row">
                 <div class="form-group">
                     <label for="budget">Budget (€)</label>
@@ -161,6 +167,10 @@
                 })
                 .catch(function () { indisponible(); });
 
+            // Pour un local commercial ou un bureau, la surface recherchée compte dans la mise en relation.
+            var typePro = function () { var t = $('property_type').value; return t === 'Local commercial' || t === 'Bureau'; };
+            $('property_type').addEventListener('change', function () { montrer('bloc-surface', typePro()); });
+
             $('formulaire').addEventListener('submit', function (e) {
                 e.preventDefault();
                 montrer('erreur-consent', false);
@@ -171,6 +181,7 @@
                 montrer('message', false);
 
                 var budget = $('budget').value === '' ? null : parseInt($('budget').value, 10);
+                var surface = typePro() && $('surface_min').value !== '' ? parseInt($('surface_min').value, 10) : null;
                 var bouton = $('envoyer');
                 bouton.disabled = true;
                 bouton.textContent = 'Envoi…';
@@ -184,6 +195,7 @@
                         budget: budget,
                         location: $('location').value.trim() || null,
                         property_type: $('property_type').value || null,
+                        surface_min: surface,
                         financing_status: $('financing_status').value,
                         purchase_urgency: $('purchase_urgency').value,
                         message: $('message-libre').value.trim() || null,
