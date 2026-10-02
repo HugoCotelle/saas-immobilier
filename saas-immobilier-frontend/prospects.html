@@ -19,6 +19,13 @@
 
         const API_URL = 'https://saas-immobilier-921a.onrender.com';
 
+        const SITUATIONS = [
+            ['cdi', 'CDI'], ['fonctionnaire', 'Fonctionnaire'], ['cdd', 'CDD ou intérim'],
+            ['independant', "Indépendant ou chef d'entreprise"], ['retraite', 'Retraité'],
+            ['etudiant', 'Étudiant'], ['autre', 'Autre']
+        ];
+        const estLocation = (l) => l.transaction === 'location';
+
         const BADGES = {
             hot: ['badge-hot', 'Acheteur actif'],
             warm: ['badge-warm', 'Projet en cours'],
@@ -45,7 +52,7 @@
         const correspond = (lead, recherche) => {
             const termes = normaliser(recherche).split(/\s+/).filter(Boolean);
             if (termes.length === 0) return true;
-            const texte = normaliser([lead.name, lead.email, lead.phone, lead.location, lead.property_type].join(' '));
+            const texte = normaliser([lead.name, lead.email, lead.phone, lead.location, lead.property_type, lead.transaction === 'location' ? 'location locataire' : ''].join(' '));
             return termes.every((t) => texte.includes(t));
         };
 
@@ -67,7 +74,8 @@
         const VIDE = {
             name: '', email: '', phone: '', budget: '',
             location: '', property_type: '', surface_min: '', activite: '',
-            financing_status: 'unknown', purchase_urgency: 'unknown'
+            financing_status: 'unknown', purchase_urgency: 'unknown',
+            transaction: 'vente', revenus: '', garants: '', situation_pro: '', meuble_souhaite: ''
         };
 
         function App() {
@@ -81,6 +89,7 @@
             const [saving, setSaving] = useState(false);
             const [recherche, setRecherche] = useState('');
             const [filtreStatut, setFiltreStatut] = useState('all');
+            const [filtreTransaction, setFiltreTransaction] = useState('tout');   // tout | vente | location
 
             useEffect(() => {
                 const token = localStorage.getItem('token');
@@ -139,8 +148,16 @@
                             property_type: form.property_type || null,
                             surface_min: ['Local commercial', 'Bureau'].includes(form.property_type) && form.surface_min !== '' ? parseInt(form.surface_min, 10) : null,
                             activite: ['Local commercial', 'Bureau'].includes(form.property_type) && form.activite ? form.activite : null,
-                            financing_status: form.financing_status,
-                            purchase_urgency: form.purchase_urgency
+                            transaction: form.transaction,
+                            // Un locataire n'a pas de financement à valider : on n'envoie que son dossier.
+                            financing_status: form.transaction === 'location' ? 'unknown' : form.financing_status,
+                            purchase_urgency: form.purchase_urgency,
+                            ...(form.transaction === 'location' ? {
+                                revenus: form.revenus === '' ? null : parseInt(form.revenus, 10),
+                                garants: form.garants === '' ? null : parseInt(form.garants, 10),
+                                situation_pro: form.situation_pro || null,
+                                meuble_souhaite: form.meuble_souhaite === '' ? null : form.meuble_souhaite === 'oui'
+                            } : {})
                         })
                     });
                     if (!response.ok) {
@@ -168,7 +185,10 @@
             const set = (k, v) => { setForm({ ...form, [k]: v }); setError(null); };
 
             const statutDe = (lead) => (STATUTS.some((x) => x[0] === lead.status) ? lead.status : 'nouveau');
-            const parRecherche = leads.filter((l) => correspond(l, recherche));
+            const nbLocation = leads.filter(estLocation).length;
+            const parRecherche = leads
+                .filter((l) => filtreTransaction === 'tout' || estLocation(l) === (filtreTransaction === 'location'))
+                .filter((l) => correspond(l, recherche));
             const compte = (statut) => parRecherche.filter((l) => statutDe(l) === statut).length;
             const relanceDue = (l) => l.next_reminder && l.next_reminder <= aujourdhui();
             const nbRelances = parRecherche.filter(relanceDue).length;
@@ -227,6 +247,16 @@
 
                                 <div className="form-row">
                                     <div className="form-group">
+                                        <label>Il cherche à</label>
+                                        <select value={form.transaction} onChange={(e) => set('transaction', e.target.value)}>
+                                            <option value="vente">Acheter</option>
+                                            <option value="location">Louer</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="form-row">
+                                    <div className="form-group">
                                         <label>Nom <span className="obligatoire">*</span></label>
                                         <input type="text" value={form.name}
                                             onChange={(e) => set('name', e.target.value)}
@@ -248,10 +278,10 @@
 
                                 <div className="form-row">
                                     <div className="form-group">
-                                        <label>Budget (€)</label>
+                                        <label>{form.transaction === 'location' ? 'Loyer maximum (€ par mois)' : 'Budget (€)'}</label>
                                         <input type="number" value={form.budget}
                                             onChange={(e) => set('budget', e.target.value)}
-                                            placeholder="280000" />
+                                            placeholder={form.transaction === 'location' ? '900' : '280000'} />
                                     </div>
                                     <div className="form-group">
                                         <label>Secteur recherché</label>
@@ -299,7 +329,45 @@
                                     </div>
                                 )}
 
+                                {form.transaction === 'location' && (
+                                    <div className="form-row">
+                                        <div className="form-group">
+                                            <label>Revenus mensuels nets du foyer (€)</label>
+                                            <input type="number" min="0" value={form.revenus}
+                                                onChange={(e) => set('revenus', e.target.value)}
+                                                placeholder="2800" />
+                                        </div>
+                                        <div className="form-group">
+                                            <label>Nombre de garants</label>
+                                            <input type="number" min="0" max="10" value={form.garants}
+                                                onChange={(e) => set('garants', e.target.value)}
+                                                placeholder="1" />
+                                        </div>
+                                        <div className="form-group">
+                                            <label>Situation professionnelle</label>
+                                            <select value={form.situation_pro} onChange={(e) => set('situation_pro', e.target.value)}>
+                                                <option value="">Non renseignée</option>
+                                                {SITUATIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {form.transaction === 'location' && !['Local commercial', 'Bureau'].includes(form.property_type) && (
+                                    <div className="form-row">
+                                        <div className="form-group">
+                                            <label>Meublé</label>
+                                            <select value={form.meuble_souhaite} onChange={(e) => set('meuble_souhaite', e.target.value)}>
+                                                <option value="">Indifférent</option>
+                                                <option value="oui">Meublé</option>
+                                                <option value="non">Non meublé</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="form-row">
+                                    {form.transaction !== 'location' && (
                                     <div className="form-group">
                                         <label>Financement</label>
                                         <select value={form.financing_status}
@@ -311,8 +379,9 @@
                                             <option value="rejected">Refusé</option>
                                         </select>
                                     </div>
+                                    )}
                                     <div className="form-group">
-                                        <label>Échéance d'achat</label>
+                                        <label>{form.transaction === 'location' ? "Date d'emménagement souhaitée" : "Échéance d'achat"}</label>
                                         <select value={form.purchase_urgency}
                                             onChange={(e) => set('purchase_urgency', e.target.value)}>
                                             <option value="unknown">Non renseignée</option>
@@ -350,6 +419,14 @@
                                 onChange={(e) => setRecherche(e.target.value)}
                                 placeholder="Rechercher un prospect (nom, secteur, e-mail...)"
                                 aria-label="Rechercher un prospect" />
+                            {nbLocation > 0 && nbLocation < leads.length && (
+                                <div className="filters">
+                                    {[['tout', 'Achat et location'], ['vente', 'Achat'], ['location', 'Location']].map(([v, l]) => (
+                                        <button key={v} className={`filter-button ${filtreTransaction === v ? 'active' : ''}`}
+                                            onClick={() => setFiltreTransaction(v)}>{l}</button>
+                                    ))}
+                                </div>
+                            )}
                             <div className="filters">
                                 <button className={`filter-button ${filtreStatut === 'all' ? 'active' : ''}`}
                                     onClick={() => setFiltreStatut('all')}>Tous ({parRecherche.length})</button>
@@ -368,7 +445,8 @@
                             <div className="leads-grid">
                                 {affiches.map((lead) => {
                                     const q = lead.lead_quality || 'cold';
-                                    const [cls, libelle] = BADGES[q] || BADGES.cold;
+                                    const [cls, libelle0] = BADGES[q] || BADGES.cold;
+                                    const libelle = estLocation(lead) && q === 'hot' ? 'Locataire actif' : libelle0;
                                     const statut = statutDe(lead);
                                     const enRetard = lead.next_reminder && lead.next_reminder < aujourdhui();
                                     return (
@@ -383,9 +461,9 @@
                                                 <span className="lead-value">{lead.phone || 'N/A'}</span>
                                             </div>
                                             <div className="lead-field">
-                                                <span className="lead-label">Budget :</span>
+                                                <span className="lead-label">{estLocation(lead) ? 'Loyer max :' : 'Budget :'}</span>
                                                 <span className="lead-value">
-                                                    {lead.budget ? `${lead.budget.toLocaleString('fr-FR')} €` : 'N/A'}
+                                                    {lead.budget ? `${lead.budget.toLocaleString('fr-FR')} €${estLocation(lead) ? ' / mois' : ''}` : 'N/A'}
                                                 </span>
                                             </div>
                                             <div className="lead-field">
@@ -398,6 +476,7 @@
                                             </div>
                                             <div className="lead-tags">
                                                 <span className={`statut-badge statut-${statut}`}>{libelleStatut(statut)}</span>
+                                                {estLocation(lead) && <span className="tag-relance" style={{ background: '#E7EDE4', color: '#4F6353' }}>Location</span>}
                                                 {lead.next_reminder && (
                                                     <span className={`tag-relance${enRetard ? ' retard' : ''}`}>
                                                         {enRetard ? 'Relance en retard · ' : 'Relance le '}{dateCourte(lead.next_reminder)}

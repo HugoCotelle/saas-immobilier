@@ -37,6 +37,14 @@
         <div id="message" class="masque" role="status"></div>
 
         <form id="formulaire" class="masque" novalidate>
+            <div class="form-group">
+                <label for="transaction">Votre projet</label>
+                <select id="transaction" name="transaction">
+                    <option value="vente">Acheter un bien</option>
+                    <option value="location">Louer un bien</option>
+                </select>
+            </div>
+
             <div class="form-row">
                 <div class="form-group">
                     <label for="property_type">Type de bien</label>
@@ -77,10 +85,10 @@
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label for="budget">Budget (€)</label>
+                    <label for="budget" id="label-budget">Budget (€)</label>
                     <input id="budget" name="budget" type="number" min="0" max="100000000" inputmode="numeric" placeholder="280000">
                 </div>
-                <div class="form-group">
+                <div class="form-group" id="bloc-financement">
                     <label for="financing_status">Financement</label>
                     <select id="financing_status" name="financing_status">
                         <option value="unknown">Non précisé</option>
@@ -89,8 +97,45 @@
                     </select>
                 </div>
             </div>
+            <div class="form-row masque" id="bloc-dossier">
+                <div class="form-group">
+                    <label for="revenus">Revenus mensuels nets du foyer (€)</label>
+                    <input id="revenus" name="revenus" type="number" min="0" max="10000000" inputmode="numeric" placeholder="2800">
+                </div>
+                <div class="form-group">
+                    <label for="garants">Avez-vous un garant ?</label>
+                    <select id="garants" name="garants">
+                        <option value="">Non précisé</option>
+                        <option value="1">Oui</option>
+                        <option value="0">Non</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row masque" id="bloc-situation">
+                <div class="form-group">
+                    <label for="situation_pro">Situation professionnelle</label>
+                    <select id="situation_pro" name="situation_pro">
+                        <option value="">Non précisée</option>
+                        <option value="cdi">CDI</option>
+                        <option value="fonctionnaire">Fonctionnaire</option>
+                        <option value="cdd">CDD ou intérim</option>
+                        <option value="independant">Indépendant ou chef d'entreprise</option>
+                        <option value="retraite">Retraité</option>
+                        <option value="etudiant">Étudiant</option>
+                        <option value="autre">Autre</option>
+                    </select>
+                </div>
+                <div class="form-group" id="bloc-meuble">
+                    <label for="meuble_souhaite">Logement meublé ?</label>
+                    <select id="meuble_souhaite" name="meuble_souhaite">
+                        <option value="">Indifférent</option>
+                        <option value="oui">Meublé</option>
+                        <option value="non">Non meublé</option>
+                    </select>
+                </div>
+            </div>
             <div class="form-group">
-                <label for="purchase_urgency">Quand souhaitez-vous acheter ?</label>
+                <label for="purchase_urgency" id="label-echeance">Quand souhaitez-vous acheter ?</label>
                 <select id="purchase_urgency" name="purchase_urgency">
                     <option value="unknown">Non précisé</option>
                     <option value="immediate">Dès que possible</option>
@@ -170,6 +215,8 @@
                         $('agence-consent').textContent = agence;
                         $('sous-titre').textContent = agence + ' pourra vous proposer les bons biens plus vite avec ces quelques précisions.';
                     }
+                    // Le prospect a peut-être déjà dit, dans son message, qu'il cherchait une location.
+                    if (d.transaction === 'location') { $('transaction').value = 'location'; adapter(); }
                     montrer('etat', false);
                     montrer('formulaire', true);
                 })
@@ -177,7 +224,21 @@
 
             // Pour un local commercial ou un bureau, la surface recherchée compte dans la mise en relation.
             var typePro = function () { var t = $('property_type').value; return t === 'Local commercial' || t === 'Bureau'; };
-            $('property_type').addEventListener('change', function () { montrer('bloc-surface', typePro()); });
+            // Vente ou location : le formulaire s'adapte (loyer, dossier du locataire, pas de financement).
+            var enLocation = function () { return $('transaction').value === 'location'; };
+            function adapter() {
+                var loc = enLocation();
+                $('label-budget').textContent = loc ? 'Loyer maximum (€ par mois)' : 'Budget (€)';
+                $('budget').placeholder = loc ? '900' : '280000';
+                $('label-echeance').textContent = loc ? 'Quand souhaitez-vous emménager ?' : 'Quand souhaitez-vous acheter ?';
+                montrer('bloc-financement', !loc);
+                montrer('bloc-dossier', loc);
+                montrer('bloc-situation', loc);
+                montrer('bloc-meuble', loc && !typePro());
+                montrer('bloc-surface', typePro());
+            }
+            $('property_type').addEventListener('change', adapter);
+            $('transaction').addEventListener('change', adapter);
 
             $('formulaire').addEventListener('submit', function (e) {
                 e.preventDefault();
@@ -201,8 +262,13 @@
                         property_type: $('property_type').value || null,
                         surface_min: surface,
                         activite: typePro() && $('activite').value ? $('activite').value : null,
-                        financing_status: $('financing_status').value,
+                        transaction: $('transaction').value,
+                        financing_status: enLocation() ? 'unknown' : $('financing_status').value,
                         purchase_urgency: $('purchase_urgency').value,
+                        revenus: enLocation() && $('revenus').value !== '' ? parseInt($('revenus').value, 10) : null,
+                        garants: enLocation() && $('garants').value !== '' ? parseInt($('garants').value, 10) : null,
+                        situation_pro: enLocation() && $('situation_pro').value ? $('situation_pro').value : null,
+                        meuble_souhaite: enLocation() && !typePro() && $('meuble_souhaite').value ? $('meuble_souhaite').value === 'oui' : null,
                         message: $('message-libre').value.trim() || null,
                         website: $('website').value,
                         consent: true

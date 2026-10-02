@@ -31,6 +31,10 @@
         .cases input[type=checkbox] { width: auto; margin: 0; }
         .bien-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
         .bien-actions .btn { margin-left: 0; }
+        .onglets-transaction { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+        .onglets-transaction button { cursor: pointer; border: 1px solid var(--line, #E3DCCC); background: var(--surface); color: var(--ink-2); border-radius: 999px; padding: 7px 16px; font-size: 13px; font-family: inherit; }
+        .onglets-transaction button.actif { background: var(--sage-600, #4F6353); border-color: var(--sage-600, #4F6353); color: #fff; }
+        .bien-badge-location { display: inline-block; font-size: 12px; font-weight: 600; color: var(--sage-600, #4F6353); background: #E7EDE4; border-radius: 999px; padding: 3px 10px; margin-right: 8px; }
     </style>
 </head>
 <body>
@@ -42,7 +46,8 @@
 
         const VIDE = {
             reference: '', title: '', address: '', price: '', size: '', rooms: '',
-            property_type: '', description: '', activites_autorisees: [], extraction_air: ''
+            property_type: '', description: '', activites_autorisees: [], extraction_air: '',
+            transaction: 'vente', meuble: ''
         };
 
         // Pour un local commercial ou un bureau : activités autorisées et extraction d'air.
@@ -111,18 +116,22 @@
             address: ['adresse', 'adresse du bien', 'localisation', 'secteur'],
             city: ['ville', 'commune'],
             zip: ['code postal', 'cp'],
-            price: ['prix', 'prix de vente', 'prix fai', 'prix net vendeur', 'montant'],
+            price: ['prix', 'prix de vente', 'prix fai', 'prix net vendeur', 'montant', 'loyer', 'loyer mensuel'],
             size: ['surface', 'surface habitable', 'superficie', 'm2'],
             rooms: ['pieces', 'nb pieces', 'nombre de pieces', 'nombre pieces', 'nb de pieces'],
             property_type: ['type de bien', 'type bien', 'nature', 'categorie', 'type'],
             description: ['description', 'descriptif', 'texte annonce', 'texte', 'commentaire'],
             activites_autorisees: ['activites autorisees', 'activite autorisee', 'activites', 'destination', 'usage'],
-            extraction_air: ['extraction', 'extraction d air', 'extraction air', 'conduit d extraction', 'hotte', 'ventilation']
+            extraction_air: ['extraction', 'extraction d air', 'extraction air', 'conduit d extraction', 'hotte', 'ventilation'],
+            transaction: ['transaction', 'type de transaction', 'vente ou location', 'vente location', 'location vente', 'nature de l operation', 'operation'],
+            meuble: ['meuble', 'meublee', 'bien meuble', 'ameublement']
         };
 
         const NOMS_CHAMPS = {
             reference: 'Référence', title: 'Titre', address: 'Adresse', city: 'Ville', zip: 'Code postal',
-            price: 'Prix', size: 'Surface', rooms: 'Pièces', property_type: 'Type de bien', description: 'Description'
+            price: 'Prix ou loyer', size: 'Surface', rooms: 'Pièces', property_type: 'Type de bien', description: 'Description',
+            activites_autorisees: 'Activités autorisées', extraction_air: "Extraction d'air",
+            transaction: 'Vente ou location', meuble: 'Meublé'
         };
 
         // Pour chaque champ, la colonne dont le titre ressemble le plus (le synonyme le plus long gagne).
@@ -183,7 +192,9 @@
                     property_type: valeur(l, 'property_type'),
                     description: valeur(l, 'description'),
                     activites_autorisees: valeur(l, 'activites_autorisees'),
-                    extraction_air: valeur(l, 'extraction_air')
+                    extraction_air: valeur(l, 'extraction_air'),
+                    transaction: valeur(l, 'transaction'),
+                    meuble: valeur(l, 'meuble')
                 };
             });
             const utilisees = Object.keys(colonnes).map((c) => colonnes[c].index);
@@ -191,6 +202,7 @@
                 biens,
                 reconnues: Object.keys(colonnes).map((c) => ({ champ: c, entete: colonnes[c].entete })),
                 ignorees: lignes[0].map((e) => String(e).trim()).filter((e, i) => e && !utilisees.includes(i)),
+                avecTransaction: !!colonnes.transaction,
                 sansAdresse: biens.filter((b) => !b.address).length,
                 sansType: biens.filter((b) => !b.property_type).length
             };
@@ -198,9 +210,10 @@
 
         // Modèle de fichier : séparateur point-virgule et BOM, pour s'ouvrir correctement dans Excel en français.
         const MODELE_CSV = '﻿' + [
-            'reference;titre;adresse;code postal;ville;prix;surface;pieces;type;description',
-            'DP-1042;Maison familiale avec jardin;12 rue des Tilleuls;60300;Senlis;395000;120;5;Maison;Jardin de 420 m², garage',
-            'DP-1038;Appartement T3 lumineux;8 avenue du Maréchal Foch;60500;Chantilly;245000;68;3;Appartement;Balcon, cave'
+            'reference;titre;adresse;code postal;ville;vente ou location;prix ou loyer;surface;pieces;type;meuble;description',
+            'DP-1042;Maison familiale avec jardin;12 rue des Tilleuls;60300;Senlis;vente;395000;120;5;Maison;;Jardin de 420 m², garage',
+            'DP-1038;Appartement T3 lumineux;8 avenue du Maréchal Foch;60500;Chantilly;vente;245000;68;3;Appartement;;Balcon, cave',
+            'DP-2007;Studio proche gare;4 rue de la Gare;60300;Senlis;location;640;22;1;Studio;oui;Loyer mensuel charges comprises'
         ].join('\r\n') + '\r\n';
 
         function telechargerModele() {
@@ -223,6 +236,17 @@
             return Number.isFinite(n) && v !== '' ? `${n.toLocaleString('fr-FR')} €` : '—';
         };
 
+        const estLocation = (b) => b.transaction === 'location';
+        const prixAffiche = (b) => (b.price || b.price === 0)
+            ? `${b.price.toLocaleString('fr-FR')} €${estLocation(b) ? ' / mois' : ''}` : '—';
+        // Lecture indicative du texte d'une cellule, pour l'aperçu seulement : le serveur fait foi.
+        const transactionDuFichier = (texte, defaut) => {
+            const t = sansAccents(texte);
+            if (/\b(location|louer|locataire|bail|loyer)\b/.test(t)) return 'location';
+            if (/\b(vente|vendre|achat|vendu)\b/.test(t)) return 'vente';
+            return defaut;
+        };
+
         function BiensApp() {
             const [biens, setBiens] = useState([]);
             const [filtre, setFiltre] = useState('');
@@ -238,6 +262,8 @@
             const [analyse, setAnalyse] = useState(null);
             const [progression, setProgression] = useState(null);
             const [bilan, setBilan] = useState(null);
+            const [onglet, setOnglet] = useState('tout');                // tout | vente | location
+            const [transactionImport, setTransactionImport] = useState('vente');   // vente | location : pour les lignes qui ne le précisent pas
 
             useEffect(() => {
                 const token = localStorage.getItem('token');
@@ -297,6 +323,11 @@
                             rooms: form.rooms === '' ? null : parseInt(form.rooms, 10),
                             property_type: form.property_type || null,
                             description: form.description.trim() || null,
+                            transaction: form.transaction,
+                            // Le meublé ne concerne que les logements à louer.
+                            ...(form.transaction === 'location' && !TYPES_PRO.includes(form.property_type) ? {
+                                meuble: form.meuble === '' ? null : form.meuble === 'oui'
+                            } : {}),
                             // Hors local commercial / bureau, ces champs sont cachés : on ne touche pas à ce qui est enregistré.
                             ...(TYPES_PRO.includes(form.property_type) ? {
                                 activites_autorisees: form.activites_autorisees,
@@ -342,6 +373,7 @@
                     const resultat = analyserFichier(lignes);
                     if (resultat.erreur) { setError(resultat.erreur); return; }
                     setAnalyse({ nom: fichier.name, ...resultat });
+                    setTransactionImport('vente');
                 } catch (err) {
                     setError(err && err.message && /Excel|classeur|navigateur/.test(err.message) ? err.message
                         : "Ce fichier ne peut pas être lu. Choisissez un fichier Excel (.xlsx) ou CSV.");
@@ -364,7 +396,10 @@
                         const response = await fetch(`${API_URL}/api/v1/properties/import`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                            body: JSON.stringify({ rows: lignes.slice(i, i + TAILLE_PAQUET), offset: i })
+                            body: JSON.stringify({
+                                rows: lignes.slice(i, i + TAILLE_PAQUET), offset: i,
+                                default_transaction: transactionImport
+                            })
                         });
                         if (response.status === 401) {
                             localStorage.removeItem('token');
@@ -426,7 +461,9 @@
                     price: b.price ?? '', size: b.size ?? '', rooms: b.rooms ?? '',
                     property_type: b.property_type ?? '', description: b.description ?? '',
                     activites_autorisees: b.activites_autorisees ?? [],
-                    extraction_air: b.extraction_air === true ? 'oui' : b.extraction_air === false ? 'non' : ''
+                    extraction_air: b.extraction_air === true ? 'oui' : b.extraction_air === false ? 'non' : '',
+                    transaction: b.transaction === 'location' ? 'location' : 'vente',
+                    meuble: b.meuble === true ? 'oui' : b.meuble === false ? 'non' : ''
                 });
                 setEditionId(b.id); setFormOuvert(true);
                 setImportOuvert(false); setMessage(null); setError(null);
@@ -434,13 +471,16 @@
             };
 
             const f = filtre.trim().toLowerCase();
+            const nbVente = biens.filter((b) => !estLocation(b)).length;
+            const nbLocation = biens.length - nbVente;
+            const biensOnglet = onglet === 'tout' ? biens : biens.filter((b) => estLocation(b) === (onglet === 'location'));
             const biensFiltres = f
-                ? biens.filter((b) =>
+                ? biensOnglet.filter((b) =>
                     (b.title || '').toLowerCase().includes(f) ||
                     (b.reference || '').toLowerCase().includes(f) ||
                     (b.address || '').toLowerCase().includes(f) ||
                     (b.property_type || '').toLowerCase().includes(f))
-                : biens;
+                : biensOnglet;
 
             return (
                 <>
@@ -469,6 +509,7 @@
                                 <h1 className="page-title">Biens</h1>
                                 <p className="page-subtitle">
                                     {biens.length} bien{biens.length > 1 ? 's' : ''} au portefeuille
+                                    {nbLocation > 0 && ` (${nbVente} à vendre, ${nbLocation} à louer)`}
                                 </p>
                             </div>
                             <div className="btn-ligne">
@@ -500,9 +541,11 @@
                                         <div className="import-etape-titre"><span>1.</span>Préparez le fichier</div>
                                         <div className="panel-note" style={{ marginBottom: '12px' }}>
                                             La première ligne contient les titres des colonnes. Colonnes
-                                            reconnues : référence, titre, adresse, code postal, ville, prix,
-                                            surface, pièces, type de bien, description et, pour les locaux commerciaux et
-                                            bureaux, activités autorisées et extraction d'air (oui ou non). Seul le titre est
+                                            reconnues : référence, titre, adresse, code postal, ville, prix (ou loyer),
+                                            vente ou location, surface, pièces, type de bien, description, meublé (oui ou non)
+                                            et, pour les locaux commerciaux et bureaux, activités autorisées et extraction
+                                            d'air (oui ou non). Pour une location, la colonne prix contient le loyer
+                                            mensuel. Seul le titre est
                                             indispensable, mais sans adresse ni type, un bien n'apparaîtra
                                             dans aucune correspondance. Le fichier peut être au format Excel
                                             (.xlsx) ou CSV ; si le classeur a plusieurs feuilles, la première
@@ -541,6 +584,16 @@
                                                     Colonnes ignorées : {analyse.ignorees.join(', ')}
                                                 </div>
                                             )}
+                                            <div className="form-group" style={{ maxWidth: '420px', marginTop: '14px' }}>
+                                                <label htmlFor="transaction-import">
+                                                    {analyse.avecTransaction ? 'Quand une ligne ne précise pas vente ou location, le bien est' : 'Ces biens sont'}
+                                                </label>
+                                                <select id="transaction-import" value={transactionImport}
+                                                    onChange={(e) => setTransactionImport(e.target.value)} disabled={!!progression}>
+                                                    <option value="vente">Des biens à vendre</option>
+                                                    <option value="location">Des biens à louer</option>
+                                                </select>
+                                            </div>
                                             {(analyse.sansAdresse > 0 || analyse.sansType > 0) && (
                                                 <div className="import-avertissement">
                                                     {analyse.sansAdresse > 0 && <div>{analyse.sansAdresse} bien{analyse.sansAdresse > 1 ? 's' : ''} sans adresse.</div>}
@@ -552,7 +605,7 @@
                                                 <table className="admin-table apercu-table">
                                                     <thead>
                                                         <tr>
-                                                            <th>Réf.</th><th>Titre</th><th>Adresse</th><th>Prix</th><th>Pièces</th><th>Type</th>
+                                                            <th>Réf.</th><th>Titre</th><th>Adresse</th><th>Vente / location</th><th>Prix ou loyer</th><th>Pièces</th><th>Type</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody>
@@ -561,7 +614,15 @@
                                                                 <td>{b.reference || '—'}</td>
                                                                 <td>{b.title || '—'}</td>
                                                                 <td>{b.address || '—'}</td>
-                                                                <td>{prixLisible(b.price)}</td>
+                                                                {(() => {
+                                                                    const location = transactionDuFichier(b.transaction, transactionImport) === 'location';
+                                                                    return (
+                                                                        <>
+                                                                            <td>{location ? 'Location' : 'Vente'}</td>
+                                                                            <td>{prixLisible(b.price)}{location && b.price ? ' / mois' : ''}</td>
+                                                                        </>
+                                                                    );
+                                                                })()}
                                                                 <td>{b.rooms || '—'}</td>
                                                                 <td>{b.property_type || '—'}</td>
                                                             </tr>
@@ -649,6 +710,13 @@
 
                                 <div className="form-row">
                                     <div className="form-group">
+                                        <label>Ce bien est</label>
+                                        <select value={form.transaction} onChange={(e) => set('transaction', e.target.value)}>
+                                            <option value="vente">À vendre</option>
+                                            <option value="location">À louer</option>
+                                        </select>
+                                    </div>
+                                    <div className="form-group">
                                         <label>Référence</label>
                                         <input type="text" value={form.reference}
                                             onChange={(e) => set('reference', e.target.value)}
@@ -670,10 +738,10 @@
                                             placeholder="12 rue Nationale 59000 Lille" />
                                     </div>
                                     <div className="form-group">
-                                        <label>Prix (€)</label>
+                                        <label>{form.transaction === 'location' ? 'Loyer mensuel (€ par mois)' : 'Prix (€)'}</label>
                                         <input type="number" value={form.price}
                                             onChange={(e) => set('price', e.target.value)}
-                                            placeholder="249000" />
+                                            placeholder={form.transaction === 'location' ? '850' : '249000'} />
                                     </div>
                                 </div>
 
@@ -706,6 +774,19 @@
                                         </select>
                                     </div>
                                 </div>
+
+                                {form.transaction === 'location' && !TYPES_PRO.includes(form.property_type) && (
+                                    <div className="form-row">
+                                        <div className="form-group">
+                                            <label>Meublé</label>
+                                            <select value={form.meuble} onChange={(e) => set('meuble', e.target.value)}>
+                                                <option value="">Non renseigné</option>
+                                                <option value="oui">Meublé</option>
+                                                <option value="non">Non meublé</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                )}
 
                                 {TYPES_PRO.includes(form.property_type) && (
                                     <>
@@ -759,6 +840,14 @@
                             </div>
                         )}
 
+                        {!loading && nbLocation > 0 && nbVente > 0 && (
+                            <div className="onglets-transaction" role="tablist" aria-label="Vente ou location">
+                                <button type="button" role="tab" className={onglet === 'tout' ? 'actif' : ''} aria-selected={onglet === 'tout'} onClick={() => setOnglet('tout')}>Tout ({biens.length})</button>
+                                <button type="button" role="tab" className={onglet === 'vente' ? 'actif' : ''} aria-selected={onglet === 'vente'} onClick={() => setOnglet('vente')}>À vendre ({nbVente})</button>
+                                <button type="button" role="tab" className={onglet === 'location' ? 'actif' : ''} aria-selected={onglet === 'location'} onClick={() => setOnglet('location')}>À louer ({nbLocation})</button>
+                            </div>
+                        )}
+
                         {!loading && biens.length > 0 && (
                             <input className="recherche" type="text" value={filtre}
                                 onChange={(e) => setFiltre(e.target.value)}
@@ -790,7 +879,7 @@
                                         <div className="bien-header">
                                             <div className="bien-titre">{b.title}</div>
                                             <div className="bien-prix">
-                                                {b.price ? `${b.price.toLocaleString('fr-FR')} €` : '—'}
+                                                {prixAffiche(b)}
                                             </div>
                                         </div>
                                         <div className="bien-adresse">
@@ -805,6 +894,12 @@
                                             <span className="bien-label">Pièces :</span>
                                             <span className="bien-value">{b.rooms || 'N/A'}</span>
                                         </div>
+                                        {estLocation(b) && b.meuble !== null && b.meuble !== undefined && !TYPES_PRO.includes(b.property_type) && (
+                                            <div className="bien-field">
+                                                <span className="bien-label">Meublé :</span>
+                                                <span className="bien-value">{b.meuble ? 'Oui' : 'Non'}</span>
+                                            </div>
+                                        )}
                                         {TYPES_PRO.includes(b.property_type) && (b.extraction_air !== null && b.extraction_air !== undefined) && (
                                             <div className="bien-field">
                                                 <span className="bien-label">Extraction d'air :</span>
@@ -820,6 +915,7 @@
                                         {b.description && (
                                             <div className="bien-desc">{b.description}</div>
                                         )}
+                                        {estLocation(b) && <span className="bien-badge-location">À louer</span>}
                                         {b.property_type && (
                                             <span className="bien-type">{b.property_type}</span>
                                         )}

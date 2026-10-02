@@ -48,17 +48,23 @@
             nomfamille: ['nom de famille', 'last name', 'lastname'],
             email: ['email', 'e mail', 'mail', 'courriel', 'adresse mail', 'adresse email'],
             phone: ['telephone', 'tel', 'mobile', 'portable', 'phone', 'numero', 'numero de telephone'],
-            budget: ['budget', 'budget max', 'prix max', 'budget maximum'],
+            budget: ['budget', 'budget max', 'prix max', 'budget maximum', 'budget ou loyer max', 'loyer max', 'loyer maximum', 'loyer'],
             location: ['secteur', 'ville', 'localisation', 'zone', 'location', 'secteur recherche'],
             property_type: ['type', 'type de bien', 'bien', 'property type', 'type de bien recherche'],
             activite: ['activite', 'activite envisagee', 'activite prevue', 'activite souhaitee'],
             surface_min: ['surface', 'surface min', 'surface mini', 'surface minimum', 'surface minimale', 'surface recherchee', 'surface souhaitee', 'm2'],
             financing_status: ['financement', 'financing', 'statut financement'],
-            purchase_urgency: ['echeance', 'urgence', 'delai', 'echeance d achat', 'delai d achat']
+            purchase_urgency: ['echeance', 'urgence', 'delai', 'echeance d achat', 'delai d achat', 'date d emmenagement', 'emmenagement'],
+            transaction: ['transaction', 'projet', 'type de recherche', 'recherche', 'achat ou location', 'vente ou location', 'achat location'],
+            revenus: ['revenus', 'revenu', 'revenus mensuels', 'revenu mensuel', 'revenus nets', 'salaire', 'salaire net'],
+            garants: ['garants', 'garant', 'nombre de garants'],
+            situation_pro: ['situation professionnelle', 'situation pro', 'situation', 'profession', 'statut professionnel', 'contrat'],
+            meuble_souhaite: ['meuble', 'meublee', 'meuble souhaite', 'logement meuble']
         };
         const NOMS_COLONNES = {
             name: 'Nom', email: 'E-mail', phone: 'Téléphone', budget: 'Budget', location: 'Secteur',
-            surface_min: 'Surface min.', activite: 'Activité', property_type: 'Type de bien', financing_status: 'Financement', purchase_urgency: 'Échéance'
+            surface_min: 'Surface min.', activite: 'Activité', property_type: 'Type de bien', financing_status: 'Financement', purchase_urgency: 'Échéance',
+            transaction: 'Achat ou location', revenus: 'Revenus', garants: 'Garants', situation_pro: 'Situation professionnelle', meuble_souhaite: 'Meublé'
         };
         const TYPES = ['Appartement', 'Maison', 'Villa', 'Studio', 'Penthouse', 'Terrain', 'Local commercial', 'Bureau'];
 
@@ -157,10 +163,17 @@
                     activite: lu(ligne, 'activite') || null,           // « Restaurant », « profession libérale » : reconnu par le serveur
                     surface_min: lu(ligne, 'surface_min') || null,      // « 120 », « 120 m² » : lu par le serveur
                     financing_status: versFinancement(lu(ligne, 'financing_status')),
-                    purchase_urgency: versEcheance(lu(ligne, 'purchase_urgency'))
+                    purchase_urgency: versEcheance(lu(ligne, 'purchase_urgency')),
+                    // Texte brut : « Location », « 2 800 € », « CDI », « oui »... le serveur les interprète.
+                    transaction: lu(ligne, 'transaction') || null,
+                    revenus: lu(ligne, 'revenus') || null,
+                    garants: lu(ligne, 'garants') || null,
+                    situation_pro: lu(ligne, 'situation_pro') || null,
+                    meuble_souhaite: lu(ligne, 'meuble_souhaite') || null
                 };
             });
-            const reconnues = ['name', 'email', 'phone', 'budget', 'location', 'property_type', 'surface_min', 'activite', 'financing_status', 'purchase_urgency']
+            const reconnues = ['name', 'email', 'phone', 'budget', 'location', 'property_type', 'surface_min', 'activite', 'financing_status', 'purchase_urgency',
+                'transaction', 'revenus', 'garants', 'situation_pro', 'meuble_souhaite']
                 .filter((c) => (c === 'name' ? (indice.name !== undefined || deuxColonnes) : indice[c] !== undefined));
             return { prospects, reconnues, nomTrouve: indice.name !== undefined || deuxColonnes };
         }
@@ -170,9 +183,10 @@
             catch (e) { return new TextDecoder('windows-1252').decode(buffer); }   // Excel français
         }
 
-        const MODELE = 'Nom;E-mail;Téléphone;Budget;Secteur;Type de bien;Financement;Échéance\r\n' +
-            'Marie Le Gall;marie@exemple.fr;0612345678;280000;Lille;Appartement;accord obtenu;immédiate\r\n' +
-            'Thomas Martin;thomas@exemple.fr;0698765432;350000;Lyon;Maison;en cours;3 à 6 mois\r\n';
+        const MODELE = 'Nom;E-mail;Téléphone;Achat ou location;Budget ou loyer max;Secteur;Type de bien;Financement;Échéance;Revenus;Garants;Situation professionnelle;Meublé\r\n' +
+            'Marie Le Gall;marie@exemple.fr;0612345678;achat;280000;Lille;Appartement;accord obtenu;immédiate;;;;\r\n' +
+            'Thomas Martin;thomas@exemple.fr;0698765432;achat;350000;Lyon;Maison;en cours;3 à 6 mois;;;;\r\n' +
+            'Camille Durand;camille@exemple.fr;0611223344;location;850;Senlis;Appartement;;1 à 3 mois;2700;1;CDI;oui\r\n';
 
         function ImportApp() {
             const [user, setUser] = useState(null);
@@ -181,6 +195,7 @@
             const [erreur, setErreur] = useState(null);
             const [envoi, setEnvoi] = useState(null);       // { fait, total }
             const [resultat, setResultat] = useState(null);
+            const [transactionDefaut, setTransactionDefaut] = useState('vente');   // pour les lignes qui ne le précisent pas
 
             useEffect(() => {
                 const token = localStorage.getItem('token');
@@ -240,7 +255,7 @@
                         const r = await fetch(`${API_URL}/api/v1/leads/import`, {
                             method: 'POST',
                             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ rows: paquet, offset: debut + 1 })   // +1 : la ligne 1 est l'en-tête
+                            body: JSON.stringify({ rows: paquet, offset: debut + 1, default_transaction: transactionDefaut })   // +1 : la ligne 1 est l'en-tête
                         });
                         if (r.status === 401) { handleLogout(); return; }
                         const d = await r.json().catch(() => ({}));
@@ -332,9 +347,10 @@
                             <div className="panel">
                                 <div className="panel-title">1. Choisir le fichier</div>
                                 <div className="panel-note">
-                                    Un fichier Excel (.xlsx) ou CSV avec une ligne de titres : Nom, E-mail, Téléphone, Budget,
-                                    Secteur, Type de bien, Financement, Échéance. Seul le nom est indispensable ;
-                                    les colonnes absentes sont simplement laissées vides. Si le classeur Excel a
+                                    Un fichier Excel (.xlsx) ou CSV avec une ligne de titres : Nom, E-mail, Téléphone, Achat ou
+                                    location, Budget (ou loyer maximum), Secteur, Type de bien, Financement, Échéance et, pour
+                                    les locataires, Revenus mensuels, Garants, Situation professionnelle, Meublé. Seul le nom
+                                    est indispensable ; les colonnes absentes sont simplement laissées vides. Si le classeur Excel a
                                     plusieurs feuilles, la première feuille qui contient des données est lue.
                                     Maximum {MAX_LIGNES} prospects et 2 Mo par fichier.
                                 </div>
@@ -360,16 +376,36 @@
                                 <div className="colonnes">
                                     {analyse.reconnues.map((c) => <span key={c} className="statut-badge statut-contacte">{NOMS_COLONNES[c]}</span>)}
                                 </div>
+                                <div className="form-group" style={{ maxWidth: '460px', marginTop: '14px' }}>
+                                    <label htmlFor="transaction-defaut">
+                                        {analyse.reconnues.includes('transaction')
+                                            ? 'Quand une ligne ne précise pas achat ou location, le prospect cherche à'
+                                            : 'Ces prospects cherchent à'}
+                                    </label>
+                                    <select id="transaction-defaut" value={transactionDefaut} onChange={(e) => setTransactionDefaut(e.target.value)}>
+                                        <option value="vente">Acheter</option>
+                                        <option value="location">Louer</option>
+                                    </select>
+                                </div>
                                 <div className="apercu">
                                     <table>
-                                        <thead><tr><th>Nom</th><th>E-mail</th><th>Téléphone</th><th>Budget</th><th>Secteur</th><th>Type</th></tr></thead>
+                                        <thead><tr><th>Nom</th><th>E-mail</th><th>Téléphone</th><th>Projet</th><th>Budget ou loyer</th><th>Secteur</th><th>Type</th></tr></thead>
                                         <tbody>
                                             {analyse.prospects.slice(0, 5).map((p) => (
                                                 <tr key={p.ligne}>
                                                     <td className={p.name ? '' : 'vide'}>{p.name || 'manquant'}</td>
                                                     <td className={p.email ? '' : 'vide'}>{p.email || '—'}</td>
                                                     <td className={p.phone ? '' : 'vide'}>{p.phone || '—'}</td>
-                                                    <td className={p.budget ? '' : 'vide'}>{p.budget ? `${p.budget.toLocaleString('fr-FR')} €` : '—'}</td>
+                                                    {(() => {
+                                                        const t = normaliser(p.transaction);
+                                                        const loc = /\b(location|louer|locataire|bail|loyer)\b/.test(t) || (!/\b(vente|achat|acheter|acheteur)\b/.test(t) && transactionDefaut === 'location');
+                                                        return (
+                                                            <>
+                                                                <td>{loc ? 'Location' : 'Achat'}</td>
+                                                                <td className={p.budget ? '' : 'vide'}>{p.budget ? `${p.budget.toLocaleString('fr-FR')} €${loc ? ' / mois' : ''}` : '—'}</td>
+                                                            </>
+                                                        );
+                                                    })()}
                                                     <td className={p.location ? '' : 'vide'}>{p.location || '—'}</td>
                                                     <td className={p.property_type ? '' : 'vide'}>{p.property_type || '—'}</td>
                                                 </tr>

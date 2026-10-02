@@ -28,6 +28,7 @@
         // l'agent. Si les seuils changent côté backend, il faut les changer
         // ici aussi — c'est le prix de l'explication en direct.
         function expliquerQualite(lead) {
+            if (lead.transaction === 'location') return expliquerQualiteLocataire(lead);
             const lignes = [];
             let points = 0;
 
@@ -53,6 +54,53 @@
             const quality = points >= 80 ? 'hot' : points >= 45 ? 'warm' : 'cold';
             return { quality, points, lignes };
         }
+
+        // Même calcul que _qualite_locataire côté serveur : solidité du dossier,
+        // échéance et complétude. Revenus et loyer viennent du formulaire (texte).
+        function expliquerQualiteLocataire(lead) {
+            const lignes = [];
+            let points = 0;
+            const loyer = parseInt(lead.budget, 10) || 0;
+            const revenus = parseInt(lead.revenus, 10) || 0;
+            const garants = parseInt(lead.garants, 10) || 0;
+            const ajouter = (n, texte) => { points += n; lignes.push(`+${n} ${texte}`); };
+
+            if (revenus && loyer) {
+                const r = revenus / loyer;
+                const txt = r.toFixed(1).replace('.', ',').replace(',0', '');
+                if (r >= 3) ajouter(30, `Revenus de ${txt} fois le loyer`);
+                else if (r >= 2.5) ajouter(20, `Revenus de ${txt} fois le loyer (3 fois exigés)`);
+                else if (r >= 2) ajouter(10, `Revenus de ${txt} fois le loyer (3 fois exigés)`);
+                else ajouter(3, `Revenus de ${txt} fois le loyer, insuffisants`);
+                if (garants) ajouter(r >= 3 ? 5 : 12, 'Garant disponible');
+            } else if (garants) {
+                ajouter(15, 'Garant disponible');
+            }
+
+            const situation = { cdi: 15, fonctionnaire: 15, retraite: 12, independant: 9, cdd: 6, etudiant: 5, autre: 2 }[lead.situation_pro];
+            if (situation) ajouter(situation, `Situation : ${(SITUATIONS.find((x) => x[0] === lead.situation_pro) || [])[1]}`);
+
+            const urg = {
+                immediate: [30, 'Emménagement immédiat'],
+                '1-3_months': [24, 'Emménagement sous 3 mois'],
+                '3-6_months': [13, 'Emménagement sous 6 mois'],
+                '6plus_months': [4, 'Emménagement au-delà de 6 mois']
+            }[lead.purchase_urgency];
+            if (urg) ajouter(urg[0], urg[1]);
+
+            if (lead.budget) ajouter(8, 'Loyer maximum renseigné');
+            if (lead.location) ajouter(7, 'Secteur renseigné');
+            if (lead.property_type) ajouter(5, 'Type de bien renseigné');
+
+            const quality = points >= 80 ? 'hot' : points >= 45 ? 'warm' : 'cold';
+            return { quality, points, lignes };
+        }
+
+        const SITUATIONS = [
+            ['cdi', 'CDI'], ['fonctionnaire', 'Fonctionnaire'], ['cdd', 'CDD ou intérim'],
+            ['independant', "Indépendant ou chef d'entreprise"], ['retraite', 'Retraité'],
+            ['etudiant', 'Étudiant'], ['autre', 'Autre']
+        ];
 
         const LIBELLES = {
             hot: 'Acheteur actif',
@@ -241,6 +289,11 @@
                         financing_status: data.financing_status ?? 'unknown',
                         purchase_urgency: data.purchase_urgency ?? 'unknown',
                         financing_amount: data.financing_amount ?? '',
+                        transaction: data.transaction === 'location' ? 'location' : 'vente',
+                        revenus: data.revenus ?? '',
+                        garants: data.garants ?? '',
+                        situation_pro: data.situation_pro ?? '',
+                        meuble_souhaite: data.meuble_souhaite === true ? 'oui' : data.meuble_souhaite === false ? 'non' : '',
                         notes: data.notes ?? ''
                     });
                     setError(null);
@@ -277,6 +330,14 @@
                             financing_status: form.financing_status,
                             purchase_urgency: form.purchase_urgency,
                             financing_amount: form.financing_amount === '' ? null : parseInt(form.financing_amount, 10),
+                            transaction: form.transaction,
+                            // Le dossier du locataire n'a de sens que pour une location : on ne l'efface pas si l'agent bascule en achat.
+                            ...(form.transaction === 'location' ? {
+                                revenus: form.revenus === '' ? null : parseInt(form.revenus, 10),
+                                garants: form.garants === '' ? null : parseInt(form.garants, 10),
+                                situation_pro: form.situation_pro || null,
+                                meuble_souhaite: form.meuble_souhaite === '' ? null : form.meuble_souhaite === 'oui'
+                            } : {}),
                             notes: form.notes || null
                         })
                     });
@@ -315,8 +376,13 @@
                 purchase_urgency: form.purchase_urgency,
                 budget: form.budget,
                 location: form.location,
-                property_type: form.property_type
+                property_type: form.property_type,
+                transaction: form.transaction,
+                revenus: form.revenus,
+                garants: form.garants,
+                situation_pro: form.situation_pro
             }) : null;
+            const location = !!form && form.transaction === 'location';
 
             return (
                 <>
@@ -411,9 +477,17 @@
                                                 avec vos biens est fiable.
                                             </div>
 
+                                            <div className="form-group">
+                                                <label>Il cherche à</label>
+                                                <select value={form.transaction} onChange={(e) => set('transaction', e.target.value)}>
+                                                    <option value="vente">Acheter</option>
+                                                    <option value="location">Louer</option>
+                                                </select>
+                                            </div>
+
                                             <div className="form-row">
                                                 <div className="form-group">
-                                                    <label>Budget (€)</label>
+                                                    <label>{location ? 'Loyer maximum (€ par mois)' : 'Budget (€)'}</label>
                                                     <input type="number" value={form.budget}
                                                         onChange={(e) => set('budget', e.target.value)}
                                                         placeholder="Non renseigné" />
@@ -467,14 +541,59 @@
                                         </div>
 
                                         <div className="panel">
-                                            <div className="panel-title">Son projet</div>
+                                            <div className="panel-title">{location ? 'Son dossier' : 'Son projet'}</div>
                                             <div className="panel-note">
-                                                Ces deux informations pèsent le plus lourd dans le classement.
-                                                Un prospect avec accord bancaire et projet immédiat remonte
-                                                automatiquement en tête de liste.
+                                                {location
+                                                    ? "Pour un locataire, le classement repose sur la solidité du dossier : revenus d'au moins trois fois le loyer, garants, situation professionnelle, et la date d'emménagement."
+                                                    : "Ces deux informations pèsent le plus lourd dans le classement. Un prospect avec accord bancaire et projet immédiat remonte automatiquement en tête de liste."}
                                             </div>
 
+                                            {location && (
+                                                <>
+                                                    <div className="form-row">
+                                                        <div className="form-group">
+                                                            <label>Revenus mensuels nets du foyer (€)</label>
+                                                            <input type="number" min="0" value={form.revenus}
+                                                                onChange={(e) => set('revenus', e.target.value)}
+                                                                placeholder="Non renseignés" />
+                                                        </div>
+                                                        <div className="form-group">
+                                                            <label>Nombre de garants</label>
+                                                            <input type="number" min="0" max="10" value={form.garants}
+                                                                onChange={(e) => set('garants', e.target.value)}
+                                                                placeholder="Non renseigné" />
+                                                        </div>
+                                                    </div>
+                                                    {form.budget && form.revenus && (
+                                                        <div className="info-box" style={{ marginBottom: '15px' }}>
+                                                            Revenus = {(form.revenus / form.budget).toFixed(1).replace('.', ',')} fois le loyer maximum
+                                                            {form.revenus / form.budget >= 3 ? ' : la règle des trois fois est respectée.' : ' : sous la règle des trois fois.'}
+                                                        </div>
+                                                    )}
+                                                    <div className="form-row">
+                                                        <div className="form-group">
+                                                            <label>Situation professionnelle</label>
+                                                            <select value={form.situation_pro} onChange={(e) => set('situation_pro', e.target.value)}>
+                                                                <option value="">Non renseignée</option>
+                                                                {SITUATIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                                                            </select>
+                                                        </div>
+                                                        {!['Local commercial', 'Bureau'].includes(form.property_type) && (
+                                                            <div className="form-group">
+                                                                <label>Meublé</label>
+                                                                <select value={form.meuble_souhaite} onChange={(e) => set('meuble_souhaite', e.target.value)}>
+                                                                    <option value="">Indifférent</option>
+                                                                    <option value="oui">Meublé</option>
+                                                                    <option value="non">Non meublé</option>
+                                                                </select>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </>
+                                            )}
+
                                             <div className="form-row">
+                                                {!location && (
                                                 <div className="form-group">
                                                     <label>Financement</label>
                                                     <select value={form.financing_status}
@@ -486,8 +605,9 @@
                                                         <option value="rejected">Refusé</option>
                                                     </select>
                                                 </div>
+                                                )}
                                                 <div className="form-group">
-                                                    <label>Échéance d'achat</label>
+                                                    <label>{location ? "Date d'emménagement souhaitée" : "Échéance d'achat"}</label>
                                                     <select value={form.purchase_urgency}
                                                         onChange={(e) => set('purchase_urgency', e.target.value)}>
                                                         <option value="unknown">Non renseignée</option>
@@ -499,12 +619,14 @@
                                                 </div>
                                             </div>
 
+                                            {!location && (
                                             <div className="form-group">
                                                 <label>Montant du financement obtenu (€)</label>
                                                 <input type="number" value={form.financing_amount}
                                                     onChange={(e) => set('financing_amount', e.target.value)}
                                                     placeholder="Non renseigné" />
                                             </div>
+                                            )}
 
                                             <div className="form-group">
                                                 <label>Notes sur le projet</label>
@@ -620,7 +742,7 @@
                                             </div>
 
                                             <div className={`quality-box quality-${apercu.quality}`}>
-                                                <div className="quality-label">{LIBELLES[apercu.quality]}</div>
+                                                <div className="quality-label">{location && apercu.quality === 'hot' ? 'Locataire actif' : LIBELLES[apercu.quality]}</div>
                                                 <div className="quality-explain">{apercu.points} points sur 100</div>
                                             </div>
 
@@ -634,9 +756,9 @@
                                                 </div>
                                             ) : (
                                                 <div className="info-box">
-                                                    Aucune information ne permet encore de classer ce prospect.
-                                                    Renseignez son financement et son échéance : ce sont les deux
-                                                    critères qui pèsent le plus.
+                                                    {location
+                                                        ? "Aucune information ne permet encore de classer ce prospect. Renseignez ses revenus, ses garants et sa date d'emménagement : ce sont les critères qui pèsent le plus."
+                                                        : "Aucune information ne permet encore de classer ce prospect. Renseignez son financement et son échéance : ce sont les deux critères qui pèsent le plus."}
                                                 </div>
                                             )}
 

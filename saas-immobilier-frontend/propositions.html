@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZELYRO - Propositions</title>
+    <meta name="robots" content="noindex">
     <script src="vendor/react.production.min.js"></script>
     <script src="vendor/react-dom.production.min.js"></script>
     <script src="vendor/babel.min.js"></script>
@@ -26,11 +27,13 @@
         // Les espaces insécables que produit toLocaleString('fr-FR') s'affichent
         // mal dans certains e-mails : on les remplace par des espaces normales.
         const ESPACES = new RegExp('[' + String.fromCharCode(0x202f, 0xa0) + ']', 'g');
-        const prix = (p) => (p ? `${Number(p).toLocaleString('fr-FR')} €`.replace(ESPACES, ' ') : null);
+        // Pour une location, le montant est un loyer : « 850 € / mois ».
+        const prix = (p, location) => (p ? `${Number(p).toLocaleString('fr-FR')} €${location ? ' / mois' : ''}`.replace(ESPACES, ' ') : null);
+        const enLocation = (x) => !!x && x.transaction === 'location';
 
         const caracteristiques = (b) => [
             b.type,
-            b.rooms ? `${b.rooms} pièces` : null,
+            b.rooms ? `${b.rooms} pièce${b.rooms > 1 ? "s" : ""}` : null,
             b.size ? `${b.size} m²` : null,
         ].filter(Boolean).join(', ');
 
@@ -38,10 +41,12 @@
         const composer = (item, ids, agent) => {
             const l = item.lead;
             const choisis = item.biens.filter((b) => ids.includes(b.property_id));
-            const criteres = [l.property_type, l.location, l.budget ? `budget ${prix(l.budget)}` : null].filter(Boolean).join(', ');
+            const loc = enLocation(l);
+            const criteres = [loc ? 'location' : null, l.property_type, l.location,
+                l.budget ? (loc ? `loyer maximum ${prix(l.budget, true)}` : `budget ${prix(l.budget)}`) : null].filter(Boolean).join(', ');
             const n = choisis.length;
             const lignes = choisis.map((b, i) => {
-                const detail = [caracteristiques(b), prix(b.price)].filter(Boolean).join(' · ');
+                const detail = [caracteristiques(b), prix(b.price, enLocation(b))].filter(Boolean).join(' · ');
                 return `${i + 1}. ${b.title}${b.address ? ' — ' + b.address : ''}` + (detail ? `\n   ${detail}` : '');
             });
             const signature = [agent.first_name, agent.company_name].filter(Boolean).join('\n');
@@ -54,7 +59,7 @@
             ].join('\n\n');
         };
 
-        const objetPar = (l) => `Sélection de biens${l.location ? ' – ' + l.location : ' pour votre recherche'}`;
+        const objetPar = (l) => `Sélection de ${enLocation(l) ? 'locations' : 'biens'}${l.location ? ' – ' + l.location : ' pour votre recherche'}`;
 
         const dateCourte = (iso) => {
             const d = new Date(iso);
@@ -189,9 +194,9 @@
                 }
             };
 
-            const badge = (q) => {
+            const badge = (q, lead) => {
                 const classes = { hot: 'badge-hot', warm: 'badge-warm', cold: 'badge-cold' };
-                const libelles = { hot: 'Acheteur actif', warm: 'Projet en cours', cold: 'Premier contact' };
+                const libelles = { hot: enLocation(lead) ? 'Locataire actif' : 'Acheteur actif', warm: 'Projet en cours', cold: 'Premier contact' };
                 return libelles[q] ? <span className={`lead-badge ${classes[q]}`}>{libelles[q]}</span> : null;
             };
 
@@ -281,14 +286,14 @@
                                                         </span>
                                                     </div>
                                                     <div className="lead-field">
-                                                        <span className="lead-label">Budget :</span>
-                                                        <span className="lead-value">{prix(x.lead.budget) || 'N/A'}</span>
+                                                        <span className="lead-label">{enLocation(x.lead) ? 'Loyer max :' : 'Budget :'}</span>
+                                                        <span className="lead-value">{prix(x.lead.budget, enLocation(x.lead)) || 'N/A'}</span>
                                                     </div>
                                                     <div className="lead-field">
                                                         <span className="lead-label">Secteur :</span>
                                                         <span className="lead-value">{x.lead.location || 'N/A'}</span>
                                                     </div>
-                                                    {badge(x.lead_quality)}
+                                                    {badge(x.lead_quality, x.lead)}
                                                 </div>
                                             ))}
                                         </div>
@@ -321,7 +326,7 @@
                                                                     <span className="bien-texte">
                                                                         <div className="bien-titre">{b.title}</div>
                                                                         <div className="bien-detail">
-                                                                            {[b.address, caracteristiques(b), prix(b.price)].filter(Boolean).join(' · ')}
+                                                                            {[b.address, caracteristiques(b), prix(b.price, enLocation(b))].filter(Boolean).join(' · ')}
                                                                         </div>
                                                                         {b.reasons && b.reasons.length > 0 && (
                                                                             <div className="raisons">

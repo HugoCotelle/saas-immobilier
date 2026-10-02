@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZELYRO - Dashboard</title>
+    <meta name="robots" content="noindex">
     <script src="vendor/react.production.min.js"></script>
     <script src="vendor/react-dom.production.min.js"></script>
     <script src="vendor/babel.min.js"></script>
@@ -174,6 +175,9 @@
                                         <div className="stat-card">
                                             <div className="stat-value">{stats.total_leads}</div>
                                             <div className="stat-label">Prospects</div>
+                                            {stats.leads_location > 0 && (
+                                                <div className="stat-note">{stats.total_leads - stats.leads_location} en achat, {stats.leads_location} en location</div>
+                                            )}
                                             <div className="stat-note">{stats.new_last_30_days} nouveau{stats.new_last_30_days > 1 ? 'x' : ''} ces 30 derniers jours</div>
                                         </div>
                                         <div className="stat-card">
@@ -194,6 +198,9 @@
                                         <div className="stat-card">
                                             <div className="stat-value">{stats.total_properties}</div>
                                             <div className="stat-label">Biens au portefeuille</div>
+                                            {stats.properties_location > 0 && (
+                                                <div className="stat-note">{stats.total_properties - stats.properties_location} à vendre, {stats.properties_location} à louer</div>
+                                            )}
                                         </div>
                                     </div>
 
@@ -302,7 +309,7 @@
                                                         <div className="bien-header">
                                                             <div className="bien-titre">{b.title}</div>
                                                             <div className="bien-prix">
-                                                                {b.price ? `${b.price.toLocaleString('fr-FR')} €` : '—'}
+                                                                {b.price ? `${b.price.toLocaleString('fr-FR')} €${b.transaction === 'location' ? ' / mois' : ''}` : '—'}
                                                             </div>
                                                         </div>
                                                         <div className="bien-adresse">

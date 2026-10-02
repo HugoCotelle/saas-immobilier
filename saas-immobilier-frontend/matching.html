@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZELYRO - Matching</title>
+    <meta name="robots" content="noindex">
     <script src="vendor/react.production.min.js"></script>
     <script src="vendor/react-dom.production.min.js"></script>
     <script src="vendor/babel.min.js"></script>
@@ -49,8 +50,16 @@
         const correspond = (lead, recherche) => {
             const termes = normaliser(recherche).split(/\s+/).filter(Boolean);
             if (termes.length === 0) return true;
-            const texte = normaliser([lead.name, lead.email, lead.phone, lead.location, lead.property_type].join(' '));
+            const texte = normaliser([lead.name, lead.email, lead.phone, lead.location, lead.property_type, lead.transaction === 'location' ? 'location locataire' : ''].join(' '));
             return termes.every((t) => texte.includes(t));
+        };
+
+        const estLocation = (x) => x.transaction === 'location';
+        // Un loyer se lit « 850 € / mois » : sans ça, on prendrait un loyer pour un prix de vente.
+        const montant = (v, loc) => `${v.toLocaleString('fr-FR')} €${loc ? ' / mois' : ''}`;
+        const SITUATIONS = {
+            cdi: 'CDI', fonctionnaire: 'Fonctionnaire', cdd: 'CDD ou intérim',
+            independant: "Indépendant ou chef d'entreprise", retraite: 'Retraité', etudiant: 'Étudiant', autre: 'Autre'
         };
 
         function MatchingApp() {
@@ -58,6 +67,7 @@
             const [selectedLeadId, setSelectedLeadId] = useState(null);
             const [qualityFilter, setQualityFilter] = useState('all');
             const [recherche, setRecherche] = useState('');
+            const [filtreTransaction, setFiltreTransaction] = useState('tout');   // tout | vente | location
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
             const [user, setUser] = useState(null);
@@ -105,9 +115,9 @@
                 window.location.replace('/login.html');
             };
 
-            const qualityBadge = (quality) => {
+            const qualityBadge = (quality, lead) => {
                 const classes = { hot: 'badge-hot', warm: 'badge-warm', cold: 'badge-cold' };
-                const labels = { hot: 'Acheteur actif', warm: 'Projet en cours', cold: 'Premier contact' };
+                const labels = { hot: lead && estLocation(lead) ? 'Locataire actif' : 'Acheteur actif', warm: 'Projet en cours', cold: 'Premier contact' };
                 if (!labels[quality]) return null;
                 return <span className={`lead-badge ${classes[quality]}`}>{labels[quality]}</span>;
             };
@@ -128,7 +138,10 @@
                 unknown: 'Non renseigné'
             }[urgency] || urgency);
 
-            const parRecherche = leads.filter(lead => correspond(lead, recherche));
+            const nbLocation = leads.filter(estLocation).length;
+            const parRecherche = leads
+                .filter(lead => filtreTransaction === 'tout' || estLocation(lead) === (filtreTransaction === 'location'))
+                .filter(lead => correspond(lead, recherche));
             const filteredLeads = parRecherche
                 .filter(lead => qualityFilter === 'all' ? true : lead.lead_quality === qualityFilter)
                 .sort(parNom);
@@ -184,6 +197,15 @@
                                     onChange={(e) => setRecherche(e.target.value)}
                                     placeholder="Rechercher un prospect (nom, secteur, e-mail...)" />
 
+                                {nbLocation > 0 && nbLocation < leads.length && (
+                                    <div className="filters">
+                                        {[['tout', 'Achat et location'], ['vente', 'Achat'], ['location', 'Location']].map(([v, l]) => (
+                                            <button key={v} className={`filter-button ${filtreTransaction === v ? 'active' : ''}`}
+                                                onClick={() => setFiltreTransaction(v)}>{l}</button>
+                                        ))}
+                                    </div>
+                                )}
+
                                 <div className="filters">
                                     <button
                                         className={`filter-button ${qualityFilter === 'all' ? 'active' : ''}`}
@@ -193,7 +215,7 @@
                                     <button
                                         className={`filter-button ${qualityFilter === 'hot' ? 'active' : ''}`}
                                         onClick={() => setQualityFilter('hot')}>
-                                        Acheteurs actifs ({count('hot')})
+                                        {nbLocation > 0 ? 'Prospects actifs' : 'Acheteurs actifs'} ({count('hot')})
                                     </button>
                                     <button
                                         className={`filter-button ${qualityFilter === 'warm' ? 'active' : ''}`}
@@ -232,16 +254,16 @@
                                                         <span className="lead-value">{lead.phone || 'N/A'}</span>
                                                     </div>
                                                     <div className="lead-field">
-                                                        <span className="lead-label">Budget :</span>
+                                                        <span className="lead-label">{estLocation(lead) ? 'Loyer max :' : 'Budget :'}</span>
                                                         <span className="lead-value">
-                                                            {lead.budget ? `${lead.budget.toLocaleString('fr-FR')} €` : 'N/A'}
+                                                            {lead.budget ? montant(lead.budget, estLocation(lead)) : 'N/A'}
                                                         </span>
                                                     </div>
                                                     <div className="lead-field">
                                                         <span className="lead-label">Secteur :</span>
                                                         <span className="lead-value">{lead.location || 'N/A'}</span>
                                                     </div>
-                                                    {qualityBadge(lead.lead_quality)}
+                                                    {qualityBadge(lead.lead_quality, lead)}
                                                 </div>
                                             ))
                                         )}
@@ -253,9 +275,9 @@
                                                 <div className="panel-title">{selectedLead.name}</div>
 
                                                 <div className="detail-block">
-                                                    <div className="detail-label">Budget</div>
+                                                    <div className="detail-label">{estLocation(selectedLead) ? 'Loyer maximum (location)' : 'Budget'}</div>
                                                     <div className="detail-value">
-                                                        {selectedLead.budget ? `${selectedLead.budget.toLocaleString('fr-FR')} €` : 'Non renseigné'}
+                                                        {selectedLead.budget ? montant(selectedLead.budget, estLocation(selectedLead)) : 'Non renseigné'}
                                                     </div>
                                                 </div>
                                                 <div className="detail-block">
@@ -267,14 +289,27 @@
                                                     <div className="detail-value">{selectedLead.location || 'Non renseignée'}</div>
                                                 </div>
 
-                                                {(selectedLead.financing_status && selectedLead.financing_status !== 'unknown') ||
+                                                {(estLocation(selectedLead) && (selectedLead.revenus || selectedLead.garants || selectedLead.situation_pro)) ||
+                                                 (selectedLead.financing_status && selectedLead.financing_status !== 'unknown') ||
                                                  (selectedLead.purchase_urgency && selectedLead.purchase_urgency !== 'unknown') ? (
                                                     <div className="info-box">
-                                                        {selectedLead.financing_status && selectedLead.financing_status !== 'unknown' && (
+                                                        {estLocation(selectedLead) && selectedLead.revenus > 0 && (
+                                                            <div className="info-item">
+                                                                Revenus : {montant(selectedLead.revenus, true)}
+                                                                {selectedLead.budget > 0 && ` (${(selectedLead.revenus / selectedLead.budget).toFixed(1).replace('.', ',')} fois le loyer maximum)`}
+                                                            </div>
+                                                        )}
+                                                        {estLocation(selectedLead) && selectedLead.garants > 0 && (
+                                                            <div className="info-item">Garants : {selectedLead.garants}</div>
+                                                        )}
+                                                        {estLocation(selectedLead) && selectedLead.situation_pro && (
+                                                            <div className="info-item">Situation : {SITUATIONS[selectedLead.situation_pro] || selectedLead.situation_pro}</div>
+                                                        )}
+                                                        {!estLocation(selectedLead) && selectedLead.financing_status && selectedLead.financing_status !== 'unknown' && (
                                                             <div className="info-item">Financement : {financingLabel(selectedLead.financing_status)}</div>
                                                         )}
                                                         {selectedLead.purchase_urgency && selectedLead.purchase_urgency !== 'unknown' && (
-                                                            <div className="info-item">Échéance : {urgencyLabel(selectedLead.purchase_urgency)}</div>
+                                                            <div className="info-item">{estLocation(selectedLead) ? 'Emménagement' : 'Échéance'} : {urgencyLabel(selectedLead.purchase_urgency)}</div>
                                                         )}
                                                     </div>
                                                 ) : null}
@@ -313,7 +348,7 @@
                                                                 {match.size ? ` · ${match.size} m²` : ''}
                                                             </div>
                                                             <div className="match-price">
-                                                                {match.price ? `${match.price.toLocaleString('fr-FR')} €` : 'Prix non renseigné'}
+                                                                {match.price ? montant(match.price, estLocation(match)) : (estLocation(match) ? 'Loyer non renseigné' : 'Prix non renseigné')}
                                                             </div>
                                                             {match.reasons && match.reasons.length > 0 && (
                                                                 <div className="raisons" aria-label="Pourquoi ce bien correspond">
@@ -325,7 +360,11 @@
                                                         </div>
                                                     ))
                                                 ) : (
-                                                    <div className="empty-state">Aucun bien ne correspond à ce prospect</div>
+                                                    <div className="empty-state">
+                                                        {estLocation(selectedLead)
+                                                            ? 'Aucun bien à louer ne correspond à ce prospect'
+                                                            : 'Aucun bien à vendre ne correspond à ce prospect'}
+                                                    </div>
                                                 )}
                                             </>
                                         ) : (
