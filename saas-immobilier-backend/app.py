@@ -375,8 +375,15 @@ _DDL_BIENS = (
 # Surface minimale recherchée par le prospect (m²). Elle ne sert qu'au calcul
 # des correspondances pour les locaux commerciaux et les bureaux, où la surface
 # est un critère d'achat central.
+#
+# Même logique pour l'activité que le prospect veut y exercer, et, côté bien,
+# les activités autorisées et la présence d'une extraction d'air (conduit de
+# ventilation qui permet d'installer une cuisine de restaurant).
 _DDL_SURFACE = (
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS surface_min INTEGER",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS activite VARCHAR(30)",
+    "ALTER TABLE properties ADD COLUMN IF NOT EXISTS activites_autorisees TEXT[]",
+    "ALTER TABLE properties ADD COLUMN IF NOT EXISTS extraction_air BOOLEAN",
 )
 
 # Les forfaits : code, nom, prospects, biens, e-mails par mois, extractions IA
@@ -538,7 +545,11 @@ def _assurer_schema():
                        EXISTS (SELECT 1 FROM information_schema.columns
                                WHERE table_name = 'properties' AND column_name = 'reference'),
                        EXISTS (SELECT 1 FROM information_schema.columns
-                               WHERE table_name = 'leads' AND column_name = 'surface_min')
+                               WHERE table_name = 'leads' AND column_name = 'surface_min'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'leads' AND column_name = 'activite'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'properties' AND column_name = 'extraction_air')
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
@@ -1375,11 +1386,109 @@ def _points_budget(budget, prix):
 # une maison. Le calcul a donc son propre barème, sur 100 points :
 # type 20, emplacement 25, budget 20, surface 15, financement 12, échéance 8.
 TYPES_PRO = ('Local commercial', 'Bureau')
+
+# Activités qu'un acheteur peut vouloir exercer dans un local. Le code est ce
+# qui est enregistré ; le libellé est ce que lit l'agent.
+ACTIVITES = {
+    'commerce': 'Commerce de détail',
+    'restauration': 'Restauration',
+    'services': 'Services ou profession libérale',
+    'bureau': 'Bureaux',
+    'artisanat': 'Artisanat ou activité',
+    'autre': 'Autre',
+}
+# Mots que les logiciels et les prospects emploient. Le premier groupe qui
+# correspond gagne : « restaurant » avant « commerce », « cabinet » avant « agence ».
+_SYNONYMES_ACTIVITE = (
+    ('restauration', ('restauration', 'restaurant', 'brasserie', 'pizzeria', 'snack', 'traiteur', 'cafe', 'bar',
+                      'kebab', 'fast food', 'dark kitchen', 'cuisine')),
+    ('services', ('services', 'service', 'profession liberale', 'liberale', 'cabinet', 'medical', 'sante',
+                  'coiffure', 'esthetique', 'agence')),
+    ('bureau', ('bureau', 'bureaux', 'tertiaire', 'coworking')),
+    ('artisanat', ('artisanat', 'artisan', 'atelier', 'entrepot', 'stockage', 'logistique', 'activite')),
+    ('commerce', ('commerce', 'commerces', 'boutique', 'magasin', 'detail', 'epicerie', 'boulangerie', 'vente')),
+    ('autre', ('autre', 'autres')),
+)
+
+
+def _activite(valeur):
+    """Le code d'activité (« restauration »...) pour une valeur de formulaire,
+    de fichier ou de l'IA (« Restaurant », « profession libérale »...), ou None."""
+    if valeur is None or isinstance(valeur, (bool, list, dict)):
+        return None
+    n = normaliser(str(valeur))
+    if not n:
+        return None
+    if n in ACTIVITES:
+        return n
+    for code, mots in _SYNONYMES_ACTIVITE:
+        if any(re.search(r'\b' + re.escape(m) + r'\b', n) for m in mots):
+            return code
+    return None
+
+
+def _activites_liste(valeur):
+    """Liste de codes d'activité (sans doublon, dans l'ordre du référentiel),
+    depuis un tableau ou un texte « restauration, commerce ». Vide : None."""
+    if valeur is None or isinstance(valeur, (bool, dict)):
+        return None
+    morceaux = valeur if isinstance(valeur, list) else re.split(r'[,;/|\n]+', str(valeur))
+    codes = {_activite(m) for m in morceaux if isinstance(m, (str, int))}
+    codes.discard(None)
+    return [c for c in ACTIVITES if c in codes] or None
+
+
+def _booleen_souple(valeur):
+    """Oui / non lu dans un formulaire, un fichier ou une réponse de l'IA.
+    Tout ce qui n'est pas clairement oui ou non est « inconnu » (None) : un
+    bien dont on ignore s'il a une extraction d'air ne doit pas être traité
+    comme un bien qui n'en a pas."""
+    if isinstance(valeur, bool):
+        return valeur
+    n = normaliser(str(valeur)) if valeur is not None else ''
+    if n in ('oui', 'o', 'yes', 'true', '1', 'present', 'presente', 'existante', 'possible'):
+        return True
+    if n in ('non', 'n', 'no', 'false', '0', 'absent', 'absente', 'impossible'):
+        return False
+    return None
 PLAFOND_TYPE_DIFFERENT = 45        # sous les seuils d'alerte (70) et de proposition (50)
+PLAFOND_ACTIVITE_INCOMPATIBLE = 45
+BONUS_ACTIVITE_CONFIRMEE = 6       # activité confirmée possible : le bien passe devant ceux dont on ne sait rien
 
 
 def _profil_pro(lead, property_item):
     return (property_item.get('property_type') in TYPES_PRO) or (lead.get('property_type') in TYPES_PRO)
+
+
+def _compat_activite(lead, property_item):
+    """(statut, phrase) : l'activité que le prospect veut exercer est-elle
+    possible dans ce bien ? Statut « ok » (confirmée), « incompatible » ou
+    « inconnu » (information manquante d'un côté : on ne pénalise pas).
+
+    Deux faits comptent : les activités autorisées dans le local (destination,
+    règlement de copropriété, bail) et, pour la restauration, la présence d'une
+    extraction d'air, sans laquelle aucune cuisine ne peut être installée.
+    """
+    activite = lead.get('activite')
+    if not activite:
+        return 'inconnu', None
+    libelle = ACTIVITES.get(activite, activite)
+    autorisees = property_item.get('activites_autorisees') or []
+    extraction = property_item.get('extraction_air')
+
+    if autorisees and activite not in autorisees:
+        return 'incompatible', f"Activité non autorisée dans ce local : {libelle}"
+    if activite == 'restauration':
+        if extraction is False:
+            return 'incompatible', "Pas d'extraction d'air : cuisine de restaurant impossible"
+        if extraction is True:
+            return 'ok', "Extraction d'air présente : cuisine de restaurant possible"
+        if autorisees:
+            return 'ok', "Restauration autorisée (extraction d'air non renseignée : à vérifier)"
+        return 'inconnu', "Extraction d'air non renseignée : à vérifier pour une cuisine"
+    if autorisees:
+        return 'ok', f"Activité autorisée : {libelle}"
+    return 'inconnu', None
 
 
 def _points_surface(besoin, surface):
@@ -1445,6 +1554,15 @@ def _detail_score_pro(lead, property_item):
     if raison_budget:
         raisons.append(raison_budget)
 
+    # Pour un bien d'un autre type que celui recherché, parler d'extraction d'air n'a pas de sens.
+    statut_activite = 'inconnu'
+    if not type_different:
+        statut_activite, raison_activite = _compat_activite(lead, property_item)
+        if raison_activite:
+            raisons.append(raison_activite)
+        if statut_activite == 'ok':
+            score += BONUS_ACTIVITE_CONFIRMEE
+
     points_surface, raison_surface = _points_surface(lead.get('surface_min'), property_item.get('size'))
     score += points_surface
     raisons.append(raison_surface)
@@ -1467,6 +1585,8 @@ def _detail_score_pro(lead, property_item):
     score = min(100, max(0, int(score)))
     if type_different:
         score = min(score, PLAFOND_TYPE_DIFFERENT)
+    if statut_activite == 'incompatible':
+        score = min(score, PLAFOND_ACTIVITE_INCOMPATIBLE)
     return score, raisons
 
 
@@ -1619,7 +1739,7 @@ def get_leads():
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("""
-            SELECT id, name, email, phone, budget, location, property_type, surface_min, status,
+            SELECT id, name, email, phone, budget, location, property_type, surface_min, activite, status,
                    financing_status, purchase_urgency, source, created_at,
                    (SELECT MIN(r.due_date) FROM lead_reminders r
                      WHERE r.lead_id = leads.id AND r.done_at IS NULL) AS next_reminder
@@ -1664,10 +1784,10 @@ def create_lead():
             return _refus_quota('leads', forfait)
         cur.execute("""
             INSERT INTO leads
-                (user_id, name, email, phone, budget, location, property_type, surface_min,
+                (user_id, name, email, phone, budget, location, property_type, surface_min, activite,
                  status, financing_status, purchase_urgency, source)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s)
-            RETURNING id, name, email, phone, budget, location, property_type, surface_min,
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s)
+            RETURNING id, name, email, phone, budget, location, property_type, surface_min, activite,
                       status, financing_status, purchase_urgency, source
         """, (
             request.agency_id,
@@ -1678,6 +1798,7 @@ def create_lead():
             _texte_court(data.get('location'), 255),
             _texte_court(data.get('property_type'), 100),
             _entier_borne(data.get('surface_min'), 1_000_000),
+            _activite(data.get('activite')),
             _choix(data.get('financing_status'), FINANCING_VALUES),
             _choix(data.get('purchase_urgency'), URGENCY_VALUES),
             _choix(data.get('source'), SOURCES, 'manuel')
@@ -1693,6 +1814,11 @@ def create_lead():
     except Exception:
         return erreur_interne()
 
+# Colonnes d'un bien renvoyées par l'API (liste, création, modification).
+COLONNES_BIEN = ("id, reference, title, address, price, size, rooms, property_type, description, "
+                 "activites_autorisees, extraction_air")
+
+
 @app.route('/api/v1/properties', methods=['GET'])
 @token_required
 def get_properties():
@@ -1700,7 +1826,7 @@ def get_properties():
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, reference, title, address, price, size, rooms, property_type, description FROM properties WHERE user_id = %s ORDER BY id", (request.agency_id,))
+        cur.execute(f"SELECT {COLONNES_BIEN} FROM properties WHERE user_id = %s ORDER BY id", (request.agency_id,))
         properties = cur.fetchall()
         cur.close()
         conn.close()
@@ -1744,11 +1870,12 @@ def create_property():
             if cur.fetchone():
                 conn.close()
                 return jsonify({"message": "Un bien porte déjà cette référence."}), 409
-        cur.execute("""
+        cur.execute(f"""
             INSERT INTO properties
-                (user_id, reference, title, address, price, size, rooms, property_type, description)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id, reference, title, address, price, size, rooms, property_type, description
+                (user_id, reference, title, address, price, size, rooms, property_type, description,
+                 activites_autorisees, extraction_air)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING {COLONNES_BIEN}
         """, (
             request.agency_id,
             reference,
@@ -1758,7 +1885,9 @@ def create_property():
             entier('size'),
             entier('rooms'),
             _texte_court(data.get('property_type'), 100),
-            _texte_court(data.get('description'), 5000)
+            _texte_court(data.get('description'), 5000),
+            _activites_liste(data.get('activites_autorisees')),
+            _booleen_souple(data.get('extraction_air'))
         ))
         bien = cur.fetchone()
         conn.commit()
@@ -1806,6 +1935,10 @@ def update_property(property_id):
             champs['property_type'] = _texte_court(data.get('property_type'), 100)
         if 'description' in data:
             champs['description'] = _texte_court(data.get('description'), 5000)
+        if 'activites_autorisees' in data:
+            champs['activites_autorisees'] = _activites_liste(data.get('activites_autorisees'))
+        if 'extraction_air' in data:
+            champs['extraction_air'] = _booleen_souple(data.get('extraction_air'))
         if not champs:
             return jsonify({"message": "Aucune modification à enregistrer"}), 400
 
@@ -1825,7 +1958,7 @@ def update_property(property_id):
                 cur.execute(f"""
                     UPDATE properties SET {assignations}
                     WHERE id = %s AND user_id = %s
-                    RETURNING id, reference, title, address, price, size, rooms, property_type, description
+                    RETURNING {COLONNES_BIEN}
                 """, (*champs.values(), property_id, request.agency_id))
             except psycopg2.errors.UniqueViolation:
                 # Deux modifications simultanées avec la même référence.
@@ -1954,6 +2087,8 @@ def import_properties():
                     types_inconnus.add(type_brut[:40])
                 description = _texte_court(ligne.get('description'), 5000)
                 titre_saisi = _texte_court(ligne.get('title'), 255)
+                activites = _activites_liste(ligne.get('activites_autorisees'))
+                extraction = _booleen_souple(ligne.get('extraction_air'))
 
                 cible = par_ref.get(reference.lower()) if reference else None
                 if cible is None:
@@ -1973,10 +2108,12 @@ def import_properties():
                             address = COALESCE(%s, address), price = COALESCE(%s, price),
                             size = COALESCE(%s, size), rooms = COALESCE(%s, rooms),
                             property_type = COALESCE(%s, property_type),
-                            description = COALESCE(%s, description)
+                            description = COALESCE(%s, description),
+                            activites_autorisees = COALESCE(%s, activites_autorisees),
+                            extraction_air = COALESCE(%s, extraction_air)
                         WHERE id = %s AND user_id = %s
                     """, (reference, titre_saisi, adresse, prix, surface, pieces, type_bien,
-                          description, cible, request.agency_id))
+                          description, activites, extraction, cible, request.agency_id))
                     if cible not in ids_maj and cible not in ids_nouveaux:
                         maj += 1
                     ids_maj.append(cible)
@@ -1989,9 +2126,10 @@ def import_properties():
                         continue
                     cur.execute("""
                         INSERT INTO properties (user_id, reference, title, address, price, size, rooms,
-                                                property_type, description)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
-                    """, (request.agency_id, reference, titre, adresse, prix, surface, pieces, type_bien, description))
+                                                property_type, description, activites_autorisees, extraction_air)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                    """, (request.agency_id, reference, titre, adresse, prix, surface, pieces, type_bien, description,
+                          activites, extraction))
                     nouvel_id = cur.fetchone()['id']
                     ids_nouveaux.append(nouvel_id)
                     ajoutes += 1
@@ -2045,7 +2183,7 @@ def get_lead_detail(lead_id):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, user_id, name, email, phone, budget, location, property_type, surface_min, status, financing_status, purchase_urgency, lead_quality, financing_amount, notes, created_at, source, status_changed_at, first_contact_at, consent_at FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.agency_id))
+        cur.execute("SELECT id, user_id, name, email, phone, budget, location, property_type, surface_min, activite, status, financing_status, purchase_urgency, lead_quality, financing_amount, notes, created_at, source, status_changed_at, first_contact_at, consent_at FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.agency_id))
         lead = cur.fetchone()
         cur.close()
         conn.close()
@@ -2095,6 +2233,8 @@ def update_lead_financing(lead_id):
         # coordonnées, elle ne change que si la requête la contient.
         if 'surface_min' in data:
             contact['surface_min'] = _entier_borne(data.get('surface_min'), 1_000_000)
+        if 'activite' in data:
+            contact['activite'] = _activite(data.get('activite'))
 
         conn = get_db_connection()
         try:
@@ -2179,9 +2319,9 @@ def get_improved_matches():
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, name, email, phone, budget, location, property_type, surface_min, financing_status, purchase_urgency FROM leads WHERE user_id = %s ORDER BY created_at DESC", (request.agency_id,))
+        cur.execute("SELECT id, name, email, phone, budget, location, property_type, surface_min, activite, financing_status, purchase_urgency FROM leads WHERE user_id = %s ORDER BY created_at DESC", (request.agency_id,))
         leads = cur.fetchall()
-        cur.execute("SELECT id, title, address, price, rooms, size, property_type, description FROM properties WHERE user_id = %s", (request.agency_id,))
+        cur.execute("SELECT id, title, address, price, rooms, size, property_type, description, activites_autorisees, extraction_air FROM properties WHERE user_id = %s", (request.agency_id,))
         properties = cur.fetchall()
         cur.close()
         conn.close()
@@ -2575,14 +2715,15 @@ def import_leads():
                     continue
                 cur.execute("""
                     INSERT INTO leads (user_id, name, email, phone, budget, location, property_type, surface_min,
-                                       status, financing_status, purchase_urgency, source)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, 'import')
+                                       activite, status, financing_status, purchase_urgency, source)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, 'import')
                     RETURNING id
                 """, (request.agency_id, nom, email, tel,
                       _entier_borne(ligne.get('budget')),
                       _texte_court(ligne.get('location'), 255),
                       _texte_court(ligne.get('property_type'), 100),
                       _entier_souple(ligne.get('surface_min'), 1_000_000),
+                      _activite(ligne.get('activite')),
                       _choix(ligne.get('financing_status'), FINANCING_VALUES),
                       _choix(ligne.get('purchase_urgency'), URGENCY_VALUES)))
                 ids.append(cur.fetchone()['id'])
@@ -2783,14 +2924,15 @@ def capture_lead(token):
             maintenant = _maintenant()
             cur.execute("""
                 INSERT INTO leads (user_id, name, email, phone, budget, location, property_type, surface_min,
-                                   status, financing_status, purchase_urgency, source, consent_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, 'formulaire', %s)
+                                   activite, status, financing_status, purchase_urgency, source, consent_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, 'formulaire', %s)
                 RETURNING id
             """, (agence['id'], nom, email, tel,
                   _entier_borne(data.get('budget')),
                   _texte_court(data.get('location'), 255),
                   _texte_court(data.get('property_type'), 100),
                   _entier_borne(data.get('surface_min'), 1_000_000),
+                  _activite(data.get('activite')),
                   _choix(data.get('financing_status'), FINANCEMENT_FORMULAIRE),
                   _choix(data.get('purchase_urgency'), URGENCY_VALUES),
                   maintenant))
@@ -2877,6 +3019,7 @@ def completer_lead(token):
                     location = COALESCE(%s, location),
                     property_type = COALESCE(%s, property_type),
                     surface_min = COALESCE(%s, surface_min),
+                    activite = COALESCE(%s, activite),
                     financing_status = %s,
                     purchase_urgency = %s,
                     email = COALESCE(email, %s),
@@ -2888,6 +3031,7 @@ def completer_lead(token):
                 _texte_court(data.get('location'), 255),
                 _texte_court(data.get('property_type'), 100),
                 _entier_borne(data.get('surface_min'), 1_000_000),
+                _activite(data.get('activite')),
                 _choix(data.get('financing_status'), FINANCEMENT_FORMULAIRE),
                 _choix(data.get('purchase_urgency'), URGENCY_VALUES),
                 email, tel, _maintenant(),
@@ -2939,11 +3083,11 @@ def _alertes_matching(user_id, lead_ids=None, property_ids=None, origine=None):
             agent = cur.fetchone()
             if not agent or not agent['alerts_enabled']:
                 return
-            cur.execute("""SELECT id, name, email, phone, budget, location, property_type, surface_min,
+            cur.execute("""SELECT id, name, email, phone, budget, location, property_type, surface_min, activite,
                                   financing_status, purchase_urgency, status
                            FROM leads WHERE user_id = %s""", (user_id,))
             prospects = [l for l in cur.fetchall() if (l['status'] or 'nouveau') not in STATUTS_CLOS]
-            cur.execute("SELECT id, title, address, price, size, property_type FROM properties WHERE user_id = %s", (user_id,))
+            cur.execute("SELECT id, title, address, price, size, property_type, activites_autorisees, extraction_air FROM properties WHERE user_id = %s", (user_id,))
             biens = cur.fetchall()
 
             ids_prospects, ids_biens = set(lead_ids or []), set(property_ids or [])
@@ -3648,12 +3792,13 @@ def get_proposals():
             moi = cur.fetchone() or {}
             cur.execute("SELECT company_name FROM users WHERE id = %s", (request.agency_id,))
             agence = cur.fetchone() or {}
-            cur.execute("""SELECT id, name, email, phone, budget, location, property_type, surface_min,
+            cur.execute("""SELECT id, name, email, phone, budget, location, property_type, surface_min, activite,
                                   financing_status, purchase_urgency, status
                            FROM leads WHERE user_id = %s""", (request.agency_id,))
             prospects = [l for l in cur.fetchall()
                          if (l['status'] or 'nouveau') not in STATUTS_CLOS and _prospect_complet(l)]
-            cur.execute("""SELECT id, title, address, price, rooms, size, property_type
+            cur.execute("""SELECT id, title, address, price, rooms, size, property_type,
+                                  activites_autorisees, extraction_air
                            FROM properties WHERE user_id = %s""", (request.agency_id,))
             biens = cur.fetchall()
             cur.execute("""SELECT m.lead_id, l.name, l.email, m.subject, m.property_ids, m.sent_at
@@ -3898,7 +4043,7 @@ texte autour.
 Date du jour : {date}
 
 Champs : nom, email, telephone, transaction, budget, secteurs, type_bien, \
-nombre_pieces, echeance, financement, garants, profession, notes
+nombre_pieces, surface_min, activite, echeance, financement, garants, profession, notes
 
 Règles strictes :
 - N'invente jamais. Information non explicite dans le message = null.
@@ -3907,6 +4052,9 @@ garants, des revenus ou un loyer, c'est une location.
 - secteurs : TABLEAU de noms de communes. "Lille ou Marcq" devient \
 ["Lille","Marcq"]. null si aucun secteur.
 - type_bien : exactement l'un de {types}, ou null.
+- surface_min : surface minimale recherchée en m², entier, ou null.
+- activite : pour un local commercial, un bureau ou un terrain, l'activité que la personne \
+veut y exercer : exactement l'une de {activites}, ou null.
 - telephone : chiffres uniquement, sans espaces ni points.
 - budget : entier en euros. Pour une location, le loyer mensuel.
 - echeance : l'un de {echeances}, ou null. Calcule par rapport à la date du jour.
@@ -3993,6 +4141,8 @@ def _valider(brut):
         'secteurs_secondaires': secteurs[1:] if len(secteurs) > 1 else [],
         'type_bien': dans('type_bien', TYPES_BIEN),
         'nombre_pieces': _entier(brut.get('nombre_pieces')),
+        'surface_min': _entier_souple(brut.get('surface_min'), 1_000_000),
+        'activite': _activite(brut.get('activite')),
         'echeance': dans('echeance', ECHEANCES),
         'financement': dans('financement', FINANCEMENTS),
         'garants': _entier(brut.get('garants')),
@@ -4088,6 +4238,7 @@ def extract_message():
     consigne = CONSIGNE.format(
         date=datetime.utcnow().strftime('%Y-%m-%d'),
         types=', '.join(TYPES_BIEN),
+        activites=', '.join(ACTIVITES),
         echeances=', '.join(ECHEANCES),
         financements=', '.join(FINANCEMENTS),
         message=message,
@@ -4131,7 +4282,7 @@ commentaire ni texte autour.
 Date du jour : {date}
 
 Champs : est_demande_contact, nom, email, telephone, transaction, budget, secteurs, \
-type_bien, nombre_pieces, echeance, financement, garants, profession, notes
+type_bien, nombre_pieces, surface_min, activite, echeance, financement, garants, profession, notes
 
 Règles strictes :
 - est_demande_contact : true si c'est une vraie demande de contact d'une personne \
@@ -4147,6 +4298,9 @@ jamais ceux de l'agence ni du portail.
 - transaction : "achat", "location" ou null.
 - secteurs : TABLEAU de noms de communes mentionnées, [] si aucune.
 - type_bien : exactement l'un de {types}, ou null.
+- surface_min : surface minimale recherchée en m², entier, ou null.
+- activite : pour un local commercial ou un bureau, l'activité que le contact veut y exercer : \
+exactement l'une de {activites}, ou null.
 - telephone : chiffres uniquement, sans espaces ni points.
 - budget : entier en euros si un montant est explicitement mentionné, sinon null.
 - echeance : l'un de {echeances}, ou null.
@@ -4327,7 +4481,7 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
                 consigne = CONSIGNE_PORTAIL.format(
                     portail=_PORTAIL_LIBELLE.get(portail, "un portail d'annonces"),
                     date=datetime.utcnow().strftime('%Y-%m-%d'),
-                    types=', '.join(TYPES_BIEN), echeances=', '.join(ECHEANCES),
+                    types=', '.join(TYPES_BIEN), activites=', '.join(ACTIVITES), echeances=', '.join(ECHEANCES),
                     financements=', '.join(FINANCEMENTS), message=corps[:4000],
                 )
                 valides, erreur = _appeler_extraction_ia(consigne)
@@ -4394,9 +4548,9 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
 
         cur.execute("""
             INSERT INTO leads
-                (user_id, name, email, phone, budget, location, property_type,
+                (user_id, name, email, phone, budget, location, property_type, surface_min, activite,
                  status, financing_status, purchase_urgency, source)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s)
             RETURNING id
         """, (
             user_id, nom[:255],
@@ -4405,6 +4559,8 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
             (champs or {}).get('budget'),
             _texte_court((champs or {}).get('secteur'), 255),
             (champs or {}).get('type_bien'),
+            (champs or {}).get('surface_min'),
+            (champs or {}).get('activite'),
             _choix((champs or {}).get('financement'), FINANCING_VALUES),
             _choix((champs or {}).get('echeance'), URGENCY_VALUES),
             portail,

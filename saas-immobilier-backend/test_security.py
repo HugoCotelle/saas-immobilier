@@ -1417,6 +1417,148 @@ class TestSurfaceProspect(Base):
         self.assertEqual(par_nom["Boutique Léa"], 45)
 
 
+# ---------------------------------------------------------------- activités autorisées et extraction d'air
+class TestActivites(Base):
+    PROSPECT = {"property_type": "Local commercial", "budget": 300000, "location": "Senlis",
+                "financing_status": "approved", "purchase_urgency": "immediate", "surface_min": None}
+
+    def score(self, activite=None, **bien):
+        lead = {**self.PROSPECT, "activite": activite}
+        local = {"property_type": "Local commercial", "price": 300000, "size": 80, "title": "Local",
+                 "address": "10 rue Nationale 60300 Senlis", **bien}
+        return backend._detail_score(lead, local)
+
+    def test_lecture_des_activites(self):
+        f = backend._activite
+        for brut, attendu in (("restauration", "restauration"), ("Restaurant", "restauration"), ("pizzeria", "restauration"),
+                              ("Profession libérale", "services"), ("cabinet médical", "services"), ("Bureaux", "bureau"),
+                              ("atelier", "artisanat"), ("Boutique", "commerce"), ("autre", "autre"),
+                              ("", None), ("n'importe quoi", None), (None, None), (True, None)):
+            self.assertEqual(f(brut), attendu, brut)
+        g = backend._activites_liste
+        self.assertEqual(g(["commerce", "restauration", "commerce"]), ["commerce", "restauration"])
+        self.assertEqual(g("Restaurant, boutique ; bureaux"), ["commerce", "restauration", "bureau"])
+        self.assertIsNone(g([]))
+        self.assertIsNone(g("n'importe quoi"))
+        self.assertIsNone(g(None))
+        b = backend._booleen_souple
+        for brut, attendu in ((True, True), (False, False), ("oui", True), ("Non", False), ("présente", True), ("absente", False),
+                              ("", None), (None, None), ("peut-être", None), (0, False), (1, True)):
+            self.assertEqual(b(brut), attendu, brut)
+
+    def test_restauration_exige_une_extraction_d_air(self):
+        sans_info = self.score("restauration")
+        avec = self.score("restauration", extraction_air=True)
+        sans = self.score("restauration", extraction_air=False)
+        self.assertIn("Extraction d'air non renseignée : à vérifier pour une cuisine", sans_info[1])
+        self.assertIn("Extraction d'air présente : cuisine de restaurant possible", avec[1])
+        self.assertIn("Pas d'extraction d'air : cuisine de restaurant impossible", sans[1])
+        self.assertEqual(avec[0] - sans_info[0], backend.BONUS_ACTIVITE_CONFIRMEE)
+        self.assertLessEqual(sans[0], backend.PLAFOND_ACTIVITE_INCOMPATIBLE)
+        self.assertLess(sans[0], backend.PROPOSITION_SCORE_MIN)
+        self.assertLess(sans[0], backend.ALERTE_SCORE_MIN)
+
+    def test_activites_autorisees(self):
+        base = self.score("commerce")[0]
+        ok, raisons = self.score("commerce", activites_autorisees=["commerce", "services"])
+        self.assertEqual(ok - base, backend.BONUS_ACTIVITE_CONFIRMEE)
+        self.assertIn("Activité autorisée : Commerce de détail", raisons)
+        non, raisons = self.score("restauration", activites_autorisees=["commerce", "services"], extraction_air=True)
+        self.assertLessEqual(non, backend.PLAFOND_ACTIVITE_INCOMPATIBLE)
+        self.assertIn("Activité non autorisée dans ce local : Restauration", raisons)
+        auto, raisons = self.score("restauration", activites_autorisees=["restauration"])
+        self.assertIn("Restauration autorisée (extraction d'air non renseignée : à vérifier)", raisons)
+        self.assertGreater(auto, self.score("restauration")[0])
+
+    def test_sans_activite_rien_ne_change(self):
+        # un prospect qui n'a pas dit ce qu'il veut y faire n'est pas pénalisé, même si le bien n'a pas d'extraction
+        self.assertEqual(self.score(None, extraction_air=False)[0], self.score(None)[0])
+        self.assertEqual(self.score(None, activites_autorisees=["commerce"])[0], self.score(None)[0])
+
+    def test_ne_s_applique_pas_a_un_autre_type_de_bien(self):
+        score, raisons = backend._detail_score({**self.PROSPECT, "activite": "restauration"},
+                                               {"property_type": "Maison", "price": 300000, "address": "Senlis 60300",
+                                                "title": "x", "extraction_air": False})
+        self.assertFalse(any("xtraction" in r for r in raisons))
+        self.assertLessEqual(score, backend.PLAFOND_TYPE_DIFFERENT)
+
+    def test_le_calcul_des_logements_ignore_l_activite(self):
+        lead = {"property_type": "Maison", "budget": 300000, "location": "Senlis", "activite": "restauration"}
+        bien = {"property_type": "Maison", "price": 300000, "address": "Senlis 60300", "title": "x", "extraction_air": False}
+        a = backend._detail_score(lead, bien)[0]
+        b = backend._detail_score({**lead, "activite": None}, bien)[0]
+        self.assertEqual(a, b)
+
+    def test_validation_de_l_extraction_ia(self):
+        v = backend._valider({"surface_min": "120 m²", "activite": "Restaurant", "type_bien": "bureau"})
+        self.assertEqual((v["surface_min"], v["activite"], v["type_bien"]), (120, "restauration", "Bureau"))
+        v = backend._valider({"surface_min": "énorme", "activite": "danser"})
+        self.assertEqual((v["surface_min"], v["activite"]), (None, None))
+
+    def test_biens_api_creation_modification_et_import(self):
+        t = self.jeton("act-1@x.fr")
+        r = self.c.post("/api/v1/properties", headers=self.h(t), json={
+            "title": "Local avec extraction", "address": "Senlis 60300", "price": 250000, "size": 90,
+            "property_type": "Local commercial", "activites_autorisees": ["restauration", "commerce", "n'importe quoi"],
+            "extraction_air": "oui"})
+        self.assertEqual(r.status_code, 201, r.get_json())
+        b = r.get_json()
+        self.assertEqual((b["activites_autorisees"], b["extraction_air"]), (["commerce", "restauration"], True))
+        i = b["id"]
+        # modification partielle : ne touche pas à ce qu'on n'envoie pas
+        r = self.c.put(f"/api/v1/properties/{i}", headers=self.h(t), json={"price": 240000})
+        self.assertEqual((r.get_json()["activites_autorisees"], r.get_json()["extraction_air"]), (["commerce", "restauration"], True))
+        r = self.c.put(f"/api/v1/properties/{i}", headers=self.h(t), json={"extraction_air": False, "activites_autorisees": ["commerce"]})
+        self.assertEqual((r.get_json()["activites_autorisees"], r.get_json()["extraction_air"]), (["commerce"], False))
+        r = self.c.put(f"/api/v1/properties/{i}", headers=self.h(t), json={"extraction_air": None, "activites_autorisees": []})
+        self.assertEqual((r.get_json()["activites_autorisees"], r.get_json()["extraction_air"]), (None, None))
+        # import (tableur) : colonnes facultatives, une mise à jour sans la colonne ne les efface pas
+        r = self.c.post("/api/v1/properties/import", headers=self.h(t), json={"rows": [
+            {"reference": "L-1", "title": "Boutique", "address": "Chantilly 60500", "price": "180000",
+             "property_type": "Boutique", "activites_autorisees": "commerce, restaurant", "extraction_air": "Oui"}]})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        r = self.c.post("/api/v1/properties/import", headers=self.h(t), json={"rows": [
+            {"reference": "L-1", "title": "Boutique", "price": "175000"}]})
+        biens = {x["reference"]: x for x in self.c.get("/api/v1/properties", headers=self.h(t)).get_json()}
+        self.assertEqual((biens["L-1"]["activites_autorisees"], biens["L-1"]["extraction_air"], biens["L-1"]["price"]),
+                         (["commerce", "restauration"], True, 175000))
+
+    def test_prospect_activite_creation_modification_import_et_formulaire(self):
+        t = self.jeton("act-2@x.fr")
+        r = self.c.post("/api/v1/leads", headers=self.h(t), json={"name": "Chez Léa", "property_type": "Local commercial",
+                                                                 "activite": "restauration"})
+        self.assertEqual(r.get_json()["activite"], "restauration")
+        i = r.get_json()["id"]
+        self.assertEqual(self.c.get(f"/api/v1/leads/{i}", headers=self.h(t)).get_json()["activite"], "restauration")
+        self.c.put(f"/api/v1/leads/{i}", headers=self.h(t), json={"notes": "x"})
+        self.assertEqual(self.c.get(f"/api/v1/leads/{i}", headers=self.h(t)).get_json()["activite"], "restauration")
+        self.c.put(f"/api/v1/leads/{i}", headers=self.h(t), json={"activite": "commerce"})
+        self.assertEqual(self.c.get(f"/api/v1/leads/{i}", headers=self.h(t)).get_json()["activite"], "commerce")
+        self.c.put(f"/api/v1/leads/{i}", headers=self.h(t), json={"activite": ""})
+        self.assertIsNone(self.c.get(f"/api/v1/leads/{i}", headers=self.h(t)).get_json()["activite"])
+        self.c.post("/api/v1/leads/import", headers=self.h(t), json={"rows": [
+            {"name": "Pizza Roma", "email": "p@roma.fr", "property_type": "Local commercial", "activite": "Pizzeria"}]})
+        jeton = self.c.get("/api/v1/capture-link", headers=self.h(t)).get_json()["token"]
+        self.c.post(f"/public/capture/{jeton}", json={"name": "Cabinet Dr X", "email": "dr@x.fr", "consent": True,
+                                                      "property_type": "Bureau", "activite": "services"})
+        par_nom = {l["name"]: l["activite"] for l in self.c.get("/api/v1/leads", headers=self.h(t)).get_json()}
+        self.assertEqual((par_nom["Pizza Roma"], par_nom["Cabinet Dr X"]), ("restauration", "services"))
+
+    def test_correspondance_complete_restaurant(self):
+        t = self.jeton("act-3@x.fr")
+        self.c.post("/api/v1/leads", headers=self.h(t), json={"name": "Chez Léa", "property_type": "Local commercial",
+                                                             "location": "Senlis", "budget": 250000, "activite": "restauration"})
+        for titre, extraction in (("Avec extraction", True), ("Sans extraction", False), ("Extraction inconnue", None)):
+            self.c.post("/api/v1/properties", headers=self.h(t), json={
+                "title": titre, "address": "Senlis 60300", "price": 250000, "size": 80,
+                "property_type": "Local commercial", "extraction_air": extraction})
+        m = self.c.get("/api/v1/improved-matches", headers=self.h(t)).get_json()[0]["matches"]
+        scores = {x["title"]: x["score"] for x in m}
+        self.assertGreater(scores["Avec extraction"], scores["Extraction inconnue"])
+        self.assertGreater(scores["Extraction inconnue"], scores["Sans extraction"])
+        self.assertLessEqual(scores["Sans extraction"], backend.PLAFOND_ACTIVITE_INCOMPATIBLE)
+
+
 # ---------------------------------------------------------------- modifier un bien
 class TestModifierBien(Base):
     URL = "/api/v1/properties/{}"
