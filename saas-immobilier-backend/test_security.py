@@ -1189,14 +1189,15 @@ class TestImportBiens(Base):
         self.assertEqual(b, {"PRO-1": "Local commercial", "PRO-2": "Bureau", "PRO-3": "Terrain"})
 
     def test_correspondance_local_commercial_et_bureau(self):
+        # le détail du barème est dans TestScoringPro ; ici : même type > type voisin > autre type
         prospect = {"property_type": "Bureau", "budget": 300000, "location": "Senlis"}
         bien = lambda t: {"property_type": t, "price": 300000, "address": "Senlis 60300", "title": "x"}
         meme = backend.calculate_lead_score(prospect, bien("Bureau"))
-        voisin, raisons = backend._detail_score(prospect, bien("Local commercial"))
+        voisin = backend.calculate_lead_score(prospect, bien("Local commercial"))
         autre = backend.calculate_lead_score(prospect, bien("Maison"))
-        self.assertEqual(meme - voisin, 15)
-        self.assertEqual(voisin - autre, 15)
-        self.assertIn("Type voisin (local commercial ou bureau)", raisons)
+        self.assertEqual(meme - voisin, 10)
+        self.assertGreater(voisin, autre)
+        self.assertLessEqual(autre, backend.PLAFOND_TYPE_DIFFERENT)
 
     def test_l_extraction_ia_connait_les_nouveaux_types(self):
         self.assertIn("Local commercial", backend.TYPES_BIEN)
@@ -1282,6 +1283,234 @@ class TestModifierProspect(Base):
 
     def test_exige_une_connexion(self):
         self.assertEqual(self.c.put("/api/v1/leads/1", json={"phone": "0601020304"}).status_code, 401)
+
+
+# ---------------------------------------------------------------- scoring des locaux commerciaux et bureaux
+class TestScoringPro(unittest.TestCase):
+    PROSPECT = {"property_type": "Bureau", "budget": 300000, "location": "Senlis", "surface_min": 100,
+                "financing_status": "approved", "purchase_urgency": "immediate"}
+
+    def bien(self, **kw):
+        return {"property_type": "Bureau", "price": 300000, "size": 120, "address": "10 rue Nationale 60300 Senlis",
+                "title": "Plateau", **kw}
+
+    def score(self, lead=None, **kw):
+        return backend._detail_score({**self.PROSPECT, **(lead or {})}, self.bien(**kw))
+
+    def test_correspondance_parfaite_sur_100(self):
+        score, raisons = self.score()
+        self.assertEqual(score, 100)
+        self.assertIn("Surface adaptée : 120 m² pour 100 m² recherchés", raisons)
+        self.assertIn("Emplacement recherché : Senlis", raisons)
+
+    def test_la_surface_pese_dans_le_calcul(self):
+        base = self.score()[0]
+        trop_petit = self.score(size=60)
+        self.assertEqual(base - trop_petit[0], 15)
+        self.assertTrue(any(r.startswith("Surface insuffisante") for r in trop_petit[1]))
+        for taille, points in ((100, 15), (150, 15), (151, 11), (250, 11), (251, 5), (90, 11), (75, 5), (74, 0)):
+            self.assertEqual(base - self.score(size=taille)[0], 15 - points, taille)
+
+    def test_surface_inconnue_ni_bonus_ni_elimination(self):
+        sans_besoin, r1 = self.score({"surface_min": None})
+        sans_taille, r2 = self.score(size=None)
+        self.assertEqual(sans_besoin, 92)
+        self.assertEqual(sans_taille, 92)
+        self.assertIn("Surface souhaitée non précisée", r1)
+        self.assertIn("Surface du bien non renseignée", r2)
+
+    def test_les_pieces_ne_comptent_pas(self):
+        self.assertEqual(self.score(rooms=1)[0], self.score(rooms=9)[0])
+
+    def test_bureau_et_local_commercial_sont_voisins(self):
+        score, raisons = self.score(property_type="Local commercial")
+        self.assertEqual(score, 90)
+        self.assertIn("Type voisin (local commercial ou bureau)", raisons)
+
+    def test_un_logement_n_est_pas_propose_a_une_recherche_de_bureau(self):
+        for type_bien in ("Maison", "Appartement", "Terrain"):
+            score, raisons = self.score(property_type=type_bien)
+            self.assertLessEqual(score, backend.PLAFOND_TYPE_DIFFERENT, type_bien)
+            self.assertLess(score, backend.PROPOSITION_SCORE_MIN, type_bien)
+            self.assertLess(score, backend.ALERTE_SCORE_MIN, type_bien)
+            self.assertTrue(any(r.startswith("Type de bien différent") for r in raisons))
+        # et l'inverse : un prospect « maison » face à un bureau
+        score, _ = backend._detail_score({**self.PROSPECT, "property_type": "Maison"}, self.bien())
+        self.assertLess(score, backend.PROPOSITION_SCORE_MIN)
+
+    def test_autre_ville_elimine(self):
+        score, raisons = self.score(address="3 rue de la Paix 75002 Paris")
+        self.assertEqual((score, raisons), (0, ["Hors du secteur recherché"]))
+
+    def test_type_non_precise_n_elimine_pas(self):
+        score, raisons = self.score({"property_type": None})
+        self.assertEqual(score, 88)
+        self.assertIn("Type de bien non précisé", raisons)
+
+    def test_l_emplacement_pese_plus_que_pour_un_logement(self):
+        # sans secteur : 10 points sur 25 pour un bureau (8 sur 20 pour un logement)
+        self.assertEqual(self.score({"location": None})[0], 100 - 25 + 10)
+
+    def test_le_calcul_des_logements_est_inchange(self):
+        maison = {"property_type": "Maison", "budget": 300000, "location": "Senlis",
+                  "financing_status": "approved", "purchase_urgency": "immediate", "surface_min": 100}
+        score, _ = backend._detail_score(maison, {"property_type": "Maison", "price": 300000, "size": 5,
+                                                  "address": "Senlis 60300", "title": "x"})
+        self.assertEqual(score, 100)       # 20 + 30 + 20 + 20 + 15 = 105, plafonné
+        voisin, _ = backend._detail_score({**maison, "property_type": "Appartement"},
+                                          {"property_type": "Maison", "price": 300000, "address": "Senlis", "title": "x"})
+        self.assertEqual(voisin, 90)       # type voisin 15 au lieu de 30
+
+
+class TestSurfaceProspect(Base):
+    def test_surface_enregistree_creation_fiche_et_modification(self):
+        t = self.jeton("surf-1@x.fr")
+        r = self.c.post("/api/v1/leads", json={"name": "Société Dupont", "property_type": "Bureau", "surface_min": "120"},
+                        headers=self.h(t))
+        self.assertEqual(r.status_code, 201, r.get_json())
+        self.assertEqual(r.get_json()["surface_min"], 120)
+        i = r.get_json()["id"]
+        fiche = self.c.get(f"/api/v1/leads/{i}", headers=self.h(t)).get_json()
+        self.assertEqual(fiche["surface_min"], 120)
+        # une modification sans la clé la laisse intacte
+        self.assertEqual(self.c.put(f"/api/v1/leads/{i}", json={"notes": "rappeler"}, headers=self.h(t)).status_code, 200)
+        self.assertEqual(self.c.get(f"/api/v1/leads/{i}", headers=self.h(t)).get_json()["surface_min"], 120)
+        # avec la clé, elle change ; vide ou illisible, elle s'efface
+        self.c.put(f"/api/v1/leads/{i}", json={"surface_min": 200}, headers=self.h(t))
+        self.assertEqual(self.c.get(f"/api/v1/leads/{i}", headers=self.h(t)).get_json()["surface_min"], 200)
+        self.c.put(f"/api/v1/leads/{i}", json={"surface_min": ""}, headers=self.h(t))
+        self.assertIsNone(self.c.get(f"/api/v1/leads/{i}", headers=self.h(t)).get_json()["surface_min"])
+        self.c.put(f"/api/v1/leads/{i}", json={"surface_min": -5}, headers=self.h(t))
+        self.assertIsNone(self.c.get(f"/api/v1/leads/{i}", headers=self.h(t)).get_json()["surface_min"])
+
+    def test_surface_dans_la_liste_et_les_correspondances(self):
+        t = self.jeton("surf-2@x.fr")
+        self.c.post("/api/v1/leads", json={"name": "Cabinet Martin", "property_type": "Bureau", "budget": 300000,
+                                           "location": "Senlis", "surface_min": 100}, headers=self.h(t))
+        self.c.post("/api/v1/properties", json={"title": "Plateau", "address": "Senlis 60300", "price": 300000,
+                                                "size": 120, "property_type": "Bureau"}, headers=self.h(t))
+        self.c.post("/api/v1/properties", json={"title": "Petit bureau", "address": "Senlis 60300", "price": 300000,
+                                                "size": 40, "property_type": "Bureau"}, headers=self.h(t))
+        liste = self.c.get("/api/v1/leads", headers=self.h(t)).get_json()
+        self.assertEqual(liste[0]["surface_min"], 100)
+        d = self.c.get("/api/v1/improved-matches", headers=self.h(t)).get_json()
+        scores = {m["title"]: m["score"] for m in d[0]["matches"]}
+        self.assertGreater(scores["Plateau"], scores["Petit bureau"])
+        self.assertTrue(any("Surface" in r for m in d[0]["matches"] for r in m["reasons"]))
+
+
+    def test_surface_via_import_csv_et_formulaire_public(self):
+        t = self.jeton("surf-3@x.fr")
+        r = self.c.post("/api/v1/leads/import", headers=self.h(t), json={"rows": [
+            {"name": "Cabinet A", "email": "a@cabinet.fr", "property_type": "Bureau", "surface_min": "120 m²"},
+            {"name": "Cabinet B", "email": "b@cabinet.fr", "property_type": "Bureau", "surface_min": "abc"},
+            {"name": "Cabinet C", "email": "c@cabinet.fr", "property_type": "Bureau"}]})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        par_nom = {l["name"]: l["surface_min"] for l in self.c.get("/api/v1/leads", headers=self.h(t)).get_json()}
+        self.assertEqual(par_nom, {"Cabinet A": 120, "Cabinet B": None, "Cabinet C": None})
+        jeton = self.c.get("/api/v1/capture-link", headers=self.h(t)).get_json()["token"]
+        r = self.c.post(f"/public/capture/{jeton}", json={"name": "Boutique Léa", "email": "lea@boutique.fr",
+                                                          "property_type": "Local commercial", "surface_min": 45,
+                                                          "consent": True})
+        self.assertEqual(r.status_code, 201, r.get_json())
+        par_nom = {l["name"]: l["surface_min"] for l in self.c.get("/api/v1/leads", headers=self.h(t)).get_json()}
+        self.assertEqual(par_nom["Boutique Léa"], 45)
+
+
+# ---------------------------------------------------------------- modifier un bien
+class TestModifierBien(Base):
+    URL = "/api/v1/properties/{}"
+
+    def creer(self, tok, **kw):
+        r = self.c.post("/api/v1/properties", json={"title": "Maison Senlis", "address": "Senlis 60300", "price": 395000,
+                                                    "size": 120, "rooms": 5, "property_type": "Maison",
+                                                    "description": "Jardin", **kw}, headers=self.h(tok))
+        self.assertEqual(r.status_code, 201, r.get_json())
+        return r.get_json()["id"]
+
+    def lire(self, tok, bien_id):
+        return next(b for b in self.c.get("/api/v1/properties", headers=self.h(tok)).get_json() if b["id"] == bien_id)
+
+    def modifier(self, tok, bien_id, **kw):
+        return self.c.put(self.URL.format(bien_id), json=kw, headers=self.h(tok))
+
+    def test_exige_une_connexion(self):
+        self.assertEqual(self.c.put(self.URL.format(1), json={"title": "x"}).status_code, 401)
+
+    def test_modification_partielle_laisse_le_reste_intact(self):
+        t = self.jeton("mod-bien-1@x.fr")
+        i = self.creer(t)
+        r = self.modifier(t, i, price=380000, description="Jardin et garage")
+        self.assertEqual(r.status_code, 200, r.get_json())
+        b = self.lire(t, i)
+        self.assertEqual((b["price"], b["description"]), (380000, "Jardin et garage"))
+        self.assertEqual((b["title"], b["address"], b["size"], b["rooms"], b["property_type"]),
+                         ("Maison Senlis", "Senlis 60300", 120, 5, "Maison"))
+        self.assertEqual(r.get_json()["price"], 380000)
+
+    def test_changer_le_type_et_vider_un_champ(self):
+        t = self.jeton("mod-bien-2@x.fr")
+        i = self.creer(t)
+        r = self.modifier(t, i, property_type="Bureau", rooms=None, size="")
+        self.assertEqual(r.status_code, 200)
+        b = self.lire(t, i)
+        self.assertEqual(b["property_type"], "Bureau")
+        self.assertIsNone(b["rooms"])
+        self.assertIsNone(b["size"])
+
+    def test_titre_obligatoire_et_rien_a_modifier(self):
+        t = self.jeton("mod-bien-3@x.fr")
+        i = self.creer(t)
+        self.assertEqual(self.modifier(t, i, title="   ").status_code, 400)
+        self.assertEqual(self.modifier(t, i, title=None).status_code, 400)
+        self.assertEqual(self.c.put(self.URL.format(i), json={}, headers=self.h(t)).status_code, 400)
+        self.assertEqual(self.modifier(t, i, inconnu="x").status_code, 400)       # clés ignorées
+        self.assertEqual(self.lire(t, i)["title"], "Maison Senlis")
+
+    def test_un_bien_d_une_autre_agence_est_introuvable(self):
+        a, b = self.jeton("mod-bien-4a@x.fr"), self.jeton("mod-bien-4b@x.fr")
+        i = self.creer(a)
+        self.assertEqual(self.modifier(b, i, title="Piraté").status_code, 404)
+        self.assertEqual(self.modifier(b, 999999, title="x").status_code, 404)
+        self.assertEqual(self.lire(a, i)["title"], "Maison Senlis")
+        # user_id / agency dans le corps : ignorés
+        r = self.modifier(a, i, title="Renommé", user_id=1)
+        self.assertEqual(r.status_code, 200)
+
+    def test_reference_unique_dans_l_agence(self):
+        t = self.jeton("mod-bien-5@x.fr")
+        i1, i2 = self.creer(t, reference="DP-1"), self.creer(t, reference="DP-2")
+        self.assertEqual(self.modifier(t, i2, reference="dp-1").status_code, 409)          # casse ignorée
+        self.assertEqual(self.lire(t, i2)["reference"], "DP-2")
+        self.assertEqual(self.modifier(t, i1, reference="DP-1", title="Même référence, même bien").status_code, 200)
+        self.assertEqual(self.modifier(t, i2, reference="DP-3").status_code, 200)
+        self.assertEqual(self.modifier(t, i2, reference="").status_code, 200)              # on peut la retirer
+        self.assertIsNone(self.lire(t, i2)["reference"])
+        # une autre agence peut réutiliser la même référence
+        autre = self.jeton("mod-bien-5b@x.fr")
+        j = self.creer(autre, reference="X-1")
+        self.assertEqual(self.modifier(autre, j, reference="DP-1").status_code, 200)
+
+    def test_recalcule_les_correspondances(self):
+        t = self.jeton("mod-bien-6@x.fr")
+        i = self.creer(t)
+        with mock.patch.object(backend, "_lancer_en_arriere_plan") as lance:
+            self.assertEqual(self.modifier(t, i, price=300000).status_code, 200)
+        args = lance.call_args[0]
+        self.assertIs(args[0], backend._alertes_matching)
+        self.assertEqual(args[2:], (None, [i]))
+        with mock.patch.object(backend, "_lancer_en_arriere_plan") as lance:
+            self.modifier(t, i, title="")                     # refusé : rien n'est relancé
+        lance.assert_not_called()
+
+    def test_valeurs_hors_limites_traitees_comme_vides(self):
+        t = self.jeton("mod-bien-7@x.fr")
+        i = self.creer(t)
+        self.assertEqual(self.modifier(t, i, price=99999999999999).status_code, 200)
+        self.assertIsNone(self.lire(t, i)["price"])
+        self.assertEqual(self.modifier(t, i, title="x" * 400, description="d" * 6000).status_code, 200)
+        b = self.lire(t, i)
+        self.assertEqual(len(b["title"]), 255)
 
 
 if __name__ == "__main__":
