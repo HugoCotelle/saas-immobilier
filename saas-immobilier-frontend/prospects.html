@@ -154,7 +154,7 @@
                             purchase_urgency: form.purchase_urgency,
                             ...(form.transaction === 'location' ? {
                                 revenus: form.revenus === '' ? null : parseInt(form.revenus, 10),
-                                garants: form.garants === '' ? null : parseInt(form.garants, 10),
+                                garants: form.garants === '' || ['Local commercial', 'Bureau'].includes(form.property_type) ? null : parseInt(form.garants, 10),
                                 situation_pro: form.situation_pro || null,
                                 meuble_souhaite: form.meuble_souhaite === '' ? null : form.meuble_souhaite === 'oui'
                             } : {})
@@ -337,12 +337,14 @@
                                                 onChange={(e) => set('revenus', e.target.value)}
                                                 placeholder="2800" />
                                         </div>
+                                        {!['Local commercial', 'Bureau'].includes(form.property_type) && (
                                         <div className="form-group">
                                             <label>Nombre de garants</label>
                                             <input type="number" min="0" max="10" value={form.garants}
                                                 onChange={(e) => set('garants', e.target.value)}
                                                 placeholder="1" />
                                         </div>
+                                        )}
                                         <div className="form-group">
                                             <label>Situation professionnelle</label>
                                             <select value={form.situation_pro} onChange={(e) => set('situation_pro', e.target.value)}>

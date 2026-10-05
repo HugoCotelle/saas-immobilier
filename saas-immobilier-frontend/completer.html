@@ -102,7 +102,7 @@
                     <label for="revenus">Revenus mensuels nets du foyer (€)</label>
                     <input id="revenus" name="revenus" type="number" min="0" max="10000000" inputmode="numeric" placeholder="2800">
                 </div>
-                <div class="form-group">
+                <div class="form-group" id="groupe-garants">
                     <label for="garants">Avez-vous un garant ?</label>
                     <select id="garants" name="garants">
                         <option value="">Non précisé</option>
@@ -233,6 +233,8 @@
                 $('label-echeance').textContent = loc ? 'Quand souhaitez-vous emménager ?' : 'Quand souhaitez-vous acheter ?';
                 montrer('bloc-financement', !loc);
                 montrer('bloc-dossier', loc);
+                // Un local commercial ou un bureau se loue à un professionnel : pas de garant personnel.
+                montrer('groupe-garants', !typePro());
                 montrer('bloc-situation', loc);
                 montrer('bloc-meuble', loc && !typePro());
                 montrer('bloc-surface', typePro());
@@ -266,7 +268,7 @@
                         financing_status: enLocation() ? 'unknown' : $('financing_status').value,
                         purchase_urgency: $('purchase_urgency').value,
                         revenus: enLocation() && $('revenus').value !== '' ? parseInt($('revenus').value, 10) : null,
-                        garants: enLocation() && $('garants').value !== '' ? parseInt($('garants').value, 10) : null,
+                        garants: enLocation() && !typePro() && $('garants').value !== '' ? parseInt($('garants').value, 10) : null,
                         situation_pro: enLocation() && $('situation_pro').value ? $('situation_pro').value : null,
                         meuble_souhaite: enLocation() && !typePro() && $('meuble_souhaite').value ? $('meuble_souhaite').value === 'oui' : null,
                         message: $('message-libre').value.trim() || null,

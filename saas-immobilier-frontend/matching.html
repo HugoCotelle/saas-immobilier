@@ -55,6 +55,8 @@
         };
 
         const estLocation = (x) => x.transaction === 'location';
+        // Local commercial ou bureau : le locataire est un professionnel, on n'affiche aucun garant.
+        const estPro = (x) => ['Local commercial', 'Bureau'].includes(x.property_type);
         // Un loyer se lit « 850 € / mois » : sans ça, on prendrait un loyer pour un prix de vente.
         const montant = (v, loc) => `${v.toLocaleString('fr-FR')} €${loc ? ' / mois' : ''}`;
         const SITUATIONS = {
@@ -289,7 +291,7 @@
                                                     <div className="detail-value">{selectedLead.location || 'Non renseignée'}</div>
                                                 </div>
 
-                                                {(estLocation(selectedLead) && (selectedLead.revenus || selectedLead.garants || selectedLead.situation_pro)) ||
+                                                {(estLocation(selectedLead) && (selectedLead.revenus || (selectedLead.garants && !estPro(selectedLead)) || selectedLead.situation_pro)) ||
                                                  (selectedLead.financing_status && selectedLead.financing_status !== 'unknown') ||
                                                  (selectedLead.purchase_urgency && selectedLead.purchase_urgency !== 'unknown') ? (
                                                     <div className="info-box">
@@ -299,7 +301,7 @@
                                                                 {selectedLead.budget > 0 && ` (${(selectedLead.revenus / selectedLead.budget).toFixed(1).replace('.', ',')} fois le loyer maximum)`}
                                                             </div>
                                                         )}
-                                                        {estLocation(selectedLead) && selectedLead.garants > 0 && (
+                                                        {estLocation(selectedLead) && !estPro(selectedLead) && selectedLead.garants > 0 && (
                                                             <div className="info-item">Garants : {selectedLead.garants}</div>
                                                         )}
                                                         {estLocation(selectedLead) && selectedLead.situation_pro && (

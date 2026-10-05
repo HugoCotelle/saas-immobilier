@@ -62,7 +62,8 @@
             let points = 0;
             const loyer = parseInt(lead.budget, 10) || 0;
             const revenus = parseInt(lead.revenus, 10) || 0;
-            const garants = parseInt(lead.garants, 10) || 0;
+            // Un local commercial ou un bureau se loue à un professionnel : on ne compte aucun garant.
+            const garants = ['Local commercial', 'Bureau'].includes(lead.property_type) ? 0 : (parseInt(lead.garants, 10) || 0);
             const ajouter = (n, texte) => { points += n; lignes.push(`+${n} ${texte}`); };
 
             if (revenus && loyer) {
@@ -334,7 +335,7 @@
                             // Le dossier du locataire n'a de sens que pour une location : on ne l'efface pas si l'agent bascule en achat.
                             ...(form.transaction === 'location' ? {
                                 revenus: form.revenus === '' ? null : parseInt(form.revenus, 10),
-                                garants: form.garants === '' ? null : parseInt(form.garants, 10),
+                                garants: form.garants === '' || ['Local commercial', 'Bureau'].includes(form.property_type) ? null : parseInt(form.garants, 10),
                                 situation_pro: form.situation_pro || null,
                                 meuble_souhaite: form.meuble_souhaite === '' ? null : form.meuble_souhaite === 'oui'
                             } : {}),
@@ -544,7 +545,9 @@
                                             <div className="panel-title">{location ? 'Son dossier' : 'Son projet'}</div>
                                             <div className="panel-note">
                                                 {location
-                                                    ? "Pour un locataire, le classement repose sur la solidité du dossier : revenus d'au moins trois fois le loyer, garants, situation professionnelle, et la date d'emménagement."
+                                                    ? (['Local commercial', 'Bureau'].includes(form.property_type)
+                                                        ? "Pour un local commercial ou un bureau, le classement repose sur la solidité du dossier : revenus d'au moins trois fois le loyer, situation professionnelle, et la date d'emménagement."
+                                                        : "Pour un locataire, le classement repose sur la solidité du dossier : revenus d'au moins trois fois le loyer, garants, situation professionnelle, et la date d'emménagement.")
                                                     : "Ces deux informations pèsent le plus lourd dans le classement. Un prospect avec accord bancaire et projet immédiat remonte automatiquement en tête de liste."}
                                             </div>
 
@@ -557,12 +560,14 @@
                                                                 onChange={(e) => set('revenus', e.target.value)}
                                                                 placeholder="Non renseignés" />
                                                         </div>
+                                                        {!['Local commercial', 'Bureau'].includes(form.property_type) && (
                                                         <div className="form-group">
                                                             <label>Nombre de garants</label>
                                                             <input type="number" min="0" max="10" value={form.garants}
                                                                 onChange={(e) => set('garants', e.target.value)}
                                                                 placeholder="Non renseigné" />
                                                         </div>
+                                                        )}
                                                     </div>
                                                     {form.budget && form.revenus && (
                                                         <div className="info-box" style={{ marginBottom: '15px' }}>
@@ -757,7 +762,9 @@
                                             ) : (
                                                 <div className="info-box">
                                                     {location
-                                                        ? "Aucune information ne permet encore de classer ce prospect. Renseignez ses revenus, ses garants et sa date d'emménagement : ce sont les critères qui pèsent le plus."
+                                                        ? (['Local commercial', 'Bureau'].includes(form.property_type)
+                                                            ? "Aucune information ne permet encore de classer ce prospect. Renseignez ses revenus et sa date d'emménagement : ce sont les critères qui pèsent le plus."
+                                                            : "Aucune information ne permet encore de classer ce prospect. Renseignez ses revenus, ses garants et sa date d'emménagement : ce sont les critères qui pèsent le plus.")
                                                         : "Aucune information ne permet encore de classer ce prospect. Renseignez son financement et son échéance : ce sont les deux critères qui pèsent le plus."}
                                                 </div>
                                             )}

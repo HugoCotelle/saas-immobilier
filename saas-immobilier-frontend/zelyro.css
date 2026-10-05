@@ -768,6 +768,12 @@ body.auth::before {
 .mail-a dt { color: var(--ink-3); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em; padding-top: 3px; }
 .mail-a dd { color: var(--ink); word-break: break-all; }
 .lien-discret { background: none; border: none; padding: 0; color: var(--sage-700); font: inherit; font-size: 13px; text-decoration: underline; cursor: pointer; }
+.pj-liste { display: grid; gap: 8px; margin-bottom: 10px; }
+.pj-ligne { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); font-size: 14px; }
+.pj-ligne .pj-nom { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.pj-ligne .pj-taille { color: var(--ink-3); font-size: 12px; white-space: nowrap; }
+.pj-liste .pj-ajout { justify-self: start; cursor: pointer; text-transform: none; letter-spacing: 0; margin: 0; }
+.pj-ajout.disabled { opacity: 0.5; pointer-events: none; }
 .envoye-item { padding: 16px 18px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
 .envoye-item .envoye-sujet { color: var(--ink-2); font-size: 14px; margin-top: 2px; word-break: break-word; }
 .envoye-item .envoye-date { color: var(--ink-3); font-size: 12px; margin-top: 6px; }
