@@ -1129,12 +1129,14 @@ def _lancer_en_arriere_plan(fonction, *args):
     threading.Thread(target=fonction, args=args, daemon=True).start()
 
 
-def _envoyer_email(destinataire, sujet, texte, html, nom_expediteur=None, repondre_a=None):
+def _envoyer_email(destinataire, sujet, texte, html, nom_expediteur=None, repondre_a=None,
+                   pieces_jointes=None):
     """Envoie un e-mail via Brevo. Renvoie True si l'envoi est accepté.
 
     nom_expediteur remplace le nom affiché (l'adresse d'expédition reste
     celle du domaine authentifié) ; repondre_a est un couple (adresse, nom)
-    vers lequel partent les réponses."""
+    vers lequel partent les réponses ; pieces_jointes est une liste de
+    (nom de fichier, contenu en octets)."""
     cle = (os.getenv("BREVO_API_KEY") or "").strip()
     expediteur = (os.getenv("MAIL_FROM") or "").strip()
     if not cle or not expediteur:
@@ -1150,11 +1152,14 @@ def _envoyer_email(destinataire, sujet, texte, html, nom_expediteur=None, repond
         }
         if repondre_a and repondre_a[0]:
             charge["replyTo"] = {"email": repondre_a[0], "name": repondre_a[1] or repondre_a[0]}
+        if pieces_jointes:
+            charge["attachment"] = [{"name": nom, "content": base64.b64encode(contenu).decode('ascii')}
+                                    for nom, contenu in pieces_jointes]
         r = requests.post(
             BREVO_URL,
             headers={"api-key": cle, "content-type": "application/json", "accept": "application/json"},
             json=charge,
-            timeout=15,
+            timeout=40 if pieces_jointes else 15,
         )
         if r.status_code not in (200, 201, 202):
             app.logger.error("Brevo a refusé l'envoi (code %s) : %s", r.status_code, r.text[:200])
@@ -1491,10 +1496,11 @@ def _points_loyer(budget, loyer):
     return 0, None
 
 
-def _points_solvabilite(lead, loyer):
-    """(points sur 20, phrase) : revenus rapportés au loyer, garants en renfort."""
+def _points_solvabilite(lead, loyer, avec_garants=True):
+    """(points sur 20, phrase) : revenus rapportés au loyer, garants en renfort.
+    Un local commercial ou un bureau se loue à un professionnel : pas de garant personnel."""
     revenus = lead.get('revenus')
-    garants = lead.get('garants') or 0
+    garants = (lead.get('garants') or 0) if avec_garants else 0
     if not revenus or not loyer:
         if garants:
             return 12, "Revenus non précisés, garant disponible"
@@ -1543,7 +1549,7 @@ def _qualite_locataire(lead):
     points = 0
     loyer = lead.get('budget')
     revenus = lead.get('revenus')
-    garants = lead.get('garants') or 0
+    garants = 0 if lead.get('property_type') in TYPES_PRO else (lead.get('garants') or 0)
     if revenus and loyer:
         r = revenus / loyer
         points += 30 if r >= COEF_REVENUS_LOYER else 20 if r >= 2.5 else 10 if r >= 2 else 3
@@ -1575,6 +1581,15 @@ def _qualite_locataire(lead):
 # une maison. Le calcul a donc son propre barème, sur 100 points :
 # type 20, emplacement 25, budget 20, surface 15, financement 12, échéance 8.
 TYPES_PRO = ('Local commercial', 'Bureau')
+
+
+def _garants_pour(type_bien, valeur, souple=False):
+    """Nombre de garants à enregistrer. Un local commercial ou un bureau se loue
+    à un professionnel (société, commerçant, profession libérale) : on ne retient
+    aucun garant personnel pour ces recherches."""
+    if type_bien in TYPES_PRO:
+        return None
+    return (_entier_souple if souple else _entier_borne)(valeur, 50)
 
 # Activités qu'un acheteur peut vouloir exercer dans un local. Le code est ce
 # qui est enregistré ; le libellé est ce que lit l'agent.
@@ -1761,7 +1776,7 @@ def _detail_score_pro(lead, property_item):
     raisons.append(raison_surface)
 
     if location:
-        pts_solv, raison = _points_solvabilite(lead, property_item.get('price'))
+        pts_solv, raison = _points_solvabilite(lead, property_item.get('price'), avec_garants=False)
         points = round(pts_solv * 12 / 20)
     else:
         financement = lead.get('financing_status') or 'unknown'
@@ -2077,7 +2092,7 @@ def create_lead():
             _choix(data.get('source'), SOURCES, 'manuel'),
             _transaction(data.get('transaction'), 'vente'),
             _entier_souple(data.get('revenus')),
-            _entier_borne(data.get('garants'), 50),
+            _garants_pour(_texte_court(data.get('property_type'), 100), data.get('garants')),
             _situation_pro(data.get('situation_pro')),
             _booleen_souple(data.get('meuble_souhaite'))
         ))
@@ -2587,6 +2602,9 @@ def update_lead_financing(lead_id):
                 lead_id,
                 request.agency_id
             ))
+            # Local commercial ou bureau : aucun garant personnel n'est conservé.
+            cur.execute("UPDATE leads SET garants = NULL WHERE id = %s AND user_id = %s AND property_type = ANY(%s)",
+                        (lead_id, request.agency_id, list(TYPES_PRO)))
             conn.commit()
         finally:
             conn.close()
@@ -3032,7 +3050,7 @@ def import_leads():
                       _choix(ligne.get('purchase_urgency'), URGENCY_VALUES),
                       _transaction(ligne.get('transaction'), transaction_defaut),
                       _entier_souple(ligne.get('revenus')),
-                      _entier_souple(ligne.get('garants'), 50),
+                      _garants_pour(_texte_court(ligne.get('property_type'), 100), ligne.get('garants'), souple=True),
                       _situation_pro(ligne.get('situation_pro')),
                       _booleen_souple(ligne.get('meuble_souhaite'))))
                 ids.append(cur.fetchone()['id'])
@@ -3248,7 +3266,7 @@ def capture_lead(token):
                   maintenant,
                   _transaction(data.get('transaction'), 'vente'),
                   _entier_souple(data.get('revenus')),
-                  _entier_borne(data.get('garants'), 50),
+                  _garants_pour(_texte_court(data.get('property_type'), 100), data.get('garants')),
                   _situation_pro(data.get('situation_pro')),
                   _booleen_souple(data.get('meuble_souhaite'))))
             lead_id = cur.fetchone()['id']
@@ -3363,6 +3381,9 @@ def completer_lead(token):
                 _booleen_souple(data.get('meuble_souhaite')),
                 lead['id'],
             ))
+            # Local commercial ou bureau : aucun garant personnel n'est conservé.
+            cur.execute("UPDATE leads SET garants = NULL WHERE id = %s AND property_type = ANY(%s)",
+                        (lead['id'], list(TYPES_PRO)))
             if message:
                 cur.execute("""
                     INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
@@ -4183,6 +4204,49 @@ def get_proposals():
         return erreur_interne()
 
 
+# Annonces jointes à un e-mail de proposition : des PDF, joints tels quels.
+# Brevo refuse une pièce jointe de 4 Mo ou plus et un e-mail de plus de 20 Mo.
+PJ_MAX_FICHIERS = 5
+PJ_MAX_OCTETS = 3 * 1024 * 1024          # par fichier
+PJ_MAX_TOTAL = 8 * 1024 * 1024           # pour l'ensemble d'un e-mail
+PJ_REQUETE_MAX = 12 * 1024 * 1024        # corps JSON : le base64 pèse un tiers de plus
+
+
+def _lire_pieces_jointes(brut):
+    """Valide les PDF envoyés par le navigateur ({name, content en base64}).
+
+    Renvoie (liste de (nom, octets), None) ou (None, message d'erreur). Le
+    nom est nettoyé (aucun chemin, aucun caractère d'en-tête), le contenu doit
+    être un vrai PDF : sa signature est vérifiée, l'extension seule ne prouve rien."""
+    if brut in (None, []):
+        return [], None
+    if not isinstance(brut, list) or len(brut) > PJ_MAX_FICHIERS:
+        return None, f"Vous pouvez joindre {PJ_MAX_FICHIERS} PDF au maximum"
+    pieces, total, noms = [], 0, set()
+    for i, p in enumerate(brut, 1):
+        if not isinstance(p, dict) or not isinstance(p.get('content'), str) or not isinstance(p.get('name'), str):
+            return None, "Pièce jointe illisible"
+        base = re.sub(r'[^\w\-. ()]+', '_', p['name'].replace('\\', '/').split('/')[-1]).strip(' .')
+        base = re.sub(r'\.pdf$', '', base, flags=re.IGNORECASE)[:80].strip(' .') or f"annonce-{i}"
+        nom, k = f"{base}.pdf", 2
+        while nom.lower() in noms:
+            nom, k = f"{base}-{k}.pdf", k + 1
+        try:
+            octets = base64.b64decode(p['content'], validate=True)
+        except Exception:
+            return None, f"« {nom} » n'a pas pu être lu"
+        if not octets.startswith(b'%PDF-'):
+            return None, f"« {nom} » n'est pas un fichier PDF"
+        if len(octets) > PJ_MAX_OCTETS:
+            return None, f"« {nom} » dépasse {PJ_MAX_OCTETS // (1024 * 1024)} Mo"
+        total += len(octets)
+        if total > PJ_MAX_TOTAL:
+            return None, f"Les PDF dépassent {PJ_MAX_TOTAL // (1024 * 1024)} Mo au total"
+        noms.add(nom.lower())
+        pieces.append((nom, octets))
+    return pieces, None
+
+
 @app.route('/api/v1/leads/<int:lead_id>/send-mail', methods=['POST'])
 @limiter.limit("30 per hour;150 per day", key_func=_cle_utilisateur)
 @token_required
@@ -4196,10 +4260,15 @@ def send_lead_mail(lead_id):
     seul e-mail.
     """
     try:
+        # Seule cette route accepte un corps volumineux (PDF en base64) : à régler avant de lire la requête.
+        request.max_content_length = PJ_REQUETE_MAX
         data = request.get_json(silent=True) or {}
         sujet = str(data.get('subject') or '').strip()
         corps = str(data.get('body') or '').replace('\r\n', '\n').strip()
         ids = data.get('property_ids')
+        pieces, erreur_pj = _lire_pieces_jointes(data.get('attachments'))
+        if erreur_pj:
+            return jsonify({"message": erreur_pj}), 400
         if not 3 <= len(sujet) <= 200 or '\n' in sujet or '\r' in sujet:
             return jsonify({"message": "L'objet doit faire entre 3 et 200 caractères, sur une seule ligne"}), 400
         if not 20 <= len(corps) <= 5000:
@@ -4246,7 +4315,8 @@ def send_lead_mail(lead_id):
             texte = corps + "\n\n--\n" + pied
             if not _envoyer_email(destinataire, sujet, texte, _corps_html(corps, pied),
                                   nom_expediteur=agence,
-                                  repondre_a=(agent['email'], _nom_affiche(agent['first_name'] or agence, agence))):
+                                  repondre_a=(agent['email'], _nom_affiche(agent['first_name'] or agence, agence)),
+                                  pieces_jointes=pieces):
                 return jsonify({"message": "L'envoi a échoué. Réessayez dans un instant."}), 502
 
             maintenant = _maintenant()
@@ -4257,7 +4327,8 @@ def send_lead_mail(lead_id):
             cur.execute("""INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
                            VALUES (%s, %s, 'note', %s, %s)""",
                         (lead_id, request.user_id,
-                         f"E-mail envoyé à {destinataire} : « {sujet} ». Biens proposés : {titres}"[:2000],
+                         (f"E-mail envoyé à {destinataire} : « {sujet} ». Biens proposés : {titres}"
+                          + (f". PDF joints : {', '.join(n for n, _ in pieces)}" if pieces else ""))[:2000],
                          maintenant))
             if statut == 'nouveau':
                 cur.execute("""UPDATE leads SET status = 'contacte', status_changed_at = NOW(),
@@ -4268,7 +4339,8 @@ def send_lead_mail(lead_id):
                             (lead_id, request.user_id,
                              f"{STATUTS_LIBELLES['nouveau']} → {STATUTS_LIBELLES['contacte']}", maintenant))
             conn.commit()
-        return jsonify({"sent_at": _iso(maintenant), "status": 'contacte' if statut == 'nouveau' else statut}), 200
+        return jsonify({"sent_at": _iso(maintenant), "status": 'contacte' if statut == 'nouveau' else statut,
+                        "attachments": len(pieces)}), 200
     except Exception:
         return erreur_interne()
 
@@ -4913,7 +4985,7 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
             portail,
             _transaction((champs or {}).get('transaction'), 'vente'),
             (champs or {}).get('revenus'),
-            _entier_borne((champs or {}).get('garants'), 50),
+            _garants_pour((champs or {}).get('type_bien'), (champs or {}).get('garants')),
             (champs or {}).get('situation_pro'),
             (champs or {}).get('meuble'),
         ))

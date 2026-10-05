@@ -1970,5 +1970,247 @@ class TestLocationApi(Base):
         self.assertEqual((d["total_leads"], d["leads_location"], d["total_properties"], d["properties_location"]), (2, 1, 2, 1))
 
 
+class TestGarantsLocauxPro(Base):
+    """Un local commercial ou un bureau se loue à un professionnel : aucun garant personnel."""
+
+    def lead(self, tok, **kw):
+        r = self.c.post("/api/v1/leads", json={"name": "Camille Martin", **kw}, headers=self.h(tok))
+        self.assertEqual(r.status_code, 201, r.get_json())
+        return r.get_json()
+
+    def test_points_solvabilite_sans_garants(self):
+        lead = {"revenus": 2000, "garants": 2}
+        avec, _ = backend._points_solvabilite(lead, 1000)
+        sans, phrase = backend._points_solvabilite(lead, 1000, avec_garants=False)
+        self.assertGreater(avec, sans)
+        self.assertNotIn("garant", phrase)
+        self.assertEqual(backend._points_solvabilite({"revenus": 2000}, 1000), (sans, phrase))
+        # sans revenus : un garant ne remplace pas un dossier pour un professionnel
+        self.assertEqual(backend._points_solvabilite({"garants": 1}, 1000, avec_garants=False), (8, None))
+
+    def test_score_location_pro_ignore_les_garants(self):
+        local = {"property_type": "Local commercial", "price": 1000, "size": 60, "transaction": "location",
+                 "address": "5 rue Vieille 60300 Senlis"}
+        base = {"transaction": "location", "property_type": "Local commercial", "budget": 1100, "revenus": 2500,
+                "location": "Senlis", "surface_min": 50}
+        s1, r1 = backend._detail_score({**base, "garants": 2}, local)
+        s0, r0 = backend._detail_score({**base, "garants": 0}, local)
+        self.assertEqual(s1, s0)
+        self.assertFalse(any("garant" in x.lower() for x in r1))
+
+    def test_score_location_logement_compte_toujours_les_garants(self):
+        bien = {"property_type": "Appartement", "price": 1000, "size": 40, "transaction": "location",
+                "address": "5 rue Vieille 60300 Senlis"}
+        base = {"transaction": "location", "property_type": "Appartement", "budget": 1100, "revenus": 2300,
+                "location": "Senlis"}
+        s1, r1 = backend._detail_score({**base, "garants": 1}, bien)
+        s0, _ = backend._detail_score({**base, "garants": 0}, bien)
+        self.assertGreater(s1, s0)
+        self.assertTrue(any("garant" in x.lower() for x in r1))
+
+    def test_qualite_pro_ignore_les_garants(self):
+        base = {"transaction": "location", "budget": 1000, "revenus": 2500, "situation_pro": "cdi",
+                "purchase_urgency": "1-3_months", "location": "Senlis"}
+        self.assertEqual(backend.derive_lead_quality({**base, "property_type": "Appartement", "garants": 1}), "hot")
+        self.assertEqual(backend.derive_lead_quality({**base, "property_type": "Local commercial", "garants": 1}), "warm")
+        self.assertEqual(backend.derive_lead_quality({**base, "property_type": "Bureau", "garants": 1}), "warm")
+
+    def test_garants_pour(self):
+        self.assertEqual(backend._garants_pour("Appartement", 2), 2)
+        self.assertEqual(backend._garants_pour("Maison", "2", souple=True), 2)
+        self.assertIsNone(backend._garants_pour("Local commercial", 2))
+        self.assertIsNone(backend._garants_pour("Bureau", "2", souple=True))
+        self.assertIsNone(backend._garants_pour(None, None))
+
+    def test_creation_pro_ne_garde_aucun_garant(self):
+        t = self.jeton("gar-1@x.fr")
+        pro = self.lead(t, transaction="location", property_type="Local commercial", budget=1200, revenus=3000, garants=2)
+        self.assertIsNone(pro["garants"])
+        self.assertEqual(pro["revenus"], 3000)
+        logement = self.lead(t, name="Locataire", transaction="location", property_type="Appartement", budget=900, garants=2)
+        self.assertEqual(logement["garants"], 2)
+
+    def test_modification_vers_un_local_efface_les_garants(self):
+        t = self.jeton("gar-2@x.fr")
+        l = self.lead(t, transaction="location", property_type="Appartement", budget=900, garants=2)
+        r = self.c.put(f"/api/v1/leads/{l['id']}", json={"property_type": "Bureau", "garants": 2, "budget": 1500},
+                       headers=self.h(t))
+        self.assertEqual(r.status_code, 200, r.get_json())
+        d = self.c.get(f"/api/v1/leads/{l['id']}", headers=self.h(t)).get_json()
+        self.assertIsNone(d["garants"])
+        # retour à un logement : on peut de nouveau renseigner un garant
+        self.c.put(f"/api/v1/leads/{l['id']}", json={"property_type": "Appartement", "garants": 1, "budget": 900},
+                   headers=self.h(t))
+        d = self.c.get(f"/api/v1/leads/{l['id']}", headers=self.h(t)).get_json()
+        self.assertEqual(d["garants"], 1)
+
+    def test_import_ignore_les_garants_des_locaux(self):
+        t = self.jeton("gar-3@x.fr")
+        r = self.c.post("/api/v1/leads/import", headers=self.h(t), json={"rows": [
+            {"name": "Boulangerie Dupont", "property_type": "Local commercial", "transaction": "location",
+             "budget": 1500, "garants": 2},
+            {"name": "Locataire Lambda", "property_type": "Appartement", "transaction": "location",
+             "budget": 800, "garants": 1}]})
+        self.assertIn(r.status_code, (200, 201), r.get_json())
+        liste = {x["name"]: x for x in self.c.get("/api/v1/leads", headers=self.h(t)).get_json()}
+        self.assertIsNone(liste["Boulangerie Dupont"]["garants"])
+        self.assertEqual(liste["Locataire Lambda"]["garants"], 1)
+
+
+class TestPiecesJointes(Base):
+    """Annonces en PDF jointes aux e-mails de proposition."""
+
+    PDF = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
+
+    @staticmethod
+    def pj(nom, octets):
+        import base64 as b64
+        return {"name": nom, "content": b64.b64encode(octets).decode("ascii")}
+
+    def setUp(self):
+        super().setUp()
+        self.envoyes = []
+
+        def faux(dest, sujet, texte, html, **kw):
+            self.envoyes.append({"to": dest, "sujet": sujet, "kw": kw})
+            return True
+
+        for p in (mock.patch.object(backend, "_envoyer_email", side_effect=faux),
+                  mock.patch.dict(os.environ, {"BREVO_API_KEY": "cle-de-test", "MAIL_FROM": "contact@zelyro.fr"})):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def preparer(self, email):
+        t = self.jeton(email)
+        l = self.c.post("/api/v1/leads", json={"name": "Camille Martin", "email": "camille@exemple.fr", "budget": 300000,
+                                               "location": "Senlis"}, headers=self.h(t)).get_json()
+        b = self.c.post("/api/v1/properties", json={"title": "Maison Senlis", "address": "5 rue Vieille 60300 Senlis",
+                                                    "property_type": "Maison", "price": 290000}, headers=self.h(t)).get_json()
+        return t, l, b
+
+    def envoyer(self, t, l, b, **kw):
+        corps = {"subject": "Sélection de biens", "body": "Bonjour, voici une sélection de biens pour vous.",
+                 "property_ids": [b["id"]], **kw}
+        return self.c.post(f"/api/v1/leads/{l['id']}/send-mail", json=corps, headers=self.h(t))
+
+    # lecteur
+    def test_lecteur_accepte_un_pdf(self):
+        pieces, err = backend._lire_pieces_jointes([self.pj("Annonce maison.pdf", self.PDF)])
+        self.assertIsNone(err)
+        self.assertEqual(pieces, [("Annonce maison.pdf", self.PDF)])
+
+    def test_lecteur_vide(self):
+        self.assertEqual(backend._lire_pieces_jointes(None), ([], None))
+        self.assertEqual(backend._lire_pieces_jointes([]), ([], None))
+
+    def test_lecteur_refuse_un_faux_pdf(self):
+        _, err = backend._lire_pieces_jointes([self.pj("virus.pdf", b"MZ\x90\x00 un executable")])
+        self.assertIn("n'est pas un fichier PDF", err)
+
+    def test_lecteur_refuse_le_base64_invalide(self):
+        _, err = backend._lire_pieces_jointes([{"name": "a.pdf", "content": "pas du base64 !!"}])
+        self.assertIn("n'a pas pu être lu", err)
+
+    def test_lecteur_refuse_les_formes_inattendues(self):
+        for brut in ("texte", {"a": 1}, [1], [{"name": "a.pdf"}], [{"content": "AAAA"}], [{"name": 3, "content": "AAAA"}]):
+            self.assertIsNotNone(backend._lire_pieces_jointes(brut)[1], brut)
+
+    def test_lecteur_limites(self):
+        gros = self.PDF + b"0" * backend.PJ_MAX_OCTETS
+        self.assertIn("dépasse", backend._lire_pieces_jointes([self.pj("gros.pdf", gros)])[1])
+        trop = [self.pj(f"a{i}.pdf", self.PDF) for i in range(backend.PJ_MAX_FICHIERS + 1)]
+        self.assertIn("au maximum", backend._lire_pieces_jointes(trop)[1])
+        moyen = self.PDF + b"0" * (backend.PJ_MAX_OCTETS - 100)
+        quatre = [self.pj(f"m{i}.pdf", moyen) for i in range(4)]
+        self.assertIn("au total", backend._lire_pieces_jointes(quatre)[1])
+
+    def test_lecteur_nettoie_les_noms(self):
+        pieces, err = backend._lire_pieces_jointes([
+            self.pj("../../etc/passwd.pdf", self.PDF),
+            self.pj("C:\\Users\\Moi\\Annonce \"1\"\r\nBcc: x@y.fr.PDF", self.PDF),
+            self.pj("annonce.pdf", self.PDF), self.pj("annonce.pdf", self.PDF), self.pj("", self.PDF)])
+        self.assertIsNone(err)
+        noms = [n for n, _ in pieces]
+        self.assertEqual(len(set(n.lower() for n in noms)), len(noms))
+        for n in noms:
+            self.assertTrue(n.endswith(".pdf"))
+            self.assertFalse(any(c in n for c in '/\\"\r\n:'), n)
+        self.assertEqual(noms[0], "passwd.pdf")
+        self.assertIn("annonce.pdf", noms)
+        self.assertIn("annonce-2.pdf", noms)
+
+    # route
+    def test_envoi_sans_pdf_inchange(self):
+        t, l, b = self.preparer("pj-1@x.fr")
+        r = self.envoyer(t, l, b)
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(r.get_json()["attachments"], 0)
+        self.assertFalse(self.envoyes[0]["kw"].get("pieces_jointes"))
+
+    def test_envoi_avec_pdf(self):
+        t, l, b = self.preparer("pj-2@x.fr")
+        r = self.envoyer(t, l, b, attachments=[self.pj("Annonce maison.pdf", self.PDF), self.pj("Plan.pdf", self.PDF)])
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(r.get_json()["attachments"], 2)
+        self.assertEqual(self.envoyes[0]["kw"]["pieces_jointes"],
+                         [("Annonce maison.pdf", self.PDF), ("Plan.pdf", self.PDF)])
+        notes = self.c.get(f"/api/v1/leads/{l['id']}/notes", headers=self.h(t))
+        if notes.status_code == 200:
+            self.assertIn("Annonce maison.pdf", str(notes.get_json()))
+
+    def test_envoi_accepte_un_pdf_de_plus_de_128_ko(self):
+        t, l, b = self.preparer("pj-3@x.fr")
+        pdf = self.PDF + b"0" * (1024 * 1024)       # 1 Mo : le plafond général de 128 Ko ne doit pas le bloquer
+        r = self.envoyer(t, l, b, attachments=[self.pj("Gros.pdf", pdf)])
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True)[:200])
+        self.assertEqual(len(self.envoyes[0]["kw"]["pieces_jointes"][0][1]), len(pdf))
+
+    def test_plafond_general_inchange_ailleurs(self):
+        t = self.jeton("pj-4@x.fr")
+        r = self.c.post("/api/v1/leads", json={"name": "X", "notes": "a" * 300_000}, headers=self.h(t))
+        self.assertEqual(r.status_code, 413)
+
+    def test_envoi_refuse_un_faux_pdf_sans_envoyer(self):
+        t, l, b = self.preparer("pj-5@x.fr")
+        r = self.envoyer(t, l, b, attachments=[self.pj("a.pdf", b"pas un pdf")])
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(self.envoyes, [])
+        # le prospect n'est pas verrouillé par l'échec : un envoi correct passe ensuite
+        self.assertEqual(self.envoyer(t, l, b).status_code, 200)
+
+    def test_requete_au_dela_du_plafond_refusee(self):
+        t, l, b = self.preparer("pj-6@x.fr")
+        enorme = "A" * (backend.PJ_REQUETE_MAX + 1000)
+        r = self.envoyer(t, l, b, attachments=[{"name": "a.pdf", "content": enorme}])
+        self.assertEqual(r.status_code, 413)
+        self.assertEqual(self.envoyes, [])
+
+    def test_envoi_brevo_recoit_les_pieces_en_base64(self):
+        import base64 as b64
+        capture = {}
+
+        class Rep:
+            status_code = 201
+            text = ""
+
+        def faux_post(url, headers=None, json=None, timeout=None):
+            capture["json"], capture["timeout"] = json, timeout
+            return Rep()
+
+        # appel direct de la vraie fonction (le test de classe l'a remplacée par un faux)
+        reel = self._vraie_envoyer_email
+        with mock.patch.object(backend.requests, "post", side_effect=faux_post):
+            ok = reel("a@b.fr", "Sujet", "texte", "<p>texte</p>", pieces_jointes=[("Annonce.pdf", self.PDF)])
+        self.assertTrue(ok)
+        self.assertEqual(capture["json"]["attachment"], [{"name": "Annonce.pdf",
+                                                          "content": b64.b64encode(self.PDF).decode("ascii")}])
+        self.assertGreaterEqual(capture["timeout"], 30)
+        with mock.patch.object(backend.requests, "post", side_effect=faux_post):
+            reel("a@b.fr", "Sujet", "texte", "<p>texte</p>")
+        self.assertNotIn("attachment", capture["json"])
+
+    _vraie_envoyer_email = staticmethod(backend._envoyer_email)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
