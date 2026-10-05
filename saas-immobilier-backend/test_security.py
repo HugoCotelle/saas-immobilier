@@ -1659,7 +1659,7 @@ class TestLocationScoring(unittest.TestCase):
     """Barème d'un locataire : loyer, secteur, dossier (revenus, garants), échéance, situation, meublé."""
     LOC = {"transaction": "location", "property_type": "Appartement", "budget": 900, "location": "Senlis",
            "revenus": 3000, "garants": 0, "situation_pro": "cdi", "purchase_urgency": "immediate",
-           "meuble_souhaite": None}
+           "meuble_souhaite": None, "email": "camille@example.fr", "phone": "06 12 34 56 78"}
     BIEN = {"transaction": "location", "property_type": "Appartement", "price": 850, "title": "T2",
             "address": "5 rue Vieille 60300 Senlis", "meuble": None}
 
@@ -1767,6 +1767,48 @@ class TestLocationScoring(unittest.TestCase):
         # l'extraction d'air reste exigée pour une cuisine
         r = backend._detail_score({**lead, "activite": "restauration"}, {**bien, "extraction_air": False})
         self.assertLessEqual(r[0], backend.PLAFOND_ACTIVITE_INCOMPATIBLE)
+
+
+class TestCoordonneesDansLaQualite(unittest.TestCase):
+    """Les coordonnées de contact comptent dans la qualité d'un prospect."""
+    ACHETEUR = {"financing_status": "approved", "purchase_urgency": "3-6_months", "budget": 300000,
+                "location": "Senlis", "property_type": "Maison"}
+
+    def test_points_coordonnees(self):
+        f = backend._points_coordonnees
+        self.assertEqual(f({"email": "a@b.fr", "phone": "06 12 34 56 78"}, 10), 10)
+        self.assertEqual(f({"email": "a@b.fr"}, 10), 5)
+        self.assertEqual(f({"phone": "+33 6 12 34 56 78"}, 10), 5)
+        self.assertEqual(f({}, 10), 0)
+        # une adresse ou un numéro invraisemblables ne rapportent rien
+        self.assertEqual(f({"email": "pas-un-mail", "phone": "123"}, 10), 0)
+        self.assertEqual(f({"email": None, "phone": None}, 8), 0)
+        self.assertEqual(f({"email": "a@b.fr", "phone": "0612345678"}, 8), 8)
+
+    def test_acheteur_sans_coordonnees_perd_de_la_qualite(self):
+        q = backend.derive_lead_quality
+        complet = {**self.ACHETEUR, "email": "a@b.fr", "phone": "0612345678"}
+        self.assertEqual(q(complet), "hot")
+        # le même dossier, injoignable ou à moitié joignable, n'est plus chaud
+        self.assertEqual(q({**self.ACHETEUR, "email": "a@b.fr"}), "warm")
+        self.assertEqual(q(self.ACHETEUR), "warm")
+
+    def test_dossier_complet_garde_son_total(self):
+        # le total reste à 100 : un dossier complet n'a pas changé de note
+        q = backend.derive_lead_quality
+        max_dossier = {"financing_status": "approved", "purchase_urgency": "immediate", "budget": 1,
+                       "location": "x", "property_type": "Maison", "email": "a@b.fr", "phone": "0612345678"}
+        self.assertEqual(q(max_dossier), "hot")
+
+    def test_locataire_coordonnees(self):
+        q = backend.derive_lead_quality
+        base = {"transaction": "location", "property_type": "Appartement", "budget": 900, "location": "Senlis",
+                "revenus": 2300, "garants": 0, "situation_pro": "cdi", "purchase_urgency": "1-3_months"}
+        avec = q({**base, "email": "a@b.fr", "phone": "0612345678"})
+        sans = q(base)
+        ordre = {"hot": 2, "warm": 1, "cold": 0}
+        self.assertGreaterEqual(ordre[avec], ordre[sans])
+        self.assertEqual(sans, "warm")
 
 
 class TestLocationApi(Base):
@@ -2010,7 +2052,8 @@ class TestGarantsLocauxPro(Base):
 
     def test_qualite_pro_ignore_les_garants(self):
         base = {"transaction": "location", "budget": 1000, "revenus": 2500, "situation_pro": "cdi",
-                "purchase_urgency": "1-3_months", "location": "Senlis"}
+                "purchase_urgency": "1-3_months", "location": "Senlis",
+                "email": "a@example.fr", "phone": "0612345678"}
         self.assertEqual(backend.derive_lead_quality({**base, "property_type": "Appartement", "garants": 1}), "hot")
         self.assertEqual(backend.derive_lead_quality({**base, "property_type": "Local commercial", "garants": 1}), "warm")
         self.assertEqual(backend.derive_lead_quality({**base, "property_type": "Bureau", "garants": 1}), "warm")

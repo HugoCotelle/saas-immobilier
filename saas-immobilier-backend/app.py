@@ -1388,6 +1388,21 @@ def get_profile():
 
 # ===== SCORING INTELLIGENT =====
 
+def _points_coordonnees(lead, total):
+    """Points pour les coordonnées de contact : la moitié du total pour une
+    adresse e-mail plausible, l'autre moitié pour un numéro de téléphone
+    plausible. Un prospect qu'on ne peut ni écrire ni appeler ne se transforme
+    pas : c'est le premier signe d'un dossier exploitable."""
+    points = 0
+    email = str(lead.get('email') or '').strip()
+    if email and len(email) <= 255 and EMAIL_RE.match(email):
+        points += total // 2
+    chiffres = re.sub(r'\D', '', str(lead.get('phone') or ''))
+    if 8 <= len(chiffres) <= 15:
+        points += total - total // 2
+    return points
+
+
 def derive_lead_quality(lead):
     """Déduire la qualité d'un lead de ses caractéristiques.
 
@@ -1424,13 +1439,15 @@ def derive_lead_quality(lead):
     elif urgency == '6plus_months':
         points += 5
 
-    # Un dossier complet est un signal d'engagement réel.
+    # Un dossier complet est un signal d'engagement réel : 25 points au total,
+    # dont 10 pour les coordonnées (e-mail 5, téléphone 5).
+    points += _points_coordonnees(lead, 10)
     if lead.get('budget'):
-        points += 10
+        points += 6
     if lead.get('location'):
-        points += 8
+        points += 5
     if lead.get('property_type'):
-        points += 7
+        points += 4
 
     if points >= 80:
         return 'hot'
@@ -1561,12 +1578,14 @@ def _qualite_locataire(lead):
                'etudiant': 5, 'autre': 2}.get(lead.get('situation_pro'), 0)
     urgency = lead.get('purchase_urgency') or 'unknown'
     points += {'immediate': 30, '1-3_months': 24, '3-6_months': 13, '6plus_months': 4}.get(urgency, 0)
+    # Complétude : 20 points, dont 8 pour les coordonnées (e-mail 4, téléphone 4).
+    points += _points_coordonnees(lead, 8)
     if lead.get('budget'):
-        points += 8
-    if lead.get('location'):
-        points += 7
-    if lead.get('property_type'):
         points += 5
+    if lead.get('location'):
+        points += 4
+    if lead.get('property_type'):
+        points += 3
     if points >= 80:
         return 'hot'
     if points >= 45:
