@@ -441,6 +441,25 @@ _DDL_BIENS = (
 # biens déjà présents restent en vente. Le locataire renseigne ses revenus
 # mensuels nets, ses garants et sa situation ; il peut préférer un logement
 # meublé ou non (NULL : indifférent). Le bien est meublé, non meublé ou inconnu.
+# Activité des prospects : le moment où un prospect ouvre le lien reçu ou
+# remplit son formulaire. Table à part, pour ne pas mêler ce que fait le
+# prospect à ce que fait l'agent (notes et statuts) ; supprimée avec la fiche.
+_DDL_ACTIVITE = (
+    "ALTER TABLE lead_mails ADD COLUMN IF NOT EXISTS suivi_token VARCHAR(64)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS lead_mails_suivi_token_idx "
+    "ON lead_mails (suivi_token) WHERE suivi_token IS NOT NULL",
+    """CREATE TABLE IF NOT EXISTS lead_events (
+        id SERIAL PRIMARY KEY,
+        lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind VARCHAR(30) NOT NULL,
+        detail TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS lead_events_user_idx ON lead_events (user_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS lead_events_lead_idx ON lead_events (lead_id, kind, created_at)",
+)
+
 _DDL_SURFACE = (
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS transaction VARCHAR(10) NOT NULL DEFAULT 'vente'",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS revenus INTEGER",
@@ -622,12 +641,15 @@ def _assurer_schema():
                        EXISTS (SELECT 1 FROM information_schema.columns
                                WHERE table_name = 'leads' AND column_name = 'transaction'),
                        EXISTS (SELECT 1 FROM information_schema.columns
-                               WHERE table_name = 'properties' AND column_name = 'transaction')
+                               WHERE table_name = 'properties' AND column_name = 'transaction'),
+                       to_regclass('lead_events') IS NOT NULL,
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'lead_mails' AND column_name = 'suivi_token')
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
                 for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
-                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE):
+                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE):
                     cur.execute(ddl)
             conn.commit()
             _schema_pret = True
@@ -801,7 +823,7 @@ def init_database(demo=False):
         ):
             cursor.execute(ddl)
         for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
-                    + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE):
+                    + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE):
             cursor.execute(ddl)
 
         # Vérifier si vide
@@ -2819,6 +2841,15 @@ def get_lead_notes(lead_id):
                 ORDER BY created_at DESC, id DESC LIMIT 200
             """, (lead_id,))
             notes = cur.fetchall()
+            cur.execute("""SELECT id, kind, detail, created_at FROM lead_events
+                           WHERE lead_id = %s ORDER BY created_at DESC, id DESC LIMIT 100""", (lead_id,))
+            for e in cur.fetchall():
+                # Ce que le prospect a fait : même fil que les notes, sans bouton de suppression.
+                notes.append({"id": f"e{e['id']}", "kind": "activite",
+                              "body": "Le prospect " + _libelle_evenement(e['kind'], e['detail']),
+                              "created_at": e['created_at']})
+            notes.sort(key=lambda n: n['created_at'], reverse=True)
+            notes = notes[:200]
         for n in notes:
             n['created_at'] = _iso(n['created_at'])
         return jsonify(notes), 200
@@ -3321,6 +3352,63 @@ def capture_lead(token):
 COMPLETION_JETON_RE = re.compile(r'^[A-Za-z0-9_-]{16,64}$')
 
 
+# ===== ACTIVITÉ DES PROSPECTS =====
+# Ce que fait le prospect avec les liens que l'agence lui envoie : ouvrir son
+# formulaire, le remplir, ouvrir les annonces reçues. L'agent le voit sur son
+# tableau de bord et sur la fiche, pour savoir qui relancer et quand.
+
+LIBELLES_EVENEMENTS = {
+    'formulaire_ouvert': "a ouvert son formulaire",
+    'formulaire_rempli': "a rempli son formulaire",
+    'annonces_ouvertes': "a ouvert les annonces reçues",
+}
+EVENEMENT_FENETRE_MINUTES = 30      # une ouverture répétée dans la fenêtre ne compte qu'une fois
+ACTIVITE_JOURS = 14                 # durée d'affichage sur le tableau de bord
+ANNONCES_VALIDITE_JOURS = 90        # au-delà, le lien des annonces expire
+
+# Aperçus de liens (WhatsApp, iMessage, Slack...), scanners de messagerie et
+# scripts : leur passage n'est pas une ouverture par le prospect. Les pages
+# publiques sont des pages statiques qui appellent ensuite l'API en
+# JavaScript, ce que ces robots font rarement ; ce filtre complète.
+_ROBOTS_RE = re.compile(
+    r"bot|crawl|spider|preview|facebookexternalhit|whatsapp|telegram|linkedin|safelinks|"
+    r"barracuda|proofpoint|mimecast|curl|wget|python-requests|go-http-client", re.I)
+
+
+def _est_robot():
+    agent = request.headers.get('User-Agent', '')
+    return not agent or bool(_ROBOTS_RE.search(agent))
+
+
+def _noter_evenement(cur, user_id, lead_id, kind, detail=None, fenetre=EVENEMENT_FENETRE_MINUTES):
+    """Enregistre un événement. Un événement identique déjà noté dans la
+    fenêtre (en minutes) n'est pas répété : actualiser la page ne gonfle pas
+    le compteur. fenetre=0 enregistre toujours. Renvoie True si noté."""
+    maintenant = _maintenant()
+    if fenetre:
+        cur.execute("""SELECT 1 FROM lead_events
+                       WHERE lead_id = %s AND kind = %s AND detail IS NOT DISTINCT FROM %s AND created_at > %s
+                       LIMIT 1""", (lead_id, kind, detail, maintenant - timedelta(minutes=fenetre)))
+        if cur.fetchone():
+            return False
+    cur.execute("""INSERT INTO lead_events (lead_id, user_id, kind, detail, created_at)
+                   VALUES (%s, %s, %s, %s, %s)""", (lead_id, user_id, kind, detail, maintenant))
+    return True
+
+
+def _libelle_evenement(kind, detail):
+    base = LIBELLES_EVENEMENTS.get(kind, kind)
+    return f"{base} ({detail})" if detail else base
+
+
+def _prenom_prospect(nom):
+    """Premier mot du nom, sauf si c'est le nom provisoire donné à un contact de portail."""
+    nom = (nom or '').strip()
+    if not nom or nom in _PORTAIL_NOM_DEFAUT.values():
+        return ''
+    return nom.split(' ')[0]
+
+
 @app.route('/public/completer/<token>', methods=['GET'])
 def completer_info(token):
     """Nom de l'agence et prénom du prospect, pour personnaliser le formulaire
@@ -3331,11 +3419,14 @@ def completer_info(token):
         _assurer_schema()
         with _base() as (conn, cur):
             cur.execute("""
-                SELECT u.company_name, l.name, l.transaction FROM leads l
+                SELECT u.company_name, l.id AS lead_id, l.user_id, l.name, l.transaction FROM leads l
                 JOIN users u ON u.id = l.user_id
                 WHERE l.completion_token = %s AND u.is_active
             """, (token,))
             ligne = cur.fetchone()
+            if ligne and not _est_robot():
+                _noter_evenement(cur, ligne['user_id'], ligne['lead_id'], 'formulaire_ouvert')
+                conn.commit()
         if not ligne:
             return jsonify({"message": "Not found"}), 404
         prenom = (ligne['name'] or '').split(' ')[0] if ligne['name'] else ''
@@ -3424,6 +3515,7 @@ def completer_lead(token):
                     INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
                     VALUES (%s, %s, 'note', %s, %s)
                 """, (lead['id'], lead['user_id'], "Précisions envoyées par le prospect : " + message, _maintenant()))
+            _noter_evenement(cur, lead['user_id'], lead['id'], 'formulaire_rempli', fenetre=0)
             conn.commit()
 
         _lancer_en_arriere_plan(_alertes_matching, lead['user_id'], [lead['id']], None, None)
@@ -4149,12 +4241,17 @@ def _nom_affiche(texte, defaut):
     return propre or defaut
 
 
-def _corps_html(texte, pied):
+def _corps_html(texte, pied, bouton=None):
     """Le message de l'agent en HTML simple : un paragraphe par bloc, un
-    saut de ligne à chaque retour à la ligne, puis le pied de message."""
+    saut de ligne à chaque retour à la ligne, puis le pied de message.
+    bouton=(libellé, adresse) ajoute un bouton après le message."""
     blocs = [b.strip() for b in re.split(r"\n\s*\n", texte.strip()) if b.strip()]
     corps = "".join('<p style="margin:0 0 16px;line-height:1.6">'
                     + _html.escape(b).replace("\n", "<br>") + "</p>" for b in blocs)
+    if bouton:
+        corps += (f'<p style="margin:24px 0"><a href="{_html.escape(bouton[1])}" '
+                  'style="background:#4F6353;color:#ffffff;text-decoration:none;padding:12px 22px;'
+                  f'border-radius:6px;display:inline-block">{_html.escape(bouton[0])}</a></p>')
     return ('<div style="font-family:Arial,Helvetica,sans-serif;color:#1F2A24;max-width:560px;margin:0 auto;padding:24px">'
             + corps
             + '<p style="margin:28px 0 0;padding-top:14px;border-top:1px solid #E3DCCC;color:#6A7168;'
@@ -4347,23 +4444,33 @@ def send_lead_mail(lead_id):
             agence = _nom_affiche(agence_row.get('company_name') or agent['first_name'], "Votre agence")
             pied = (f"Ce message vous est adressé par {agence} dans le cadre de votre recherche immobilière. "
                     "Pour ne plus recevoir de propositions, répondez simplement « STOP » à ce message.")
-            texte = corps + "\n\n--\n" + pied
-            if not _envoyer_email(destinataire, sujet, texte, _corps_html(corps, pied),
+            # Lien vers les annonces en ligne, propre à ce message : c'est son
+            # ouverture que l'agent verra sur son tableau de bord. Le PDF reste
+            # en pièce jointe, mais une pièce jointe ne dit pas si elle est lue.
+            suivi_jeton, lien_suivi = None, None
+            if data.get('tracked_link') is not False and _site_url():
+                suivi_jeton = secrets.token_urlsafe(24)
+                lien_suivi = f"{_site_url()}/annonces.html?t={suivi_jeton}"
+            texte = (corps + (f"\n\nVoir les annonces en ligne : {lien_suivi}" if lien_suivi else "")
+                     + "\n\n--\n" + pied)
+            if not _envoyer_email(destinataire, sujet, texte,
+                                  _corps_html(corps, pied, ("Voir les annonces en ligne", lien_suivi) if lien_suivi else None),
                                   nom_expediteur=agence,
                                   repondre_a=(agent['email'], _nom_affiche(agent['first_name'] or agence, agence)),
                                   pieces_jointes=pieces):
                 return jsonify({"message": "L'envoi a échoué. Réessayez dans un instant."}), 502
 
             maintenant = _maintenant()
-            cur.execute("""INSERT INTO lead_mails (lead_id, user_id, subject, body, property_ids, sent_at)
-                           VALUES (%s, %s, %s, %s, %s, %s)""",
-                        (lead_id, request.user_id, sujet, corps, ids, maintenant))
+            cur.execute("""INSERT INTO lead_mails (lead_id, user_id, subject, body, property_ids, sent_at, suivi_token)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                        (lead_id, request.user_id, sujet, corps, ids, maintenant, suivi_jeton))
             titres = ", ".join(b['title'] for b in biens)
             cur.execute("""INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
                            VALUES (%s, %s, 'note', %s, %s)""",
                         (lead_id, request.user_id,
                          (f"E-mail envoyé à {destinataire} : « {sujet} ». Biens proposés : {titres}"
-                          + (f". PDF joints : {', '.join(n for n, _ in pieces)}" if pieces else ""))[:2000],
+                          + (f". PDF joints : {', '.join(n for n, _ in pieces)}" if pieces else "")
+                          + (". Lien de suivi des annonces joint" if lien_suivi else ""))[:2000],
                          maintenant))
             if statut == 'nouveau':
                 cur.execute("""UPDATE leads SET status = 'contacte', status_changed_at = NOW(),
@@ -4375,7 +4482,7 @@ def send_lead_mail(lead_id):
                              f"{STATUTS_LIBELLES['nouveau']} → {STATUTS_LIBELLES['contacte']}", maintenant))
             conn.commit()
         return jsonify({"sent_at": _iso(maintenant), "status": 'contacte' if statut == 'nouveau' else statut,
-                        "attachments": len(pieces)}), 200
+                        "attachments": len(pieces), "tracked_link": bool(lien_suivi)}), 200
     except Exception:
         return erreur_interne()
 
@@ -4392,6 +4499,82 @@ def update_preferences():
             cur.execute("UPDATE users SET alerts_enabled = %s WHERE id = %s", (data['alerts_enabled'], request.agency_id))
             conn.commit()
         return jsonify({"alerts_enabled": data['alerts_enabled']}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/public/annonces/<token>', methods=['GET'])
+def annonces_publiques(token):
+    """Les biens d'un e-mail de proposition, pour la page annonces.html. Le
+    lien est propre à un message : l'ouvrir note l'événement sur la fiche du
+    prospect (sauf pour les robots). Expire au bout de ANNONCES_VALIDITE_JOURS."""
+    try:
+        if not COMPLETION_JETON_RE.match(token):
+            return jsonify({"message": "Not found"}), 404
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("""
+                SELECT m.property_ids, m.sent_at, l.id AS lead_id, l.user_id, l.name, u.company_name
+                FROM lead_mails m
+                JOIN leads l ON l.id = m.lead_id
+                JOIN users u ON u.id = l.user_id AND u.is_active
+                WHERE m.suivi_token = %s
+            """, (token,))
+            mail = cur.fetchone()
+            if not mail:
+                return jsonify({"message": "Not found"}), 404
+            if mail['sent_at'] < _maintenant() - timedelta(days=ANNONCES_VALIDITE_JOURS):
+                return jsonify({"message": "Ce lien a expiré. Contactez votre agence pour recevoir les annonces."}), 410
+            cur.execute("""SELECT title, address, price, size, rooms, property_type, description, transaction, meuble
+                           FROM properties WHERE user_id = %s AND id = ANY(%s) ORDER BY id""",
+                        (mail['user_id'], list(mail['property_ids'] or [])))
+            biens = cur.fetchall()
+            if biens and not _est_robot():
+                pluriel = 's' if len(biens) > 1 else ''
+                _noter_evenement(cur, mail['user_id'], mail['lead_id'], 'annonces_ouvertes',
+                                 f"envoyées le {mail['sent_at']:%d/%m}, {len(biens)} bien{pluriel}")
+                conn.commit()
+        return jsonify({"agence": mail['company_name'] or "", "prenom": _prenom_prospect(mail['name']),
+                        "envoye_le": _iso(mail['sent_at']), "biens": biens}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/leads/<int:lead_id>/completion-link', methods=['POST'])
+@limiter.limit("60 per hour", key_func=_cle_utilisateur)
+@token_required
+def lien_completion_lead(lead_id):
+    """Le lien personnel du formulaire de ce prospect et un message prêt à
+    coller. Sert quand l'adresse e-mail est inconnue : l'agent le transmet
+    par la messagerie du portail, par SMS ou sur WhatsApp. Le lien est créé
+    au premier appel, puis toujours le même pour ce prospect."""
+    try:
+        site = _site_url()
+        if not site:
+            return jsonify({"message": "L'adresse du site n'est pas configurée sur ce serveur"}), 503
+        with _base() as (conn, cur):
+            cur.execute("SELECT id, name FROM leads WHERE id = %s AND user_id = %s",
+                        (lead_id, request.agency_id))
+            lead = cur.fetchone()
+            if not lead:
+                return jsonify({"message": "Lead not found"}), 404
+            cur.execute("""UPDATE leads SET completion_token = COALESCE(completion_token, %s)
+                           WHERE id = %s RETURNING completion_token""",
+                        (secrets.token_urlsafe(24), lead_id))
+            jeton = cur.fetchone()['completion_token']
+            cur.execute("SELECT company_name FROM users WHERE id = %s", (request.agency_id,))
+            agence = _nom_affiche((cur.fetchone() or {}).get('company_name'), '')
+            cur.execute("SELECT first_name FROM users WHERE id = %s", (request.user_id,))
+            agent = _nom_affiche((cur.fetchone() or {}).get('first_name'), '')
+            conn.commit()
+        lien = f"{site}/completer.html?c={jeton}"
+        prenom = _prenom_prospect(lead['name'])
+        signature = " — ".join(x for x in (agent, agence) if x)
+        message = (f"Bonjour{' ' + prenom if prenom else ''}, merci pour votre message. "
+                   "Pour vous proposer rapidement les biens qui correspondent vraiment à votre projet, "
+                   f"pouvez-vous préciser votre recherche en une minute ici : {lien}"
+                   + (f"\n\n{signature}" if signature else ""))
+        return jsonify({"url": lien, "message": message}), 200
     except Exception:
         return erreur_interne()
 
@@ -4427,6 +4610,12 @@ def get_dashboard():
                 WHERE l.user_id = %s AND r.done_at IS NULL""",
                         (aujourdhui, aujourdhui, aujourdhui, aujourdhui + timedelta(days=7), request.agency_id))
             rappels = cur.fetchone()
+            cur.execute("""SELECT e.id, e.lead_id, l.name, e.kind, e.detail, e.created_at
+                           FROM lead_events e JOIN leads l ON l.id = e.lead_id
+                           WHERE e.user_id = %s AND e.created_at > %s
+                           ORDER BY e.created_at DESC, e.id DESC LIMIT 30""",
+                        (request.agency_id, maintenant - timedelta(days=ACTIVITE_JOURS)))
+            evenements = cur.fetchall()
 
         pipeline = {s: 0 for s in STATUTS}
         qualite = {'hot': 0, 'warm': 0, 'cold': 0}
@@ -4463,6 +4652,9 @@ def get_dashboard():
             "conversion_rate": round(100 * pipeline['signe'] / total) if total else None,
             "reminders": {"overdue": rappels['en_retard'], "today": rappels['aujourdhui'],
                           "this_week": rappels['semaine']},
+            "activity": [{"id": e['id'], "lead_id": e['lead_id'], "name": e['name'], "kind": e['kind'],
+                          "label": _libelle_evenement(e['kind'], e['detail']),
+                          "created_at": _iso(e['created_at'])} for e in evenements],
         }), 200
     except Exception:
         return erreur_interne()

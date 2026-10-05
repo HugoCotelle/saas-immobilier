@@ -1,5 +1,6 @@
 """Tests de sécurité du backend, contre une vraie base PostgreSQL."""
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -1853,6 +1854,194 @@ class TestScoreQualiteExpose(Base):
         par_niveau = self.c.get("/api/v1/leads/quality/warm", headers=self.h(t)).get_json()
         self.assertEqual([x["id"] for x in par_niveau], [cree["id"]])
         self.assertEqual(par_niveau[0]["quality_score"], 75)
+
+
+class TestActiviteProspects(Base):
+    """Ouverture des liens par le prospect : formulaire, annonces, flux de l'agent."""
+
+    NAVIGATEUR = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Safari/604.1"}
+
+    def setUp(self):
+        super().setUp()
+        self.envoyes = []
+
+        def faux(dest, sujet, texte, html, **kw):
+            self.envoyes.append({"to": dest, "sujet": sujet, "texte": texte, "html": html})
+            return True
+
+        for p in (mock.patch.object(backend, "_envoyer_email", side_effect=faux),
+                  mock.patch.dict(os.environ, {"BREVO_API_KEY": "cle-de-test", "MAIL_FROM": "contact@zelyro.fr",
+                                               "FRONTEND_URL": "https://app.zelyro.fr"})):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def preparer(self, email):
+        t = self.jeton(email)
+        l = self.c.post("/api/v1/leads", json={"name": "Camille Martin", "email": "camille@exemple.fr",
+                                               "budget": 300000, "location": "Senlis"}, headers=self.h(t)).get_json()
+        b = self.c.post("/api/v1/properties", json={"title": "Maison Senlis", "address": "5 rue Vieille 60300 Senlis",
+                                                    "property_type": "Maison", "price": 290000, "rooms": 4, "size": 95},
+                        headers=self.h(t)).get_json()
+        return t, l, b
+
+    def lien(self, t, l):
+        r = self.c.post(f"/api/v1/leads/{l['id']}/completion-link", headers=self.h(t))
+        self.assertEqual(r.status_code, 200, r.get_json())
+        return r.get_json()
+
+    def evenements(self, t):
+        return self.c.get("/api/v1/dashboard", headers=self.h(t)).get_json()["activity"]
+
+    # lien à copier
+    def test_lien_a_copier_stable_et_message_pret(self):
+        t, l, _ = self.preparer("act-1@x.fr")
+        a = self.lien(t, l)
+        self.assertTrue(a["url"].startswith("https://app.zelyro.fr/completer.html?c="))
+        self.assertIn(a["url"], a["message"])
+        self.assertTrue(a["message"].startswith("Bonjour Camille,"))
+        self.assertEqual(self.lien(t, l)["url"], a["url"])
+
+    def test_lien_a_copier_nom_provisoire_et_acces(self):
+        t, _, _ = self.preparer("act-2@x.fr")
+        anonyme = self.c.post("/api/v1/leads", json={"name": "Contact LeBonCoin"}, headers=self.h(t)).get_json()
+        self.assertTrue(self.lien(t, anonyme)["message"].startswith("Bonjour, merci"))
+        autre = self.jeton("act-2b@x.fr")
+        self.assertEqual(self.c.post(f"/api/v1/leads/{anonyme['id']}/completion-link",
+                                     headers=self.h(autre)).status_code, 404)
+        self.assertEqual(self.c.post(f"/api/v1/leads/{anonyme['id']}/completion-link").status_code, 401)
+        with mock.patch.dict(os.environ, {"FRONTEND_URL": ""}):
+            self.assertEqual(self.c.post(f"/api/v1/leads/{anonyme['id']}/completion-link",
+                                         headers=self.h(t)).status_code, 503)
+
+    # ouverture du formulaire
+    def test_ouverture_du_formulaire_notee_une_fois(self):
+        t, l, _ = self.preparer("act-3@x.fr")
+        jeton = self.lien(t, l)["url"].split("c=")[1]
+        self.assertEqual(self.evenements(t), [])
+        for _ in range(3):
+            r = self.c.get(f"/public/completer/{jeton}", headers=self.NAVIGATEUR)
+            self.assertEqual(r.status_code, 200)
+        ev = self.evenements(t)
+        self.assertEqual(len(ev), 1)
+        self.assertEqual((ev[0]["kind"], ev[0]["name"], ev[0]["lead_id"]), ("formulaire_ouvert", "Camille Martin", l["id"]))
+        self.assertEqual(ev[0]["label"], "a ouvert son formulaire")
+
+    def test_robots_ne_comptent_pas(self):
+        t, l, _ = self.preparer("act-4@x.fr")
+        jeton = self.lien(t, l)["url"].split("c=")[1]
+        for ua in ("WhatsApp/2.23.20 A", "facebookexternalhit/1.1", "Slackbot-LinkExpanding 1.0",
+                   "curl/8.4.0", "python-requests/2.31", "Googlebot/2.1", ""):
+            r = self.c.get(f"/public/completer/{jeton}", headers={"User-Agent": ua})
+            self.assertEqual(r.status_code, 200, ua)
+        self.assertEqual(self.evenements(t), [])
+
+    def test_formulaire_rempli_note_a_chaque_envoi(self):
+        t, l, _ = self.preparer("act-5@x.fr")
+        jeton = self.lien(t, l)["url"].split("c=")[1]
+        for _ in range(2):
+            r = self.c.post(f"/public/completer/{jeton}", json={"consent": True, "budget": 310000, "location": "Senlis"},
+                            headers=self.NAVIGATEUR)
+            self.assertEqual(r.status_code, 200, r.get_json())
+        types = [e["kind"] for e in self.evenements(t)]
+        self.assertEqual(types, ["formulaire_rempli", "formulaire_rempli"])
+        # refus de consentement : rien n'est noté
+        r = self.c.post(f"/public/completer/{jeton}", json={"budget": 1}, headers=self.NAVIGATEUR)
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(len(self.evenements(t)), 2)
+
+    def test_jeton_inconnu(self):
+        self.assertEqual(self.c.get("/public/completer/" + "a" * 30, headers=self.NAVIGATEUR).status_code, 404)
+        self.assertEqual(self.c.get("/public/annonces/" + "a" * 30, headers=self.NAVIGATEUR).status_code, 404)
+        self.assertEqual(self.c.get("/public/annonces/court", headers=self.NAVIGATEUR).status_code, 404)
+
+    # annonces
+    def jeton_annonces(self, t, l, b, **kw):
+        corps = {"subject": "Sélection de biens", "body": "Bonjour, voici une sélection de biens pour vous.",
+                 "property_ids": [b["id"]], **kw}
+        r = self.c.post(f"/api/v1/leads/{l['id']}/send-mail", json=corps, headers=self.h(t))
+        self.assertEqual(r.status_code, 200, r.get_json())
+        return r.get_json(), self.envoyes[-1]
+
+    def test_mail_avec_lien_de_suivi_et_ouverture(self):
+        t, l, b = self.preparer("act-6@x.fr")
+        rep, mail = self.jeton_annonces(t, l, b)
+        self.assertTrue(rep["tracked_link"])
+        m = re.search(r"https://app\.zelyro\.fr/annonces\.html\?t=([A-Za-z0-9_-]+)", mail["texte"])
+        self.assertIsNotNone(m, mail["texte"])
+        self.assertIn(m.group(0), mail["html"])
+        self.assertIn("Voir les annonces en ligne", mail["html"])
+        r = self.c.get(f"/public/annonces/{m.group(1)}", headers=self.NAVIGATEUR)
+        self.assertEqual(r.status_code, 200, r.get_json())
+        d = r.get_json()
+        self.assertEqual((d["prenom"], len(d["biens"]), d["biens"][0]["title"]), ("Camille", 1, "Maison Senlis"))
+        self.assertNotIn("user_id", d["biens"][0])
+        ev = self.evenements(t)
+        self.assertEqual([e["kind"] for e in ev], ["annonces_ouvertes"])
+        self.assertIn("1 bien", ev[0]["label"])
+        self.assertNotIn("1 biens", ev[0]["label"])
+        # une deuxième ouverture rapprochée ne double pas l'événement
+        self.c.get(f"/public/annonces/{m.group(1)}", headers=self.NAVIGATEUR)
+        self.assertEqual(len(self.evenements(t)), 1)
+        # un robot n'ajoute rien
+        self.c.get(f"/public/annonces/{m.group(1)}", headers={"User-Agent": "WhatsApp/2.0"})
+        self.assertEqual(len(self.evenements(t)), 1)
+
+    def test_mail_sans_lien_de_suivi(self):
+        t, l, b = self.preparer("act-7@x.fr")
+        rep, mail = self.jeton_annonces(t, l, b, tracked_link=False)
+        self.assertFalse(rep["tracked_link"])
+        self.assertNotIn("annonces.html", mail["texte"])
+        self.assertNotIn("annonces.html", mail["html"])
+
+    def test_mail_sans_adresse_du_site_part_sans_lien(self):
+        t, l, b = self.preparer("act-8@x.fr")
+        with mock.patch.dict(os.environ, {"FRONTEND_URL": ""}):
+            rep, mail = self.jeton_annonces(t, l, b)
+        self.assertFalse(rep["tracked_link"])
+        self.assertNotIn("annonces.html", mail["texte"])
+
+    def test_lien_annonces_expire_et_bien_supprime(self):
+        t, l, b = self.preparer("act-9@x.fr")
+        _, mail = self.jeton_annonces(t, l, b)
+        jeton = re.search(r"annonces\.html\?t=([A-Za-z0-9_-]+)", mail["texte"]).group(1)
+        # bien supprimé depuis l'envoi : page vide, aucun événement
+        conn = backend.get_db_connection()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM properties WHERE id = %s", (b["id"],))
+        conn.commit(); conn.close()
+        r = self.c.get(f"/public/annonces/{jeton}", headers=self.NAVIGATEUR)
+        self.assertEqual((r.status_code, r.get_json()["biens"]), (200, []))
+        self.assertEqual(self.evenements(t), [])
+        # lien trop ancien
+        conn = backend.get_db_connection()
+        cur = conn.cursor()
+        cur.execute("UPDATE lead_mails SET sent_at = sent_at - interval '100 days' WHERE suivi_token = %s", (jeton,))
+        conn.commit(); conn.close()
+        self.assertEqual(self.c.get(f"/public/annonces/{jeton}", headers=self.NAVIGATEUR).status_code, 410)
+
+    # fil de la fiche et isolement
+    def test_historique_de_la_fiche_et_isolement(self):
+        t, l, _ = self.preparer("act-10@x.fr")
+        jeton = self.lien(t, l)["url"].split("c=")[1]
+        self.c.get(f"/public/completer/{jeton}", headers=self.NAVIGATEUR)
+        notes = self.c.get(f"/api/v1/leads/{l['id']}/notes", headers=self.h(t)).get_json()
+        act = [n for n in notes if n["kind"] == "activite"]
+        self.assertEqual(len(act), 1)
+        self.assertEqual(act[0]["body"], "Le prospect a ouvert son formulaire")
+        self.assertTrue(str(act[0]["id"]).startswith("e"))
+        autre = self.jeton("act-10b@x.fr")
+        self.assertEqual(self.evenements(autre), [])
+
+    def test_suppression_du_prospect_efface_son_activite(self):
+        t, l, _ = self.preparer("act-11@x.fr")
+        jeton = self.lien(t, l)["url"].split("c=")[1]
+        self.c.get(f"/public/completer/{jeton}", headers=self.NAVIGATEUR)
+        self.assertEqual(self.c.delete(f"/api/v1/leads/{l['id']}", headers=self.h(t)).status_code, 200)
+        conn = backend.get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM lead_events WHERE lead_id = %s", (l["id"],))
+        self.assertEqual(cur.fetchone()[0], 0)
+        conn.close()
 
 
 class TestLocationApi(Base):
