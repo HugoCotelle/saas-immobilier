@@ -1811,6 +1811,50 @@ class TestCoordonneesDansLaQualite(unittest.TestCase):
         self.assertEqual(sans, "warm")
 
 
+class TestScoreQualiteExpose(Base):
+    """Le score /100 affiché est celui qui fixe le niveau, et l'API le renvoie."""
+
+    def test_points_et_niveau_coherents(self):
+        for lead in (
+            {"financing_status": "approved", "purchase_urgency": "immediate", "budget": 1, "location": "x",
+             "property_type": "Maison", "email": "a@b.fr", "phone": "0612345678"},
+            {"financing_status": "in_progress", "purchase_urgency": "3-6_months", "email": "a@b.fr"},
+            {}, {"transaction": "location", "budget": 900, "revenus": 3000, "email": "a@b.fr", "phone": "0612345678",
+                 "situation_pro": "cdi", "purchase_urgency": "immediate", "location": "x", "property_type": "Appartement"},
+        ):
+            pts = backend.points_qualite(lead)
+            self.assertTrue(0 <= pts <= 100)
+            attendu = "hot" if pts >= 80 else "warm" if pts >= 45 else "cold"
+            self.assertEqual(backend.derive_lead_quality(lead), attendu)
+        self.assertEqual(backend.points_qualite({}), 0)
+        self.assertEqual(backend.points_qualite({"email": "a@b.fr", "phone": "0612345678"}), 10)
+
+    def test_api_renvoie_quality_score(self):
+        t = self.jeton("score-1@x.fr")
+        r = self.c.post("/api/v1/leads", json={"name": "Julie Martin", "email": "julie@example.fr",
+                        "phone": "06 12 34 56 78", "budget": 300000, "location": "Senlis", "property_type": "Maison",
+                        "financing_status": "approved", "purchase_urgency": "3-6_months"}, headers=self.h(t))
+        self.assertEqual(r.status_code, 201, r.get_json())
+        cree = r.get_json()
+        # 40 + 15 + 10 + 6 + 5 + 4
+        self.assertEqual(cree["quality_score"], 80)
+        self.assertEqual(cree["lead_quality"], "hot")
+        liste = self.c.get("/api/v1/leads", headers=self.h(t)).get_json()
+        self.assertEqual(liste[0]["quality_score"], 80)
+        detail = self.c.get(f"/api/v1/leads/{cree['id']}", headers=self.h(t)).get_json()
+        self.assertEqual((detail["quality_score"], detail["lead_quality"]), (80, "hot"))
+        # sans téléphone, le même prospect perd 5 points et n'est plus chaud
+        r2 = self.c.put(f"/api/v1/leads/{cree['id']}", json={"budget": 300000, "location": "Senlis",
+                        "property_type": "Maison", "financing_status": "approved",
+                        "purchase_urgency": "3-6_months", "phone": None}, headers=self.h(t))
+        self.assertEqual(r2.status_code, 200, r2.get_json())
+        detail = self.c.get(f"/api/v1/leads/{cree['id']}", headers=self.h(t)).get_json()
+        self.assertEqual((detail["quality_score"], detail["lead_quality"]), (75, "warm"))
+        par_niveau = self.c.get("/api/v1/leads/quality/warm", headers=self.h(t)).get_json()
+        self.assertEqual([x["id"] for x in par_niveau], [cree["id"]])
+        self.assertEqual(par_niveau[0]["quality_score"], 75)
+
+
 class TestLocationApi(Base):
     def lead(self, tok, **kw):
         r = self.c.post("/api/v1/leads", json={"name": "Camille Martin", **kw}, headers=self.h(tok))

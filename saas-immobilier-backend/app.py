@@ -1416,8 +1416,23 @@ def derive_lead_quality(lead):
     correctement, il faudrait demander à un directeur d'agence de classer
     une vingtaine de ses leads et ajuster jusqu'à retrouver son classement.
     """
+    return _niveau_qualite(points_qualite(lead))
+
+
+def _niveau_qualite(points):
+    if points >= 80:
+        return 'hot'
+    if points >= 45:
+        return 'warm'
+    return 'cold'
+
+
+def points_qualite(lead):
+    """Score de qualité d'un prospect, sur 100. C'est lui, et lui seul, qui
+    fixe le niveau chaud, tiède ou froid : le chiffre affiché à l'agent et le
+    classement ne peuvent donc pas diverger."""
     if _transaction(lead.get('transaction'), 'vente') == 'location':
-        return _qualite_locataire(lead)
+        return min(100, _points_locataire(lead))
 
     points = 0
 
@@ -1449,11 +1464,7 @@ def derive_lead_quality(lead):
     if lead.get('property_type'):
         points += 4
 
-    if points >= 80:
-        return 'hot'
-    if points >= 45:
-        return 'warm'
-    return 'cold'
+    return min(100, points)
 
 
 def _points_budget(budget, prix):
@@ -1560,8 +1571,8 @@ def _compat_meuble(lead, bien):
     return 0, f"Bien {libelle(propose)} alors que le prospect cherche du {libelle(voulu)}", True
 
 
-def _qualite_locataire(lead):
-    """Qualité d'un prospect en location : solidité du dossier + échéance +
+def _points_locataire(lead):
+    """Points d'un prospect en location : solidité du dossier + échéance +
     complétude. Mêmes seuils que pour un acquéreur (chaud 80, tiède 45)."""
     points = 0
     loyer = lead.get('budget')
@@ -1586,11 +1597,11 @@ def _qualite_locataire(lead):
         points += 4
     if lead.get('property_type'):
         points += 3
-    if points >= 80:
-        return 'hot'
-    if points >= 45:
-        return 'warm'
-    return 'cold'
+    return points
+
+
+def _qualite_locataire(lead):
+    return _niveau_qualite(min(100, _points_locataire(lead)))
 
 
 # Locaux commerciaux et bureaux : on ne les achète pas comme un logement. Le
@@ -2055,6 +2066,7 @@ def get_leads():
         conn.close()
         for lead in leads:
             lead['lead_quality'] = derive_lead_quality(lead)
+            lead['quality_score'] = points_qualite(lead)
             lead['next_reminder'] = _iso(lead['next_reminder'])
         return jsonify(leads), 200
     except Exception:
@@ -2121,6 +2133,7 @@ def create_lead():
         conn.close()
 
         lead['lead_quality'] = derive_lead_quality(lead)
+        lead['quality_score'] = points_qualite(lead)
         _lancer_en_arriere_plan(_alertes_matching, request.agency_id, [lead['id']], None)
         return jsonify(lead), 201
     except Exception:
@@ -2514,6 +2527,8 @@ def get_lead_detail(lead_id):
         conn.close()
         if not lead:
             return jsonify({"message": "Lead not found"}), 404
+        lead['lead_quality'] = derive_lead_quality(lead)
+        lead['quality_score'] = points_qualite(lead)
         return jsonify(lead), 200
     except Exception:
         return erreur_interne()
@@ -2647,6 +2662,7 @@ def get_leads_by_quality(quality):
         filtered = [l for l in leads if derive_lead_quality(l) == quality]
         for lead in filtered:
             lead['lead_quality'] = quality
+            lead['quality_score'] = points_qualite(lead)
         return jsonify(filtered), 200
     except Exception:
         return erreur_interne()
@@ -4391,7 +4407,7 @@ def get_dashboard():
         with _base() as (conn, cur):
             cur.execute("""SELECT id, status, source, created_at, first_contact_at, budget, location,
                                   property_type, financing_status, purchase_urgency,
-                                  transaction, revenus, garants, situation_pro
+                                  transaction, revenus, garants, situation_pro, email, phone
                            FROM leads WHERE user_id = %s""", (request.agency_id,))
             prospects = cur.fetchall()
             cur.execute("""SELECT COUNT(*) AS n,
