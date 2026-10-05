@@ -486,7 +486,10 @@
                                                 )}
                                             </div>
                                             <div className="lead-footer">
-                                                <span className={`lead-badge ${cls}`}>{libelle}</span>
+                                                <span className={`lead-badge ${cls}`}
+                                                    title="Score de qualité du prospect. Le détail est sur sa fiche.">
+                                                    {libelle}{typeof lead.quality_score === 'number' ? ` · ${lead.quality_score}/100` : ''}
+                                                </span>
                                                 <a className="lien-fiche" href={`/leads-profile.html?id=${lead.id}`}>
                                                     Ouvrir la fiche →
                                                 </a>

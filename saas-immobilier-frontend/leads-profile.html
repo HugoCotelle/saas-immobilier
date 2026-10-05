@@ -27,6 +27,18 @@
         // Reproduit la logique du serveur pour expliquer le classement à
         // l'agent. Si les seuils changent côté backend, il faut les changer
         // ici aussi — c'est le prix de l'explication en direct.
+        // Coordonnées : la moitié des points pour un e-mail plausible, l'autre
+        // moitié pour un numéro plausible (mêmes règles que le serveur).
+        function coordonnees(lead, total) {
+            const moitie = Math.floor(total / 2);
+            const email = String(lead.email || '').trim();
+            const chiffres = String(lead.phone || '').replace(/\D/g, '');
+            return {
+                email: email.length <= 255 && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) ? moitie : 0,
+                phone: chiffres.length >= 8 && chiffres.length <= 15 ? total - moitie : 0
+            };
+        }
+
         function expliquerQualite(lead) {
             if (lead.transaction === 'location') return expliquerQualiteLocataire(lead);
             const lignes = [];
@@ -47,10 +59,14 @@
             }[lead.purchase_urgency];
             if (urg) { points += urg[0]; lignes.push(`+${urg[0]} ${urg[1]}`); }
 
-            if (lead.budget) { points += 10; lignes.push('+10 Budget renseigné'); }
-            if (lead.location) { points += 8; lignes.push('+8 Secteur renseigné'); }
-            if (lead.property_type) { points += 7; lignes.push('+7 Type de bien renseigné'); }
+            const coord = coordonnees(lead, 10);
+            if (coord.email) { points += coord.email; lignes.push(`+${coord.email} E-mail renseigné`); }
+            if (coord.phone) { points += coord.phone; lignes.push(`+${coord.phone} Téléphone renseigné`); }
+            if (lead.budget) { points += 6; lignes.push('+6 Budget renseigné'); }
+            if (lead.location) { points += 5; lignes.push('+5 Secteur renseigné'); }
+            if (lead.property_type) { points += 4; lignes.push('+4 Type de bien renseigné'); }
 
+            points = Math.min(100, points);
             const quality = points >= 80 ? 'hot' : points >= 45 ? 'warm' : 'cold';
             return { quality, points, lignes };
         }
@@ -89,10 +105,14 @@
             }[lead.purchase_urgency];
             if (urg) ajouter(urg[0], urg[1]);
 
-            if (lead.budget) ajouter(8, 'Loyer maximum renseigné');
-            if (lead.location) ajouter(7, 'Secteur renseigné');
-            if (lead.property_type) ajouter(5, 'Type de bien renseigné');
+            const coord = coordonnees(lead, 8);
+            if (coord.email) ajouter(coord.email, 'E-mail renseigné');
+            if (coord.phone) ajouter(coord.phone, 'Téléphone renseigné');
+            if (lead.budget) ajouter(5, 'Loyer maximum renseigné');
+            if (lead.location) ajouter(4, 'Secteur renseigné');
+            if (lead.property_type) ajouter(3, 'Type de bien renseigné');
 
+            points = Math.min(100, points);
             const quality = points >= 80 ? 'hot' : points >= 45 ? 'warm' : 'cold';
             return { quality, points, lignes };
         }
@@ -378,6 +398,8 @@
                 budget: form.budget,
                 location: form.location,
                 property_type: form.property_type,
+                email: form.email,
+                phone: form.phone,
                 transaction: form.transaction,
                 revenus: form.revenus,
                 garants: form.garants,
