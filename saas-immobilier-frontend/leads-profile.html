@@ -169,6 +169,8 @@
             const [doublon, setDoublon] = useState(null);
             const [user, setUser] = useState(null);
             const [notes, setNotes] = useState([]);
+            const [lienPerso, setLienPerso] = useState(null);
+            const [lienCopie, setLienCopie] = useState(false);
             const [rappels, setRappels] = useState([]);
             const [nouvelleNote, setNouvelleNote] = useState('');
             const [rappelDate, setRappelDate] = useState('');
@@ -250,6 +252,15 @@
                 if (!nouvelleNote.trim()) return;
                 await appel(`/api/v1/leads/${leadId}/notes`, { method: 'POST', body: JSON.stringify({ body: nouvelleNote }) });
                 setNouvelleNote('');
+            });
+
+            // Lien personnel du formulaire + message prêt à coller (messagerie du
+            // portail, SMS, WhatsApp) : sert surtout quand l'e-mail est inconnu.
+            const copierLien = () => agir(async () => {
+                const d = await appel(`/api/v1/leads/${leadId}/completion-link`, { method: 'POST' });
+                setLienPerso(d);
+                try { await navigator.clipboard.writeText(d.message); setLienCopie(true); }
+                catch (e) { setLienCopie(false); }
             });
 
             const supprimerNote = (id) => agir(() => appel(`/api/v1/leads/${leadId}/notes/${id}`, { method: 'DELETE' }));
@@ -672,6 +683,30 @@
 
                                     <div>
                                         <div className="panel">
+                                            <div className="panel-title">Lien du formulaire</div>
+                                            <div className="panel-note">
+                                                Pas d'e-mail pour ce prospect ? Copiez un message avec son lien personnel et collez-le
+                                                dans la messagerie du portail, par SMS ou sur WhatsApp. Il précise sa recherche lui-même,
+                                                et vous voyez ici et sur le tableau de bord quand il ouvre le lien.
+                                            </div>
+                                            <button className="btn petit" disabled={occupe} onClick={copierLien}>
+                                                Copier le message avec le lien
+                                            </button>
+                                            {lienPerso && (
+                                                <>
+                                                    <div className="info-box" style={{ marginTop: '12px' }} role="status">
+                                                        {lienCopie
+                                                            ? 'Message copié. Il ne reste qu\'à le coller.'
+                                                            : 'Copie automatique impossible : sélectionnez le message ci-dessous et copiez-le.'}
+                                                    </div>
+                                                    <textarea readOnly className="mail-corps" value={lienPerso.message}
+                                                        style={{ minHeight: '120px', marginTop: '10px' }}
+                                                        onFocus={(e) => e.target.select()} aria-label="Message avec le lien du formulaire"></textarea>
+                                                </>
+                                            )}
+                                        </div>
+
+                                        <div className="panel">
                                             <div className="panel-title">Suivi</div>
                                             <div className="panel-note">
                                                 Où en est ce prospect ? Cliquez sur l'étape atteinte : le
@@ -747,7 +782,7 @@
                                                     <div className="panel-note" style={{ marginBottom: 0 }}>Rien pour l'instant.</div>
                                                 )}
                                                 {notes.map((n) => (
-                                                    <div key={n.id} className={`hist-item ${n.kind === 'statut' ? 'statut' : ''}`}>
+                                                    <div key={n.id} className={`hist-item ${n.kind === 'statut' ? 'statut' : n.kind === 'activite' ? 'activite' : ''}`}>
                                                         <div className="hist-date">
                                                             {dateHeure(n.created_at)}
                                                             {n.kind === 'note' && (

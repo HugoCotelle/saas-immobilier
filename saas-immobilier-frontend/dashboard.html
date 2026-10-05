@@ -39,6 +39,22 @@
             const [a, m, j] = iso.split('-').map(Number);
             return new Date(a, m - 1, j).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
         };
+        // « il y a 12 min », « il y a 3 h », « hier », puis la date.
+        const ilYA = (iso) => {
+            const d = new Date(iso);
+            if (isNaN(d)) return '';
+            const min = Math.round((Date.now() - d.getTime()) / 60000);
+            if (min < 1) return "à l'instant";
+            if (min < 60) return `il y a ${min} min`;
+            if (min < 24 * 60) return `il y a ${Math.round(min / 60)} h`;
+            if (min < 48 * 60) return 'hier';
+            return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+        };
+        // Dernière visite de l'agent sur le tableau de bord, pour repérer ce qui est nouveau.
+        const CLE_ACTIVITE_VUE = 'zelyro_activite_vue';
+        const lireVue = () => { try { return localStorage.getItem(CLE_ACTIVITE_VUE) || ''; } catch (e) { return ''; } };
+        const ecrireVue = (iso) => { try { localStorage.setItem(CLE_ACTIVITE_VUE, iso); } catch (e) { /* stockage indisponible : sans conséquence */ } };
+
         const duree = (heures) => {
             if (heures === null || heures === undefined) return '—';
             if (heures < 1) return "< 1 h";
@@ -74,6 +90,8 @@
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
             const [user, setUser] = useState(null);
+            // Lu une fois, avant d'être mis à jour : ce qui est postérieur est « nouveau » pour l'agent.
+            const [vueAvant] = useState(lireVue);
 
             useEffect(() => {
                 const token = localStorage.getItem('token');
@@ -110,7 +128,9 @@
                     if (!rBiens.ok) throw new Error(`Erreur API: ${rBiens.status}`);
                     if (!rRappels.ok) throw new Error(`Erreur API: ${rRappels.status}`);
 
-                    setStats(await rStats.json());
+                    const donnees = await rStats.json();
+                    setStats(donnees);
+                    if (donnees.activity && donnees.activity.length) ecrireVue(donnees.activity[0].created_at);
                     setBiens(await rBiens.json());
                     setRappels(await rRappels.json());
                     setError(null);
@@ -127,6 +147,8 @@
                 window.location.replace('/login.html');
             };
 
+            const estNouveau = (iso) => !vueAvant || new Date(iso) > new Date(vueAvant);
+            const nouveautes = stats ? (stats.activity || []).filter((e) => estNouveau(e.created_at)).length : 0;
             const f = filtre.trim().toLowerCase();
             const biensFiltres = f
                 ? biens.filter((b) =>
@@ -202,6 +224,39 @@
                                                 <div className="stat-note">{stats.total_properties - stats.properties_location} à vendre, {stats.properties_location} à louer</div>
                                             )}
                                         </div>
+                                    </div>
+
+                                    <div className="panel" style={{ marginBottom: '24px' }}>
+                                        <div className="panel-header">
+                                            <div className="panel-title">Activité des prospects</div>
+                                            <div className="panel-count">
+                                                {nouveautes > 0 ? `${nouveautes} nouveauté${nouveautes > 1 ? 's' : ''}` : '14 derniers jours'}
+                                            </div>
+                                        </div>
+                                        {(stats.activity || []).length === 0 ? (
+                                            <div className="empty-state">
+                                                Rien pour l'instant.<br />
+                                                Quand un prospect ouvre le lien de son formulaire, le remplit ou ouvre les annonces
+                                                que vous lui avez envoyées, vous le voyez ici.
+                                            </div>
+                                        ) : (
+                                            <div>
+                                                {stats.activity.slice(0, 8).map((e) => (
+                                                    <div key={e.id} className="afaire-item">
+                                                        <div className="afaire-quoi">
+                                                            <a href={`/leads-profile.html?id=${e.lead_id}`}>{e.name}</a>
+                                                            <small>{e.label}</small>
+                                                        </div>
+                                                        <div className="rappel-date" style={estNouveau(e.created_at) ? { color: 'var(--sage-700)', fontWeight: 600 } : undefined}>
+                                                            {estNouveau(e.created_at) ? 'Nouveau · ' : ''}{ilYA(e.created_at)}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                {stats.activity.length > 8 && (
+                                                    <div className="stat-note">… et {stats.activity.length - 8} autre{stats.activity.length - 8 > 1 ? 's' : ''}.</div>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div className="content-grid">

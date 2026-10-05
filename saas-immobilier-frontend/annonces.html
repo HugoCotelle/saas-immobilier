@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Les biens sélectionnés pour vous</title>
+    <meta name="robots" content="noindex">
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="zelyro.css">
+    <style>
+        body.auth { align-items: flex-start; }
+        .annonces-carte { max-width: 680px; margin: 24px auto; }
+        .annonces-carte .auth-header h1 { font-size: 30px; letter-spacing: 0.02em; }
+        .annonces-carte .auth-header h1::before { display: none; }
+        .masque { display: none; }
+        .liste-annonces { display: grid; gap: 16px; margin-top: 8px; }
+        .annonce { border: 1px solid var(--line, #E3DCCC); border-radius: 12px; padding: 20px; background: #FFFEFB; text-align: left; }
+        .annonce h2 { font-family: Georgia, serif; font-weight: 500; font-size: 21px; margin: 0 0 6px; }
+        .annonce .prix { font-weight: 600; font-size: 18px; color: var(--sage-700, #3E4F43); margin: 0 0 10px; }
+        .annonce .adresse { color: var(--ink-2, #44504A); margin: 0 0 10px; font-size: 14px; }
+        .annonce .caracteristiques { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
+        .annonce .caracteristiques li { background: var(--sage-100, #E7EDE4); color: var(--sage-700, #3E4F43); border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 600; }
+        .annonce .description { margin: 0; font-size: 14px; line-height: 1.6; color: var(--ink-2, #44504A); white-space: pre-line; }
+        .contact-agence { margin-top: 24px; font-size: 14px; color: var(--ink-2, #44504A); line-height: 1.6; text-align: center; }
+        .pied-formulaire { text-align: center; margin-top: 22px; font-size: 12px; color: var(--ink-3, #6A7168); line-height: 1.7; }
+        .pied-formulaire a { color: var(--ink-3, #6A7168); }
+    </style>
+</head>
+<body class="auth">
+    <main class="auth-container annonces-carte" id="carte">
+        <div class="auth-header">
+            <h1 id="titre">Les biens sélectionnés pour vous</h1>
+            <p id="sous-titre"></p>
+        </div>
+
+        <div id="etat" class="loading masque"><div class="loader"></div></div>
+        <div id="liste" class="liste-annonces masque"></div>
+        <p id="contact" class="contact-agence masque">Un de ces biens vous intéresse ? Répondez simplement à l'e-mail reçu pour organiser une visite.</p>
+
+        <p class="pied-formulaire">
+            Votre agence est informée de l'ouverture de cette page.<br>
+            Page propulsée par Zelyro · <a href="/mentions-legales.html" target="_blank" rel="noopener">Mentions légales</a>
+        </p>
+    </main>
+
+    <script>
+        (function () {
+            var API_URL = 'https://saas-immobilier-921a.onrender.com';
+            var jeton = new URLSearchParams(window.location.search).get('t') || '';
+            var $ = function (id) { return document.getElementById(id); };
+            var montrer = function (id, oui) { $(id).classList.toggle('masque', !oui); };
+
+            function indisponible(texte) {
+                montrer('etat', false);
+                montrer('liste', false);
+                montrer('contact', false);
+                $('titre').textContent = 'Lien indisponible';
+                $('sous-titre').textContent = texte || "Ce lien n'est plus valable. Contactez directement l'agence pour recevoir les annonces.";
+            }
+
+            function element(balise, classe, texte) {
+                var e = document.createElement(balise);
+                if (classe) e.className = classe;
+                if (texte !== undefined && texte !== null) e.textContent = texte;
+                return e;
+            }
+
+            function prix(valeur, location) {
+                if (valeur === null || valeur === undefined) return '';
+                return Number(valeur).toLocaleString('fr-FR') + ' €' + (location ? ' / mois' : '');
+            }
+
+            function carte(b) {
+                var a = element('article', 'annonce');
+                a.appendChild(element('h2', '', b.title));
+                var p = prix(b.price, b.transaction === 'location');
+                if (p) a.appendChild(element('p', 'prix', p));
+                if (b.address) a.appendChild(element('p', 'adresse', b.address));
+                var ul = element('ul', 'caracteristiques');
+                [b.property_type,
+                 b.rooms ? b.rooms + (b.rooms > 1 ? ' pièces' : ' pièce') : null,
+                 b.size ? b.size + ' m²' : null,
+                 b.transaction === 'location' ? (b.meuble === true ? 'Meublé' : b.meuble === false ? 'Non meublé' : null) : null]
+                    .filter(Boolean).forEach(function (t) { ul.appendChild(element('li', '', t)); });
+                if (ul.children.length) a.appendChild(ul);
+                if (b.description) a.appendChild(element('p', 'description', b.description));
+                return a;
+            }
+
+            if (!/^[A-Za-z0-9_-]{16,64}$/.test(jeton)) { indisponible(); return; }
+
+            montrer('etat', true);
+            fetch(API_URL + '/public/annonces/' + encodeURIComponent(jeton))
+                .then(function (r) {
+                    if (r.status === 410) return r.json().then(function (d) { throw new Error(d.message || ''); });
+                    if (!r.ok) throw new Error('');
+                    return r.json();
+                })
+                .then(function (d) {
+                    var agence = d.agence || '';
+                    if (agence) document.title = 'Les biens sélectionnés pour vous — ' + agence;
+                    if (!d.biens || !d.biens.length) {
+                        indisponible("Ces annonces ne sont plus disponibles. Contactez directement l'agence pour en savoir plus.");
+                        return;
+                    }
+                    var n = d.biens.length;
+                    $('titre').textContent = d.prenom ? ('Bonjour ' + d.prenom + ', voici votre sélection') : 'Les biens sélectionnés pour vous';
+                    $('sous-titre').textContent = (agence ? agence + ' vous propose ' : 'Votre agence vous propose ')
+                        + n + (n > 1 ? ' biens qui correspondent' : ' bien qui correspond') + ' à votre recherche.';
+                    var liste = $('liste');
+                    d.biens.forEach(function (b) { liste.appendChild(carte(b)); });
+                    montrer('etat', false);
+                    montrer('liste', true);
+                    montrer('contact', true);
+                })
+                .catch(function (e) { indisponible(e && e.message ? e.message : ''); });
+        })();
+    </script>
+</body>
+</html>

@@ -232,9 +232,10 @@
                 setBilan(null);
                 const nom = item.lead.name, adresse = item.lead.email, id = item.lead.id, nbPdf = (brouillon.pieces || []).length;
                 try {
-                    await appel(`/api/v1/leads/${id}/send-mail`, {
+                    const rep = await appel(`/api/v1/leads/${id}/send-mail`, {
                         method: 'POST',
                         body: JSON.stringify({ subject: brouillon.objet, body: brouillon.corps, property_ids: brouillon.ids,
+                            tracked_link: brouillon.lien !== false,
                             attachments: (brouillon.pieces || []).map((p) => ({ name: p.name, content: p.content })) })
                     });
                     const reste = { ...brouillons };
@@ -243,7 +244,7 @@
                     setConfirmer(false);
                     setSelectedId(null);
                     await charger();
-                    setBilan(`Message envoyé à ${nom} (${adresse})${nbPdf ? (nbPdf > 1 ? ` avec ${nbPdf} PDF en pièces jointes` : ' avec 1 PDF en pièce jointe') : ''}. Il figure dans l'historique de sa fiche.`);
+                    setBilan(`Message envoyé à ${nom} (${adresse})${nbPdf ? (nbPdf > 1 ? ` avec ${nbPdf} PDF en pièces jointes` : ' avec 1 PDF en pièce jointe') : ''}. Il figure dans l'historique de sa fiche.${rep && rep.tracked_link ? " Vous verrez sur le tableau de bord quand il ouvre le lien des annonces." : ''}`);
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                 } catch (e) {
                     setConfirmer(false);
@@ -439,6 +440,15 @@
                                                                 Rétablir le message d'origine
                                                             </button>
                                                         </p>
+                                                    </div>
+                                                    <div className="form-group">
+                                                        <label htmlFor="lien-suivi" style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', textTransform: 'none', letterSpacing: 0, fontSize: '14px', fontWeight: 400, cursor: 'pointer', lineHeight: 1.5 }}>
+                                                            <input id="lien-suivi" type="checkbox" checked={brouillon.lien !== false}
+                                                                onChange={(e) => maj({ lien: e.target.checked })} disabled={envoi}
+                                                                style={{ width: '18px', height: '18px', marginTop: '2px', flex: 'none', padding: 0 }} />
+                                                            <span>Ajouter un lien vers les annonces en ligne. Vous verrez sur votre tableau de bord
+                                                                quand {item.lead.name} l'ouvre. Les PDF restent joints au message.</span>
+                                                        </label>
                                                     </div>
 
                                                     <div className="btn-ligne">

@@ -711,6 +711,8 @@ body.auth::before {
 .hist-date { font-size: 12px; color: var(--ink-3); margin-bottom: 3px; font-variant-numeric: tabular-nums; }
 .hist-texte { font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
 .hist-item.statut .hist-texte { color: var(--ink-2); font-style: italic; }
+.hist-item.activite::before { background: var(--sage-700); }
+.hist-item.activite .hist-texte { color: var(--sage-700); font-weight: 600; }
 .hist-suppr { background: none; border: none; color: var(--ink-3); font-size: 12px; cursor: pointer; margin-left: 10px; font-family: inherit; }
 .hist-suppr:hover { color: var(--danger); text-decoration: underline; }
 
