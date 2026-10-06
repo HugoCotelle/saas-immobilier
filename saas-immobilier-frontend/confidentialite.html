@@ -13,9 +13,6 @@
 <script src="/societe.js" defer></script>
 </head>
 <body class="pub">
-<!-- BANDEAU PROVISOIRE : supprimer ce bloc (et rien d’autre) une fois le texte validé par un juriste. -->
-<div class="draft-banner" role="note">Version provisoire — à faire relire par un juriste avant publication. <span>Les passages surlignés en jaune sont à compléter.</span></div>
-<!-- FIN DU BANDEAU PROVISOIRE -->
 <a class="skip-link" href="#contenu">Aller au contenu</a>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
 <defs>
@@ -169,7 +166,7 @@
     <p>Lorsque l’agence envoie à un prospect un lien (formulaire de contact à compléter, page de sélection de biens), Zelyro enregistre, pour le compte de l’agence, l’ouverture du lien, le remplissage du formulaire et les demandes de visite, afin de signaler à l’agence les prospects qui se manifestent. Chaque lien contient un identifiant aléatoire propre au prospect. Aucun cookie et aucun outil de mesure tiers ne sont utilisés pour cela, et les ouvertures répétées en un court laps de temps ne sont comptées qu’une fois. Les pages concernées indiquent au prospect que son agence est informée de l’ouverture de la page. Les événements enregistrés sont rattachés à la fiche du prospect et supprimés avec elle. L’agence, responsable de traitement, reste chargée d’informer ses prospects et de répondre à leurs demandes (voir l’article 12).</p>
     <p>Les indicateurs « prospects à réveiller » et « potentiel de commission » du tableau de bord sont des calculs d’aide à l’organisation : ils ne produisent aucune décision à l’égard des prospects.</p>
     <h3>Fonction d’extraction de critères à partir d’un message</h3>
-    <p>Si cette fonction est activée, le texte d’un message collé dans l’outil, ou d’un e-mail de portail reçu (SeLoger, Leboncoin), peut être transmis à Anthropic (États-Unis) afin d’en extraire des critères (par exemple budget, type de bien, échéance). Seul le texte du message est transmis pour cette analyse. Les agences doivent éviter d’y inclure des informations inutiles ou sensibles. Anthropic indique ne pas utiliser, par défaut, les données transmises via son API commerciale pour entraîner ses modèles. <span class="a-completer">[À VÉRIFIER : que les conditions commerciales signées avec Anthropic (Commercial Terms of Service) reflètent bien cette politique à la date de publication, et préciser la durée de conservation appliquée]</span></p>
+    <p>Si cette fonction est activée, le texte d’un message collé dans l’outil, ou d’un e-mail de portail reçu (SeLoger, Leboncoin), peut être transmis à Anthropic (États-Unis) afin d’en extraire des critères (par exemple budget, type de bien, échéance). Seul le texte du message est transmis pour cette analyse. Les agences doivent éviter d’y inclure des informations inutiles ou sensibles. Les conditions commerciales d’Anthropic interdisent à Anthropic d’entraîner ses modèles sur les contenus transmis via son API, et Anthropic indique supprimer automatiquement ces données de ses systèmes dans un délai de 30 jours à compter de leur réception ou de leur génération, sauf obligation légale ou violation de sa politique d’usage.</p>
 </section>
 
 <section id="destinataires" aria-labelledby="h-destinataires">
@@ -194,7 +191,7 @@
 
 <section id="transferts" aria-labelledby="h-transferts">
     <h2 id="h-transferts">7. Transferts hors de l’Union européenne</h2>
-    <p>Certains prestataires mentionnés ci-dessus sont établis aux États-Unis ou peuvent héberger des données hors de l’Union européenne. Dans ce cas, le transfert est encadré par les garanties prévues au chapitre V du RGPD : Vercel adhère au cadre européen de protection des données (EU-U.S. Data Privacy Framework) ; Render et Anthropic recourent, selon leurs informations publiées, aux clauses contractuelles types de la Commission européenne. Google (API Gmail) et les services de notification des navigateurs relèvent des dispositifs de transfert de leurs fournisseurs ; le contenu des notifications y transite chiffré. <span class="a-completer">[À VÉRIFIER auprès de chaque prestataire, notamment dans son propre DPA, que le mécanisme retenu est toujours en vigueur à la date de publication]</span>.</p>
+    <p>Certains prestataires mentionnés ci-dessus sont établis aux États-Unis ou peuvent héberger des données hors de l’Union européenne. Dans ce cas, le transfert est encadré par les garanties prévues au chapitre V du RGPD : Vercel et Render adhèrent au cadre européen de protection des données (EU-U.S. Data Privacy Framework), Render recourant par ailleurs à des clauses contractuelles types ; Anthropic encadre les transferts par les clauses contractuelles types de la Commission européenne, intégrées à son addendum de traitement des données (DPA). Google (API Gmail) et les services de notification des navigateurs relèvent des dispositifs de transfert de leurs fournisseurs ; le contenu des notifications y transite chiffré..</p>
 </section>
 
 <section id="conservation" aria-labelledby="h-conservation">
