@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 import unittest
+from datetime import timedelta
 from unittest import mock
 
 import jwt as pyjwt
@@ -1772,7 +1773,7 @@ class TestLocationScoring(unittest.TestCase):
 
 class TestCoordonneesDansLaQualite(unittest.TestCase):
     """Les coordonnées de contact comptent dans la qualité d'un prospect."""
-    ACHETEUR = {"financing_status": "approved", "purchase_urgency": "3-6_months", "budget": 300000,
+    ACHETEUR = {"financing_status": "approved", "purchase_urgency": "1-3_months", "budget": 300000,
                 "location": "Senlis", "property_type": "Maison"}
 
     def test_points_coordonnees(self):
@@ -1789,17 +1790,25 @@ class TestCoordonneesDansLaQualite(unittest.TestCase):
     def test_acheteur_sans_coordonnees_perd_de_la_qualite(self):
         q = backend.derive_lead_quality
         complet = {**self.ACHETEUR, "email": "a@b.fr", "phone": "0612345678"}
-        self.assertEqual(q(complet), "hot")
+        self.assertEqual(q(complet), "hot")                     # 36 + 25 + 12 + 8 = 81
         # le même dossier, injoignable ou à moitié joignable, n'est plus chaud
         self.assertEqual(q({**self.ACHETEUR, "email": "a@b.fr"}), "warm")
         self.assertEqual(q(self.ACHETEUR), "warm")
+        # l'engagement du prospect peut rattraper : ouvrir son formulaire (+2) puis les annonces (+3)
+        self.assertEqual(q({**self.ACHETEUR, "email": "a@b.fr", "engagement": 5}), "hot")
 
-    def test_dossier_complet_garde_son_total(self):
-        # le total reste à 100 : un dossier complet n'a pas changé de note
-        q = backend.derive_lead_quality
+    def test_bareme_total_cent(self):
+        # dossier le plus complet sans engagement : 88 ; l'engagement ajoute 12 au plus, jusqu'à 100
         max_dossier = {"financing_status": "approved", "purchase_urgency": "immediate", "budget": 1,
                        "location": "x", "property_type": "Maison", "email": "a@b.fr", "phone": "0612345678"}
-        self.assertEqual(q(max_dossier), "hot")
+        self.assertEqual(backend.points_qualite(max_dossier), 88)
+        self.assertEqual(backend.points_qualite({**max_dossier, "engagement": 12}), 100)
+        self.assertEqual(backend.points_qualite({**max_dossier, "engagement": 99}), 100)   # plafonné
+        locataire = {"transaction": "location", "budget": 900, "revenus": 3000, "garants": 1, "situation_pro": "cdi",
+                     "purchase_urgency": "immediate", "location": "x", "property_type": "Appartement",
+                     "email": "a@b.fr", "phone": "0612345678"}
+        self.assertEqual(backend.points_qualite(locataire), 88)
+        self.assertEqual(backend.points_qualite({**locataire, "engagement": 12}), 100)
 
     def test_locataire_coordonnees(self):
         q = backend.derive_lead_quality
@@ -1828,32 +1837,32 @@ class TestScoreQualiteExpose(Base):
             attendu = "hot" if pts >= 80 else "warm" if pts >= 45 else "cold"
             self.assertEqual(backend.derive_lead_quality(lead), attendu)
         self.assertEqual(backend.points_qualite({}), 0)
-        self.assertEqual(backend.points_qualite({"email": "a@b.fr", "phone": "0612345678"}), 10)
+        self.assertEqual(backend.points_qualite({"email": "a@b.fr", "phone": "0612345678"}), 8)
 
     def test_api_renvoie_quality_score(self):
         t = self.jeton("score-1@x.fr")
         r = self.c.post("/api/v1/leads", json={"name": "Julie Martin", "email": "julie@example.fr",
                         "phone": "06 12 34 56 78", "budget": 300000, "location": "Senlis", "property_type": "Maison",
-                        "financing_status": "approved", "purchase_urgency": "3-6_months"}, headers=self.h(t))
+                        "financing_status": "approved", "purchase_urgency": "1-3_months"}, headers=self.h(t))
         self.assertEqual(r.status_code, 201, r.get_json())
         cree = r.get_json()
-        # 40 + 15 + 10 + 6 + 5 + 4
-        self.assertEqual(cree["quality_score"], 80)
+        # 36 + 25 + 8 (coordonnées) + 5 + 4 + 3
+        self.assertEqual(cree["quality_score"], 81)
         self.assertEqual(cree["lead_quality"], "hot")
         liste = self.c.get("/api/v1/leads", headers=self.h(t)).get_json()
-        self.assertEqual(liste[0]["quality_score"], 80)
+        self.assertEqual(liste[0]["quality_score"], 81)
         detail = self.c.get(f"/api/v1/leads/{cree['id']}", headers=self.h(t)).get_json()
-        self.assertEqual((detail["quality_score"], detail["lead_quality"]), (80, "hot"))
+        self.assertEqual((detail["quality_score"], detail["lead_quality"]), (81, "hot"))
         # sans téléphone, le même prospect perd 5 points et n'est plus chaud
         r2 = self.c.put(f"/api/v1/leads/{cree['id']}", json={"budget": 300000, "location": "Senlis",
                         "property_type": "Maison", "financing_status": "approved",
-                        "purchase_urgency": "3-6_months", "phone": None}, headers=self.h(t))
+                        "purchase_urgency": "1-3_months", "phone": None}, headers=self.h(t))
         self.assertEqual(r2.status_code, 200, r2.get_json())
         detail = self.c.get(f"/api/v1/leads/{cree['id']}", headers=self.h(t)).get_json()
-        self.assertEqual((detail["quality_score"], detail["lead_quality"]), (75, "warm"))
+        self.assertEqual((detail["quality_score"], detail["lead_quality"]), (77, "warm"))
         par_niveau = self.c.get("/api/v1/leads/quality/warm", headers=self.h(t)).get_json()
         self.assertEqual([x["id"] for x in par_niveau], [cree["id"]])
-        self.assertEqual(par_niveau[0]["quality_score"], 75)
+        self.assertEqual(par_niveau[0]["quality_score"], 77)
 
 
 class TestActiviteProspects(Base):
@@ -1870,6 +1879,7 @@ class TestActiviteProspects(Base):
             return True
 
         for p in (mock.patch.object(backend, "_envoyer_email", side_effect=faux),
+                  mock.patch.object(backend, "_lancer_en_arriere_plan", side_effect=lambda f, *a: f(*a)),
                   mock.patch.dict(os.environ, {"BREVO_API_KEY": "cle-de-test", "MAIL_FROM": "contact@zelyro.fr",
                                                "FRONTEND_URL": "https://app.zelyro.fr"})):
             p.start()
@@ -2032,6 +2042,108 @@ class TestActiviteProspects(Base):
         autre = self.jeton("act-10b@x.fr")
         self.assertEqual(self.evenements(autre), [])
 
+    # ---- demande de visite
+    def jeton_page_annonces(self, t, l, b):
+        _, mail = self.jeton_annonces(t, l, b)
+        return re.search(r"annonces\.html\?t=([A-Za-z0-9_-]+)", mail["texte"]).group(1)
+
+    def test_annonces_donnent_un_rang_et_pas_l_identifiant(self):
+        t, l, b = self.preparer("int-1@x.fr")
+        jeton = self.jeton_page_annonces(t, l, b)
+        d = self.c.get(f"/public/annonces/{jeton}", headers=self.NAVIGATEUR).get_json()
+        self.assertEqual((d["biens"][0]["ref"], d["biens"][0]["interesse"]), (0, False))
+        self.assertNotIn("id", d["biens"][0])
+
+    def test_demande_de_visite(self):
+        t, l, b = self.preparer("int-2@x.fr")
+        jeton = self.jeton_page_annonces(t, l, b)
+        avant = len(self.envoyes)
+        r = self.c.post(f"/public/annonces/{jeton}/interet", json={"ref": 0}, headers=self.NAVIGATEUR)
+        self.assertEqual(r.status_code, 200, r.get_json())
+        ev = self.evenements(t)
+        self.assertEqual((ev[0]["kind"], ev[0]["label"]), ("interet_bien", "souhaite visiter « Maison Senlis »"))
+        # l'agent reçoit un e-mail
+        alertes = [m for m in self.envoyes[avant:] if "souhaite visiter" in m["sujet"]]
+        self.assertEqual(len(alertes), 1)
+        self.assertIn("Camille Martin", alertes[0]["sujet"])
+        self.assertIn(f"/leads-profile.html?id={l['id']}", alertes[0]["texte"])
+        # deuxième clic : ni nouvel événement ni nouvel e-mail
+        self.c.post(f"/public/annonces/{jeton}/interet", json={"ref": 0}, headers=self.NAVIGATEUR)
+        self.assertEqual(len([e for e in self.evenements(t) if e["kind"] == "interet_bien"]), 1)
+        self.assertEqual(len([m for m in self.envoyes[avant:] if "souhaite visiter" in m["sujet"]]), 1)
+        # la page se souvient du choix
+        d = self.c.get(f"/public/annonces/{jeton}", headers=self.NAVIGATEUR).get_json()
+        self.assertTrue(d["biens"][0]["interesse"])
+
+    def test_demande_de_visite_refus(self):
+        t, l, b = self.preparer("int-3@x.fr")
+        jeton = self.jeton_page_annonces(t, l, b)
+        for corps in ({}, {"ref": -1}, {"ref": 5}, {"ref": "0"}, {"ref": True}, {"ref": 1.5}):
+            r = self.c.post(f"/public/annonces/{jeton}/interet", json=corps, headers=self.NAVIGATEUR)
+            self.assertEqual(r.status_code, 400, corps)
+        self.assertEqual(self.c.post("/public/annonces/" + "a" * 30 + "/interet", json={"ref": 0}).status_code, 404)
+        self.assertEqual(self.c.post("/public/annonces/court/interet", json={"ref": 0}).status_code, 404)
+        self.assertEqual([e for e in self.evenements(t) if e["kind"] == "interet_bien"], [])
+        conn = backend.get_db_connection()
+        cur = conn.cursor()
+        cur.execute("UPDATE lead_mails SET sent_at = sent_at - interval '100 days' WHERE suivi_token = %s", (jeton,))
+        conn.commit(); conn.close()
+        self.assertEqual(self.c.post(f"/public/annonces/{jeton}/interet", json={"ref": 0}).status_code, 410)
+
+    def test_demande_de_visite_sans_alerte_si_coupee(self):
+        t, l, b = self.preparer("int-4@x.fr")
+        jeton = self.jeton_page_annonces(t, l, b)
+        self.assertEqual(self.c.put("/auth/preferences", json={"alerts_enabled": False}, headers=self.h(t)).status_code, 200)
+        avant = len(self.envoyes)
+        self.c.post(f"/public/annonces/{jeton}/interet", json={"ref": 0}, headers=self.NAVIGATEUR)
+        self.assertEqual([e["kind"] for e in self.evenements(t)], ["interet_bien"])   # l'événement est noté, l'e-mail non
+        self.assertEqual([m for m in self.envoyes[avant:] if "souhaite visiter" in m["sujet"]], [])
+
+    # ---- engagement dans le score
+    def test_engagement_fait_monter_le_score(self):
+        t, l, b = self.preparer("eng-1@x.fr")
+        jeton_form = self.lien(t, l)["url"].split("c=")[1]
+        base = self.c.get(f"/api/v1/leads/{l['id']}", headers=self.h(t)).get_json()
+        self.assertEqual((base["engagement"], base["engagement_lignes"]), (0, []))
+        self.c.get(f"/public/completer/{jeton_form}", headers=self.NAVIGATEUR)          # +2
+        jeton = self.jeton_page_annonces(t, l, b)
+        self.c.get(f"/public/annonces/{jeton}", headers=self.NAVIGATEUR)                 # +3
+        self.c.post(f"/public/annonces/{jeton}/interet", json={"ref": 0}, headers=self.NAVIGATEUR)   # +6 : 11 au total (plafond 12)
+        apres = self.c.get(f"/api/v1/leads/{l['id']}", headers=self.h(t)).get_json()
+        self.assertEqual(apres["engagement"], 11)
+        self.assertEqual(sorted(x[0] for x in apres["engagement_lignes"]), [2, 3, 6])
+        self.assertEqual(apres["quality_score"] - base["quality_score"], 11)
+        # la liste et le tableau de bord utilisent le même score
+        liste = {x["id"]: x for x in self.c.get("/api/v1/leads", headers=self.h(t)).get_json()}
+        self.assertEqual(liste[l["id"]]["quality_score"], apres["quality_score"])
+
+    # ---- export CSV
+    def test_export_csv(self):
+        t, l, _ = self.preparer("csv-1@x.fr")
+        self.c.post("/api/v1/leads", json={"name": "=HYPERLINK(\"http://x\")", "phone": "+33 6 12 34 56 78",
+                                           "location": "@Senlis"}, headers=self.h(t))
+        self.c.post(f"/api/v1/leads/{l['id']}/notes", json={"body": "note privée très confidentielle"}, headers=self.h(t))
+        r = self.c.get("/api/v1/leads/export", headers=self.h(t))
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.headers["Content-Type"].startswith("text/csv"))
+        self.assertIn("attachment; filename=\"prospects-zelyro-", r.headers["Content-Disposition"])
+        corps = r.get_data(as_text=True)
+        self.assertTrue(corps.startswith("\ufeffNom;E-mail;Téléphone;"))
+        lignes = corps.strip().split("\r\n")
+        self.assertEqual(len(lignes), 3)
+        self.assertIn("Camille Martin;camille@exemple.fr;", lignes[1])
+        self.assertIn("'=HYPERLINK", lignes[2])               # formule neutralisée
+        self.assertIn(";0033 6 12 34 56 78;", lignes[2])       # « + » remplacé
+        self.assertIn(";'@Senlis;", lignes[2])
+        self.assertNotIn("confidentielle", corps)               # les notes privées ne sortent pas
+
+    def test_export_csv_isole_par_agence_et_protege(self):
+        t, _, _ = self.preparer("csv-2@x.fr")
+        autre = self.jeton("csv-2b@x.fr")
+        corps = self.c.get("/api/v1/leads/export", headers=self.h(autre)).get_data(as_text=True)
+        self.assertEqual(len(corps.strip().split("\r\n")), 1)    # seulement les en-têtes
+        self.assertEqual(self.c.get("/api/v1/leads/export").status_code, 401)
+
     def test_suppression_du_prospect_efface_son_activite(self):
         t, l, _ = self.preparer("act-11@x.fr")
         jeton = self.lien(t, l)["url"].split("c=")[1]
@@ -2112,7 +2224,8 @@ class TestLocationApi(Base):
     def test_matching_separe_vente_et_location(self):
         t = self.jeton("loc-5@x.fr")
         locataire = self.lead(t, name="Locataire", transaction="location", budget=900, location="Senlis",
-                              property_type="Appartement", revenus=3000, situation_pro="cdi", purchase_urgency="immediate")
+                              property_type="Appartement", revenus=3000, situation_pro="cdi", purchase_urgency="immediate",
+                              email="locataire@exemple.fr", phone="0612345678")
         acheteur = self.lead(t, name="Acheteur", transaction="vente", budget=300000, location="Senlis",
                              property_type="Appartement", financing_status="approved", purchase_urgency="immediate")
         a_louer = self.bien(t, title="À louer", transaction="location", price=850)
@@ -2486,6 +2599,594 @@ class TestPiecesJointes(Base):
         self.assertNotIn("attachment", capture["json"])
 
     _vraie_envoyer_email = staticmethod(backend._envoyer_email)
+
+
+class TestEtape2(Base):
+    """Responsables des prospects, e-mail du matin, prospects à réveiller, potentiel de commission."""
+
+    CHAUD = {"name": "Camille Martin", "email": "camille@exemple.fr", "phone": "06 12 34 56 78", "budget": 300000,
+             "location": "Senlis", "property_type": "Maison", "financing_status": "approved",
+             "purchase_urgency": "immediate"}
+
+    def setUp(self):
+        super().setUp()
+        self.envoyes = []
+
+        def faux(dest, sujet, texte, html, **kw):
+            self.envoyes.append({"to": dest, "sujet": sujet, "texte": texte, "html": html})
+            return True
+
+        for p in (mock.patch.object(backend, "_envoyer_email", side_effect=faux),
+                  mock.patch.object(backend, "_lancer_en_arriere_plan", side_effect=lambda f, *a: f(*a)),
+                  mock.patch.dict(os.environ, {"BREVO_API_KEY": "cle-de-test", "MAIL_FROM": "contact@zelyro.fr",
+                                               "FRONTEND_URL": "https://app.zelyro.fr", "CRON_SECRET": "secret-cron"})):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def sql(self, requete, params=()):
+        conn = backend.get_db_connection(); cur = conn.cursor()
+        cur.execute(requete, params)
+        try:
+            lignes = cur.fetchall()
+        except Exception:
+            lignes = None
+        conn.commit(); conn.close()
+        return lignes
+
+    def agence(self, email, prenom="Directrice"):
+        """Un directeur, un collaborateur actif ; renvoie (jeton directeur, id directeur, jeton collab, id collab)."""
+        td = self.jeton(email)
+        self.c.put("/auth/profile", json={}, headers=self.h(td))
+        id_d = self.sql("SELECT id FROM users WHERE email = %s", (email,))[0][0]
+        self.sql("UPDATE users SET first_name = %s WHERE id = %s", (prenom, id_d))
+        mail_e = "collab-" + email
+        self.sql("""INSERT INTO users (email, password_hash, first_name, role, agency_owner_id)
+                    VALUES (%s, %s, 'Julien', 'employe', %s)""",
+                 (mail_e, backend.generate_password_hash(PW, method='pbkdf2:sha256'), id_d))
+        id_e = self.sql("SELECT id FROM users WHERE email = %s", (mail_e,))[0][0]
+        te = self.c.post("/auth/login", json={"email": mail_e, "password": PW}).get_json()["token"]
+        return td, id_d, te, id_e
+
+    def lead(self, t, **kw):
+        r = self.c.post("/api/v1/leads", json={**self.CHAUD, **kw}, headers=self.h(t))
+        self.assertEqual(r.status_code, 201, r.get_json())
+        return r.get_json()
+
+    def detail(self, t, l):
+        return self.c.get(f"/api/v1/leads/{l['id']}", headers=self.h(t)).get_json()
+
+    def assigner(self, t, l, cible):
+        return self.c.put(f"/api/v1/leads/{l['id']}/assign", json={"user_id": cible}, headers=self.h(t))
+
+    # ---- responsable
+    def test_createur_collaborateur_devient_responsable(self):
+        td, id_d, te, id_e = self.agence("e2-1@x.fr")
+        a = self.lead(te)
+        self.assertEqual(a["assigned_to"], id_e)
+        b = self.lead(td, name="Paul Durand")
+        self.assertIsNone(b["assigned_to"])
+        liste = {x["name"]: x["assigned_to"] for x in self.c.get("/api/v1/leads", headers=self.h(td)).get_json()}
+        self.assertEqual(liste, {"Camille Martin": id_e, "Paul Durand": None})
+
+    def test_liste_des_membres(self):
+        td, id_d, te, id_e = self.agence("e2-2@x.fr")
+        for t, moi in ((td, id_d), (te, id_e)):
+            m = self.c.get("/api/v1/team/members", headers=self.h(t)).get_json()
+            self.assertEqual([(x["id"], x["name"], x["role"]) for x in m],
+                             [(id_d, "Directrice", "admin"), (id_e, "Julien", "employe")])
+            self.assertEqual([x["id"] for x in m if x["is_me"]], [moi])
+        autre = self.jeton("e2-2b@x.fr")
+        self.assertEqual(len(self.c.get("/api/v1/team/members", headers=self.h(autre)).get_json()), 1)
+        self.assertEqual(self.c.get("/api/v1/team/members").status_code, 401)
+
+    def test_attribution_historique_et_alerte(self):
+        td, id_d, te, id_e = self.agence("e2-3@x.fr")
+        l = self.lead(td)
+        r = self.assigner(td, l, id_e)
+        self.assertEqual((r.status_code, r.get_json()), (200, {"assigned_to": id_e, "name": "Julien"}))
+        self.assertEqual(self.detail(td, l)["assigned_to"], id_e)
+        self.assertEqual(self.detail(te, l)["assigned_to"], id_e)
+        notes = self.c.get(f"/api/v1/leads/{l['id']}/notes", headers=self.h(td)).get_json()
+        self.assertIn(("attrib", "Responsable : Julien"), [(n["kind"], n["body"]) for n in notes])
+        self.assertEqual([m["to"] for m in self.envoyes], ["collab-e2-3@x.fr"])
+        self.assertIn("vous a été confié", self.envoyes[0]["texte"])
+        self.assertIn(f"leads-profile.html?id={l['id']}", self.envoyes[0]["texte"])
+        # même responsable : rien de nouveau (ni note, ni e-mail)
+        self.assigner(td, l, id_e)
+        self.assertEqual(len(self.envoyes), 1)
+        self.assertEqual(len([n for n in self.c.get(f"/api/v1/leads/{l['id']}/notes", headers=self.h(td)).get_json()
+                              if n["kind"] == "attrib"]), 1)
+        # se l'attribuer à soi-même ne prévient personne ; retirer le responsable
+        self.assigner(td, l, id_d)
+        self.assertEqual(len(self.envoyes), 1)
+        r = self.assigner(te, l, None)
+        self.assertEqual(r.get_json(), {"assigned_to": None, "name": None})
+        self.assertIsNone(self.detail(td, l)["assigned_to"])
+
+    def test_attribution_refus(self):
+        td, id_d, te, id_e = self.agence("e2-4@x.fr")
+        autre = self.jeton("e2-4b@x.fr")
+        id_autre = self.sql("SELECT id FROM users WHERE email = 'e2-4b@x.fr'")[0][0]
+        l = self.lead(td)
+        self.assertEqual(self.assigner(td, l, id_autre).status_code, 400)      # autre agence
+        self.assertEqual(self.assigner(td, l, 999999).status_code, 400)
+        for bad in ("1", True, 1.5, [1]):
+            self.assertEqual(self.assigner(td, l, bad).status_code, 400, bad)
+        self.assertEqual(self.c.put(f"/api/v1/leads/{l['id']}/assign", json={}, headers=self.h(td)).status_code, 400)
+        self.assertEqual(self.assigner(autre, l, id_autre).status_code, 404)    # le prospect d'une autre agence
+        self.assertEqual(self.assigner(td, {"id": 999999}, id_d).status_code, 404)
+        self.assertEqual(self.c.put(f"/api/v1/leads/{l['id']}/assign", json={"user_id": id_d}).status_code, 401)
+        self.assertIsNone(self.detail(td, l)["assigned_to"])
+        self.assertEqual(self.envoyes, [])
+
+    def test_collaborateur_retire_libere_ses_prospects(self):
+        td, id_d, te, id_e = self.agence("e2-5@x.fr")
+        l = self.lead(te)
+        self.assertEqual(self.assigner(td, l, id_e).status_code, 200)
+        self.assertEqual(self.c.delete(f"/api/v1/team/{id_e}", headers=self.h(td)).status_code, 200)
+        self.assertIsNone(self.detail(td, l)["assigned_to"])
+        self.assertEqual(self.assigner(td, l, id_e).status_code, 400)           # compte désactivé
+        self.assertEqual([m["id"] for m in self.c.get("/api/v1/team/members", headers=self.h(td)).get_json()], [id_d])
+
+    def test_export_csv_contient_le_responsable(self):
+        td, id_d, te, id_e = self.agence("e2-6@x.fr")
+        l = self.lead(te)
+        self.lead(td, name="Paul Durand")
+        corps = self.c.get("/api/v1/leads/export", headers=self.h(td)).get_data(as_text=True)
+        lignes = [x.split(";") for x in corps.lstrip("﻿").strip().split("\r\n")]
+        i = lignes[0].index("Responsable")
+        self.assertEqual({x[0]: x[i] for x in lignes[1:]}, {"Camille Martin": "Julien", "Paul Durand": ""})
+
+    def test_demande_de_visite_previent_aussi_le_responsable(self):
+        td, id_d, te, id_e = self.agence("e2-7@x.fr")
+        self.c.post("/api/v1/properties", json={"title": "Maison Senlis", "address": "5 rue Vieille 60300 Senlis",
+                    "property_type": "Maison", "price": 290000, "rooms": 4, "size": 95}, headers=self.h(td))
+        b = self.c.get("/api/v1/properties", headers=self.h(td)).get_json()[0]
+        l = self.lead(td)
+        self.assigner(td, l, id_e)
+        self.envoyes.clear()
+        self.c.post(f"/api/v1/leads/{l['id']}/send-mail", json={"subject": "Sélection", "body": "Bonjour, voici des biens.",
+                    "property_ids": [b["id"]]}, headers=self.h(td))
+        mail = self.envoyes[-1]
+        jeton = re.search(r"annonces\.html\?t=([A-Za-z0-9_-]+)", mail["texte"]).group(1)
+        self.envoyes.clear()
+        nav = {"User-Agent": "Mozilla/5.0 (iPhone) Safari/604.1"}
+        r = self.c.post(f"/public/annonces/{jeton}/interet", json={"ref": 0}, headers=nav)
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(sorted(m["to"] for m in self.envoyes), sorted(["e2-7@x.fr", "collab-e2-7@x.fr"]))
+
+    # ---- e-mail du matin
+    def isoler(self, *ids):
+        """La base est partagée entre tests : on marque les autres comptes comme déjà servis aujourd'hui."""
+        self.sql("UPDATE users SET digest_sent_on = %s WHERE NOT (id = ANY(%s))", (backend._aujourdhui(), list(ids)))
+
+    def declencher(self, cle="secret-cron"):
+        return self.c.post("/internal/digest/send", headers={"X-Cron-Key": cle} if cle is not None else {})
+
+    def test_digest_protege_par_la_cle(self):
+        self.jeton("e2-8@x.fr")
+        for cle in (None, "", "mauvaise"):
+            self.assertEqual(self.declencher(cle).status_code, 404, cle)
+        with mock.patch.dict(os.environ, {"CRON_SECRET": ""}):
+            self.assertEqual(self.declencher("").status_code, 404)
+        with mock.patch.dict(os.environ, {"BREVO_API_KEY": ""}):
+            self.assertEqual(self.declencher().status_code, 503)
+        self.assertEqual(self.envoyes, [])
+
+    def test_digest_contenu_et_une_seule_fois_par_jour(self):
+        td, id_d, te, id_e = self.agence("e2-9@x.fr")
+        self.isoler(id_d, id_e)
+        l = self.lead(td)
+        self.sql("UPDATE leads SET created_at = NOW() - interval '50 hours' WHERE id = %s", (l["id"],))
+        self.c.post(f"/api/v1/leads/{l['id']}/reminders", json={"due_date": backend._aujourdhui().isoformat(),
+                    "label": "Rappeler pour la visite"}, headers=self.h(td))
+        r = self.declencher()
+        self.assertEqual((r.status_code, r.get_json()["envoyes"]), (200, 2))        # directrice + collaborateur (non attribué)
+        mail = [m for m in self.envoyes if m["to"] == "e2-9@x.fr"][0]
+        self.assertEqual(mail["sujet"], "Zelyro — 1 prospect à suivre ce matin")
+        for attendu in ("Bonjour Directrice,", "Prospects chauds à appeler", "Camille Martin — 88/100 — 06 12 34 56 78 · Senlis",
+                        "Relances à faire", "Rappeler pour la visite (Camille Martin)",
+                        "Sans suite depuis plus de 24 h", "reçu il y a 2 j — sans responsable",
+                        "https://app.zelyro.fr/dashboard.html", "Décochez « E-mail du matin »"):
+            self.assertIn(attendu, mail["texte"])
+        self.assertIn("<ul", mail["html"])
+        self.envoyes.clear()
+        self.assertEqual(self.declencher().get_json()["envoyes"], 0)                # déjà fait aujourd'hui
+        self.assertEqual(self.envoyes, [])
+        self.sql("UPDATE users SET digest_sent_on = %s WHERE id = ANY(%s)", (backend._aujourdhui() - timedelta(days=1), [id_d, id_e]))
+        self.assertEqual(self.declencher().get_json()["envoyes"], 2)                # le lendemain, ça repart
+
+    def test_digest_rien_a_signaler_et_desactive(self):
+        td, id_d, te, id_e = self.agence("e2-10@x.fr")
+        self.isoler(id_d, id_e)
+        self.assertEqual(self.declencher().get_json()["envoyes"], 0)
+        self.assertEqual(self.envoyes, [])
+        # pas marqué comme envoyé : un prospect chaud arrivé plus tard déclenche bien l'e-mail
+        self.assertIsNone(self.sql("SELECT digest_sent_on FROM users WHERE id = %s", (id_d,))[0][0])
+        self.lead(td)
+        self.assertEqual(self.c.put("/auth/preferences", json={"digest_enabled": False}, headers=self.h(td)).get_json(),
+                         {"digest_enabled": False})
+        self.assertEqual(self.declencher().get_json()["envoyes"], 1)                # seul le collaborateur
+        self.assertEqual([m["to"] for m in self.envoyes], ["collab-e2-10@x.fr"])
+
+    def test_digest_portee_du_collaborateur(self):
+        td, id_d, te, id_e = self.agence("e2-11@x.fr")
+        self.isoler(id_d, id_e)
+        a = self.lead(td, name="Pour Julien")
+        b = self.lead(td, name="Pour la directrice", phone="0611111111")
+        c = self.lead(td, name="Sans responsable", phone="0622222222")
+        self.assigner(td, a, id_e)
+        self.assigner(td, b, id_d)
+        self.envoyes.clear()
+        self.declencher()
+        collab = [m for m in self.envoyes if m["to"] == "collab-e2-11@x.fr"][0]["texte"]
+        directeur = [m for m in self.envoyes if m["to"] == "e2-11@x.fr"][0]["texte"]
+        self.assertIn("Pour Julien", collab); self.assertIn("Sans responsable", collab)
+        self.assertNotIn("Pour la directrice", collab)
+        for nom in ("Pour Julien", "Pour la directrice", "Sans responsable"):
+            self.assertIn(nom, directeur)
+
+    def test_digest_activite_du_prospect(self):
+        t = self.jeton("e2-12@x.fr")
+        self.isoler(self.sql("SELECT id FROM users WHERE email = 'e2-12@x.fr'")[0][0])
+        l = self.lead(t, name="Zoe", email=None, phone=None, financing_status="unknown", purchase_urgency="unknown")
+        self.sql("INSERT INTO lead_events (lead_id, user_id, kind) SELECT id, user_id, 'formulaire_ouvert' FROM leads WHERE id = %s", (l["id"],))
+        self.sql("INSERT INTO lead_events (lead_id, user_id, kind, detail) SELECT id, user_id, 'interet_bien', 'Maison Senlis' FROM leads WHERE id = %s", (l["id"],))
+        self.declencher()
+        texte = self.envoyes[0]["texte"]
+        self.assertIn("Ce que vos prospects ont fait depuis hier", texte)
+        self.assertIn("Zoe souhaite visiter « Maison Senlis »", texte)
+        self.assertIn("Zoe a ouvert son formulaire", texte)
+
+    def test_digest_apercu_a_la_demande(self):
+        t = self.jeton("e2-13@x.fr")
+        r = self.c.post("/api/v1/digest/preview", headers=self.h(t))
+        self.assertEqual((r.status_code, r.get_json()["sent"]), (200, False))
+        self.assertEqual(self.envoyes, [])
+        self.lead(t)
+        r = self.c.post("/api/v1/digest/preview", headers=self.h(t))
+        self.assertEqual((r.status_code, r.get_json()["sent"]), (200, True))
+        self.assertEqual([m["to"] for m in self.envoyes], ["e2-13@x.fr"])
+        self.assertEqual(self.c.post("/api/v1/digest/preview").status_code, 401)
+        with mock.patch.dict(os.environ, {"BREVO_API_KEY": ""}):
+            self.assertEqual(self.c.post("/api/v1/digest/preview", headers=self.h(t)).status_code, 503)
+
+    def test_preferences_digest_et_profil(self):
+        td, id_d, te, id_e = self.agence("e2-14@x.fr")
+        self.assertTrue(self.c.get("/auth/profile", headers=self.h(td)).get_json()["digest_enabled"])
+        self.c.put("/auth/preferences", json={"digest_enabled": False}, headers=self.h(te))
+        self.assertFalse(self.c.get("/auth/profile", headers=self.h(te)).get_json()["digest_enabled"])
+        self.assertTrue(self.c.get("/auth/profile", headers=self.h(td)).get_json()["digest_enabled"])   # réglage personnel
+        self.assertEqual(self.c.put("/auth/preferences", json={"digest_enabled": "non"}, headers=self.h(td)).status_code, 400)
+        self.assertEqual(self.c.put("/auth/preferences", json={}, headers=self.h(td)).status_code, 400)
+        self.assertEqual(self.c.put("/auth/preferences", json={"alerts_enabled": False}, headers=self.h(td)).get_json(),
+                         {"alerts_enabled": False})
+
+    def test_digest_agence_desactivee_ignoree(self):
+        td, id_d, te, id_e = self.agence("e2-15@x.fr")
+        self.isoler(id_d, id_e)
+        self.lead(td)
+        self.sql("UPDATE users SET is_active = FALSE WHERE id = %s", (id_d,))
+        self.assertEqual(self.declencher().get_json()["envoyes"], 0)
+        self.assertEqual(self.envoyes, [])
+
+    # ---- prospects à réveiller
+    def bien(self, t, **kw):
+        corps = {"title": "Maison Senlis", "address": "5 rue Vieille 60300 Senlis", "property_type": "Maison",
+                 "price": 290000, "rooms": 4, "size": 95, **kw}
+        r = self.c.post("/api/v1/properties", json=corps, headers=self.h(t))
+        self.assertEqual(r.status_code, 201, r.get_json())
+        return r.get_json()
+
+    def test_dormants(self):
+        t = self.jeton("e2-16@x.fr")
+        self.bien(t)
+        vieux = self.lead(t)
+        recent = self.lead(t, name="Recent", email="recent@exemple.fr")
+        clos = self.lead(t, name="Signé", email="signe@exemple.fr")
+        incomplet = self.lead(t, name="Sans mail", email=None)
+        self.c.put(f"/api/v1/leads/{clos['id']}/status", json={"status": "signe"}, headers=self.h(t))
+        for x in (vieux, clos, incomplet):
+            self.sql("UPDATE leads SET created_at = NOW() - interval '45 days', status_changed_at = NULL WHERE id = %s", (x["id"],))
+        self.sql("DELETE FROM lead_notes WHERE lead_id IN (%s, %s)", (clos["id"], vieux["id"]))
+        r = self.c.get("/api/v1/dormants", headers=self.h(t))
+        self.assertEqual(r.status_code, 200)
+        d = r.get_json()
+        self.assertEqual((d["days"], d["total"]), (30, 1))
+        e = d["dormants"][0]
+        self.assertEqual((e["lead"]["name"], e["days_inactive"], e["lead_quality"], e["quality_score"]),
+                         ("Camille Martin", 45, "hot", 88))
+        self.assertEqual(e["biens"][0]["title"], "Maison Senlis")
+        self.assertIn("score", e["biens"][0])
+        # une note, un e-mail ou une action du prospect le sortent des dormants
+        self.c.post(f"/api/v1/leads/{vieux['id']}/notes", json={"body": "Rappelé, répondeur"}, headers=self.h(t))
+        self.assertEqual(self.c.get("/api/v1/dormants", headers=self.h(t)).get_json()["total"], 0)
+        self.assertEqual(self.c.get("/api/v1/dormants?days=7", headers=self.h(t)).get_json()["total"], 0)
+        self.assertEqual(self.c.get("/api/v1/dormants?days=1", headers=self.h(t)).get_json()["days"], 7)
+        self.assertEqual(self.c.get("/api/v1/dormants?days=9999", headers=self.h(t)).get_json()["days"], 365)
+
+    def test_dormants_sans_bien_ou_deja_propose_et_isolation(self):
+        t = self.jeton("e2-17@x.fr")
+        l = self.lead(t)
+        self.sql("UPDATE leads SET created_at = NOW() - interval '60 days' WHERE id = %s", (l["id"],))
+        self.assertEqual(self.c.get("/api/v1/dormants", headers=self.h(t)).get_json()["total"], 0)   # aucun bien
+        b = self.bien(t)
+        self.assertEqual(self.c.get("/api/v1/dormants", headers=self.h(t)).get_json()["total"], 1)
+        autre = self.jeton("e2-17b@x.fr")
+        self.assertEqual(self.c.get("/api/v1/dormants", headers=self.h(autre)).get_json()["total"], 0)
+        self.assertEqual(self.c.get("/api/v1/dormants").status_code, 401)
+        # bien déjà envoyé ce prospect : plus rien à lui proposer (et l'envoi le sort des dormants)
+        self.sql("""INSERT INTO lead_mails (lead_id, user_id, subject, body, property_ids, sent_at)
+                    SELECT id, user_id, 'x', 'y', ARRAY[%s], NOW() - interval '40 days' FROM leads WHERE id = %s""",
+                 (b["id"], l["id"]))
+        self.assertEqual(self.c.get("/api/v1/dormants", headers=self.h(t)).get_json()["total"], 0)
+
+    # ---- potentiel de commission
+    def test_commission(self):
+        td, id_d, te, id_e = self.agence("e2-18@x.fr")
+        self.lead(td)                                                                    # chaud 300 000
+        self.lead(td, name="Tiède", email="t@exemple.fr", financing_status="in_progress",
+                  purchase_urgency="3-6_months", budget=200000)                          # 22+14+8+12 = 56
+        self.lead(td, name="Froid", email=None, phone=None, financing_status="unknown", purchase_urgency="unknown")
+        self.lead(td, name="Locataire", transaction="location", budget=900, revenus=3000, garants=1, situation_pro="cdi")
+        com = self.c.get("/api/v1/dashboard", headers=self.h(td)).get_json()["commission"]
+        self.assertEqual(com["rate"], 4.0)
+        self.assertEqual((com["hot"]["count"], com["hot"]["budget"], com["hot"]["commission"]), (1, 300000, 12000))
+        self.assertEqual((com["warm"]["count"], com["warm"]["budget"], com["warm"]["commission"]), (1, 200000, 8000))
+        self.assertEqual(com["total"], 20000)
+        r = self.c.put("/api/v1/commission-rate", json={"rate": 2.5}, headers=self.h(td))
+        self.assertEqual((r.status_code, r.get_json()), (200, {"rate": 2.5}))
+        com = self.c.get("/api/v1/dashboard", headers=self.h(td)).get_json()["commission"]
+        self.assertEqual((com["rate"], com["total"]), (2.5, 12500))
+        # les collaborateurs ne voient pas le potentiel et ne règlent pas le taux
+        self.assertIsNone(self.c.get("/api/v1/dashboard", headers=self.h(te)).get_json()["commission"])
+        self.assertEqual(self.c.put("/api/v1/commission-rate", json={"rate": 9}, headers=self.h(te)).status_code, 403)
+        for bad in (0, -1, 16, "4", None, True, [4]):
+            self.assertEqual(self.c.put("/api/v1/commission-rate", json={"rate": bad}, headers=self.h(td)).status_code, 400, bad)
+        self.assertEqual(self.c.put("/api/v1/commission-rate", json={"rate": 4}).status_code, 401)
+
+    def test_commission_ignore_les_prospects_clos(self):
+        t = self.jeton("e2-19@x.fr")
+        l = self.lead(t)
+        self.c.put(f"/api/v1/leads/{l['id']}/status", json={"status": "perdu"}, headers=self.h(t))
+        com = self.c.get("/api/v1/dashboard", headers=self.h(t)).get_json()["commission"]
+        self.assertEqual((com["hot"]["count"], com["total"]), (0, 0))
+
+    # ---- sans suite
+    def test_dashboard_prospects_sans_suite(self):
+        td, id_d, te, id_e = self.agence("e2-20@x.fr")
+        a = self.lead(td, name="Ancien")
+        b = self.lead(td, name="Récent")
+        self.assigner(td, a, id_e)
+        self.sql("UPDATE leads SET created_at = NOW() - interval '30 hours' WHERE id = %s", (a["id"],))
+        d = self.c.get("/api/v1/dashboard", headers=self.h(td)).get_json()["untreated"]
+        self.assertEqual((d["hours"], d["count"]), (24, 1))
+        self.assertEqual((d["items"][0]["name"], d["items"][0]["assigned_name"], d["items"][0]["hours"]), ("Ancien", "Julien", 30))
+        self.c.put(f"/api/v1/leads/{a['id']}/status", json={"status": "contacte"}, headers=self.h(td))
+        self.assertEqual(self.c.get("/api/v1/dashboard", headers=self.h(td)).get_json()["untreated"]["count"], 0)
+
+
+class TestNotificationsPush(Base):
+    """Appareils enregistrés et notifications envoyées quand un prospect agit."""
+
+    NAVIGATEUR = TestActiviteProspects.NAVIGATEUR
+    CHAUD = TestEtape2.CHAUD
+    sql, agence, lead, assigner = TestEtape2.sql, TestEtape2.agence, TestEtape2.lead, TestEtape2.assigner
+
+    def setUp(self):
+        super().setUp()
+        self.envoyes = []
+
+        def faux_mail(dest, sujet, texte, html, **kw):
+            self.envoyes.append({"to": dest, "sujet": sujet, "texte": texte, "html": html})
+            return True
+
+        for p in (mock.patch.object(backend, "_envoyer_email", side_effect=faux_mail),
+                  mock.patch.object(backend, "_lancer_en_arriere_plan", side_effect=lambda f, *a: f(*a)),
+                  mock.patch.dict(os.environ, {"BREVO_API_KEY": "cle-de-test", "MAIL_FROM": "contact@zelyro.fr",
+                                               "FRONTEND_URL": "https://app.zelyro.fr"})):
+            p.start()
+            self.addCleanup(p.stop)
+        pub, priv = backend._generer_cles_vapid()
+        p = mock.patch.dict(os.environ, {"VAPID_PUBLIC_KEY": pub, "VAPID_PRIVATE_KEY": priv,
+                                         "VAPID_SUBJECT": "mailto:contact@zelyro.fr"})
+        p.start(); self.addCleanup(p.stop)
+        self.pushs = []
+        self.erreur = {}
+
+        def faux(abonnement, charge):
+            code = self.erreur.get(abonnement["endpoint"])
+            if code:
+                class R: status_code = code
+                class E(Exception): response = R()
+                raise E()
+            self.pushs.append((abonnement["endpoint"], charge))
+
+        p2 = mock.patch.object(backend, "_webpush_envoyer", side_effect=faux)
+        p2.start(); self.addCleanup(p2.stop)
+
+    @staticmethod
+    def cles():
+        import base64
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        pub = ec.generate_private_key(ec.SECP256R1()).public_key().public_bytes(
+            serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+        enc = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+        return {"p256dh": enc(pub), "auth": enc(os.urandom(16))}
+
+    def abonner(self, t, nom="a", hote="fcm.googleapis.com"):
+        endpoint = f"https://{hote}/fcm/send/{nom}"
+        r = self.c.post("/api/v1/push/subscribe", json={"endpoint": endpoint, "keys": self.cles()}, headers=self.h(t))
+        self.assertEqual(r.status_code, 201, r.get_json())
+        return endpoint
+
+    def test_configuration(self):
+        t = self.jeton("push-1@x.fr")
+        c = self.c.get("/api/v1/push/config", headers=self.h(t)).get_json()
+        self.assertEqual((c["enabled"], c["public_key"]), (True, os.environ["VAPID_PUBLIC_KEY"]))
+        self.assertEqual(self.c.get("/api/v1/push/config").status_code, 401)
+        with mock.patch.dict(os.environ, {"VAPID_PRIVATE_KEY": ""}):
+            c = self.c.get("/api/v1/push/config", headers=self.h(t)).get_json()
+            self.assertEqual((c["enabled"], c["public_key"]), (False, None))
+            r = self.c.post("/api/v1/push/subscribe", json={"endpoint": "https://fcm.googleapis.com/x", "keys": self.cles()},
+                            headers=self.h(t))
+            self.assertEqual(r.status_code, 503)
+
+    def test_enregistrement_refus(self):
+        t = self.jeton("push-2@x.fr")
+        bonnes = self.cles()
+        for endpoint in ("http://fcm.googleapis.com/x", "https://evil.example.com/x", "https://127.0.0.1/x",
+                         "https://fcm.googleapis.com.evil.com/x", "https://user:pw@fcm.googleapis.com/x",
+                         "https://fcm.googleapis.com:8443/x", "https://169.254.169.254/latest", "", None, 5,
+                         "https://fcm.googleapis.com/" + "a" * 1100):
+            r = self.c.post("/api/v1/push/subscribe", json={"endpoint": endpoint, "keys": bonnes}, headers=self.h(t))
+            self.assertEqual(r.status_code, 400, endpoint)
+        ok = "https://fcm.googleapis.com/x"
+        for cles in ({}, None, {"p256dh": "abc", "auth": bonnes["auth"]}, {"p256dh": bonnes["p256dh"], "auth": "court"},
+                     {"p256dh": bonnes["p256dh"], "auth": "!!!!"}, {"p256dh": 5, "auth": 6}):
+            r = self.c.post("/api/v1/push/subscribe", json={"endpoint": ok, "keys": cles}, headers=self.h(t))
+            self.assertEqual(r.status_code, 400, cles)
+        self.assertEqual(self.c.post("/api/v1/push/subscribe", json={"endpoint": ok, "keys": bonnes}).status_code, 401)
+        self.assertEqual(self.sql("SELECT COUNT(*) FROM push_subscriptions")[0][0],
+                         self.sql("SELECT COUNT(*) FROM push_subscriptions")[0][0])
+        hotes_ok = ("updates.push.services.mozilla.com", "web.push.apple.com", "wns2-par02p.notify.windows.com",
+                    "fcm.googleapis.com")
+        for i, h in enumerate(hotes_ok):
+            self.abonner(t, f"h{i}", h)
+
+    def test_limite_et_reattribution(self):
+        t1, t2 = self.jeton("push-3@x.fr"), self.jeton("push-3b@x.fr")
+        for i in range(10):
+            self.abonner(t1, f"lim{i}")
+        r = self.c.post("/api/v1/push/subscribe", json={"endpoint": "https://fcm.googleapis.com/de-trop", "keys": self.cles()},
+                        headers=self.h(t1))
+        self.assertEqual(r.status_code, 400)
+        # un appareil déjà enregistré se met à jour sans compter en double
+        self.assertEqual(self.c.post("/api/v1/push/subscribe", json={"endpoint": "https://fcm.googleapis.com/fcm/send/lim0",
+                                     "keys": self.cles()}, headers=self.h(t1)).status_code, 201)
+        # le même appareil, utilisé avec un autre compte, change de propriétaire
+        self.abonner(t2, "lim0")
+        proprio = self.sql("SELECT u.email FROM push_subscriptions s JOIN users u ON u.id = s.user_id WHERE s.endpoint = %s",
+                           ("https://fcm.googleapis.com/fcm/send/lim0",))
+        self.assertEqual(proprio, [("push-3b@x.fr",)])
+
+    def test_desabonnement_limite_au_compte(self):
+        t1, t2 = self.jeton("push-4@x.fr"), self.jeton("push-4b@x.fr")
+        e = self.abonner(t1, "des")
+        self.c.post("/api/v1/push/unsubscribe", json={"endpoint": e}, headers=self.h(t2))
+        self.assertEqual(self.sql("SELECT COUNT(*) FROM push_subscriptions WHERE endpoint = %s", (e,))[0][0], 1)
+        self.assertEqual(self.c.post("/api/v1/push/unsubscribe", json={"endpoint": e}, headers=self.h(t1)).status_code, 200)
+        self.assertEqual(self.sql("SELECT COUNT(*) FROM push_subscriptions WHERE endpoint = %s", (e,))[0][0], 0)
+        self.assertEqual(self.c.post("/api/v1/push/unsubscribe", json={}, headers=self.h(t1)).status_code, 400)
+
+    def test_notification_a_l_ouverture_du_formulaire(self):
+        td, id_d, te, id_e = self.agence("push-5@x.fr")
+        ed, ee = self.abonner(td, "dir"), self.abonner(te, "emp")
+        autre = self.jeton("push-5b@x.fr")
+        ea = self.abonner(autre, "autre")
+        l = self.lead(td, name="Camille Martin")
+        self.assigner(td, l, id_e)
+        self.pushs.clear()
+        lien = self.c.post(f"/api/v1/leads/{l['id']}/completion-link", headers=self.h(td)).get_json()["url"].split("c=")[1]
+        nav = {"User-Agent": "Mozilla/5.0 (iPhone) Safari/604.1"}
+        self.c.get(f"/public/completer/{lien}", headers={"User-Agent": "WhatsApp/2.23"})        # robot : rien
+        self.assertEqual(self.pushs, [])
+        self.c.get(f"/public/completer/{lien}", headers=nav)
+        self.c.get(f"/public/completer/{lien}", headers=nav)                                       # répété : une seule fois
+        self.assertEqual(sorted(p[0] for p in self.pushs), sorted([ed, ee]))
+        charge = self.pushs[0][1]
+        self.assertEqual((charge["title"], charge["body"]), ("Camille Martin", "a ouvert son formulaire"))
+        self.assertEqual(charge["url"], f"https://app.zelyro.fr/leads-profile.html?id={l['id']}")
+        self.assertNotIn(ea, [p[0] for p in self.pushs])                                           # une autre agence n'est jamais prévenue
+
+    def test_pas_de_notification_si_la_requete_echoue(self):
+        t = self.jeton("push-6@x.fr")
+        self.abonner(t, "x6")
+        l = self.lead(t)
+        lien = self.c.post(f"/api/v1/leads/{l['id']}/completion-link", headers=self.h(t)).get_json()["url"].split("c=")[1]
+        self.pushs.clear()
+        r = self.c.post(f"/public/completer/{lien}", json={"budget": 1}, headers=self.NAVIGATEUR)   # sans consentement
+        self.assertGreaterEqual(r.status_code, 400)
+        self.assertEqual(self.pushs, [])
+
+    def test_demande_de_visite_notifiee(self):
+        t = self.jeton("push-7@x.fr")
+        e = self.abonner(t, "x7")
+        self.c.post("/api/v1/properties", json={"title": "Maison Senlis", "address": "5 rue Vieille 60300 Senlis",
+                    "property_type": "Maison", "price": 290000, "rooms": 4, "size": 95}, headers=self.h(t))
+        b = self.c.get("/api/v1/properties", headers=self.h(t)).get_json()[0]
+        l = self.lead(t)
+        self.c.post(f"/api/v1/leads/{l['id']}/send-mail", json={"subject": "Sélection", "body": "Bonjour, voici des biens.",
+                    "property_ids": [b["id"]]}, headers=self.h(t))
+        jeton = re.search(r"annonces\.html\?t=([A-Za-z0-9_-]+)", self.envoyes[-1]["texte"]).group(1)
+        self.pushs.clear()
+        self.c.post(f"/public/annonces/{jeton}/interet", json={"ref": 0}, headers=self.NAVIGATEUR)
+        self.assertEqual(len(self.pushs), 1)
+        self.assertEqual(self.pushs[0][1]["title"], "Demande de visite")
+        self.assertIn("Camille Martin souhaite visiter « Maison Senlis »", self.pushs[0][1]["body"])
+        self.assertIn("à rappeler", self.pushs[0][1]["body"])
+
+    def test_attribution_notifiee(self):
+        td, id_d, te, id_e = self.agence("push-8@x.fr")
+        ee = self.abonner(te, "emp8")
+        l = self.lead(td)
+        self.pushs.clear()
+        self.assigner(td, l, id_e)
+        self.assertEqual([(p[0], p[1]["title"], p[1]["body"]) for p in self.pushs],
+                         [(ee, "Un prospect vous est confié", "Camille Martin")])
+
+    def test_appareil_disparu_retire_et_autres_erreurs_conservees(self):
+        t = self.jeton("push-9@x.fr")
+        mort, lent = self.abonner(t, "mort"), self.abonner(t, "lent")
+        vivant = self.abonner(t, "vivant")
+        self.erreur[mort], self.erreur[lent] = 410, 503
+        n = backend._pousser([self.sql("SELECT id FROM users WHERE email = 'push-9@x.fr'")[0][0]], "T", "C", "https://x/", "t")
+        self.assertEqual(n, 1)
+        restants = {r[0] for r in self.sql("SELECT endpoint FROM push_subscriptions WHERE endpoint LIKE '%%/fcm/send/%%'")}
+        self.assertNotIn(mort, restants); self.assertIn(lent, restants); self.assertIn(vivant, restants)
+
+    def test_notification_d_essai(self):
+        t = self.jeton("push-10@x.fr")
+        r = self.c.post("/api/v1/push/test", headers=self.h(t))
+        self.assertEqual((r.status_code, r.get_json()["sent"]), (200, 0))
+        self.abonner(t, "x10")
+        r = self.c.post("/api/v1/push/test", headers=self.h(t))
+        self.assertEqual((r.status_code, r.get_json()["sent"]), (200, 1))
+        self.assertEqual(self.c.post("/api/v1/push/test").status_code, 401)
+        with mock.patch.dict(os.environ, {"VAPID_PUBLIC_KEY": ""}):
+            self.assertEqual(self.c.post("/api/v1/push/test", headers=self.h(t)).status_code, 503)
+
+    def test_sans_cles_aucun_envoi(self):
+        t = self.jeton("push-11@x.fr")
+        self.abonner(t, "x11")
+        l = self.lead(t)
+        lien = self.c.post(f"/api/v1/leads/{l['id']}/completion-link", headers=self.h(t)).get_json()["url"].split("c=")[1]
+        self.pushs.clear()
+        with mock.patch.dict(os.environ, {"VAPID_SUBJECT": ""}):
+            self.assertEqual(self.c.get(f"/public/completer/{lien}", headers=self.NAVIGATEUR).status_code, 200)
+        self.assertEqual(self.pushs, [])
+
+
+class TestWebPushReel(unittest.TestCase):
+    """Un vrai appel à la bibliothèque pywebpush (chiffrement et signature), sans réseau."""
+
+    def test_envoi_chiffre_et_signe(self):
+        pub, priv = backend._generer_cles_vapid()
+        cles = TestNotificationsPush.cles()
+        reponse = mock.Mock(status_code=201, text="")
+        with mock.patch.dict(os.environ, {"VAPID_PUBLIC_KEY": pub, "VAPID_PRIVATE_KEY": priv,
+                                          "VAPID_SUBJECT": "mailto:contact@zelyro.fr"}), \
+                mock.patch("requests.post", return_value=reponse) as post:
+            backend._webpush_envoyer({"endpoint": "https://fcm.googleapis.com/fcm/send/abc", "keys": cles},
+                                     {"title": "Zelyro", "body": "Essai accentué é", "url": "https://app.zelyro.fr/", "tag": "t"})
+        args, kw = post.call_args
+        self.assertEqual(args[0], "https://fcm.googleapis.com/fcm/send/abc")
+        self.assertTrue(kw["headers"]["Authorization"].startswith("vapid t="))
+        self.assertIn(f"k={pub}", kw["headers"]["Authorization"])
+        self.assertEqual(kw["headers"]["Content-Encoding"], "aes128gcm")
+        self.assertGreater(len(kw["data"]), 80)
+        self.assertNotIn(b"Essai", kw["data"])                     # le contenu est bien chiffré
 
 
 if __name__ == "__main__":

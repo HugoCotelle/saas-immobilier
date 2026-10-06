@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, redirect
+from flask import Flask, request, jsonify, redirect, Response, g, has_request_context
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -11,6 +11,8 @@ import threading
 import jwt
 import requests
 import os
+import csv
+import io
 import re
 import sys
 import secrets
@@ -460,6 +462,32 @@ _DDL_ACTIVITE = (
     "CREATE INDEX IF NOT EXISTS lead_events_lead_idx ON lead_events (lead_id, kind, created_at)",
 )
 
+# Étape 2 : responsable d'un prospect (un collaborateur de l'agence ou le
+# directeur ; SET NULL si le compte disparaît), e-mail du matin (réglage par
+# utilisateur, une seule fois par jour grâce à digest_sent_on) et taux de
+# commission de l'agence (pour le « potentiel » du tableau de bord).
+_DDL_ETAPE2 = (
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS leads_assigned_idx ON leads (user_id, assigned_to)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS digest_enabled BOOLEAN NOT NULL DEFAULT TRUE",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS digest_sent_on DATE",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS commission_rate NUMERIC(4,1) NOT NULL DEFAULT 4.0",
+)
+
+# Appareils qui reçoivent les notifications (Web Push) : un abonnement par
+# navigateur ou téléphone, identifié par son adresse (endpoint).
+_DDL_PUSH = (
+    """CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        endpoint TEXT NOT NULL UNIQUE,
+        p256dh VARCHAR(255) NOT NULL,
+        auth VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions (user_id)",
+)
+
 _DDL_SURFACE = (
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS transaction VARCHAR(10) NOT NULL DEFAULT 'vente'",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS revenus INTEGER",
@@ -644,12 +672,17 @@ def _assurer_schema():
                                WHERE table_name = 'properties' AND column_name = 'transaction'),
                        to_regclass('lead_events') IS NOT NULL,
                        EXISTS (SELECT 1 FROM information_schema.columns
-                               WHERE table_name = 'lead_mails' AND column_name = 'suivi_token')
+                               WHERE table_name = 'lead_mails' AND column_name = 'suivi_token'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'leads' AND column_name = 'assigned_to'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'users' AND column_name = 'commission_rate'),
+                       to_regclass('push_subscriptions') IS NOT NULL
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
                 for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
-                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE):
+                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH):
                     cur.execute(ddl)
             conn.commit()
             _schema_pret = True
@@ -823,7 +856,7 @@ def init_database(demo=False):
         ):
             cursor.execute(ddl)
         for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
-                    + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE):
+                    + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH):
             cursor.execute(ddl)
 
         # Vérifier si vide
@@ -1388,7 +1421,7 @@ def get_profile():
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, email, first_name, created_at FROM users WHERE id = %s", (request.user_id,))
+        cur.execute("SELECT id, email, first_name, created_at, digest_enabled FROM users WHERE id = %s", (request.user_id,))
         user = cur.fetchone()
         if not user:
             cur.close()
@@ -1403,6 +1436,7 @@ def get_profile():
         user['alerts_enabled'] = agence.get('alerts_enabled')
         user['plan'] = agence.get('plan')
         user['role'] = request.role
+        user['digest_enabled'] = bool(user.get('digest_enabled'))
         user['is_admin'] = _est_admin(user['email'])
         return jsonify(user), 200
     except Exception:
@@ -1449,43 +1483,70 @@ def _niveau_qualite(points):
     return 'cold'
 
 
+# Ce que fait le prospect avec les liens reçus compte dans sa qualité : un
+# prospect qui ouvre, remplit et demande une visite est plus chaud qu'un autre
+# au dossier identique. Chaque type d'événement compte une seule fois, et
+# l'ensemble est plafonné.
+ENGAGEMENT_POINTS = {'formulaire_ouvert': 2, 'formulaire_rempli': 4, 'annonces_ouvertes': 3, 'interet_bien': 6}
+ENGAGEMENT_LIBELLES = {'formulaire_ouvert': "A ouvert son formulaire", 'formulaire_rempli': "A rempli son formulaire",
+                       'annonces_ouvertes': "A ouvert les annonces reçues", 'interet_bien': "A demandé une visite"}
+ENGAGEMENT_MAX = 12
+
+
+def _charger_engagement(cur, user_id, leads, lignes=False):
+    """Ajoute à chaque prospect de la liste le champ « engagement » (points,
+    plafonnés) calculé d'après ses événements ; avec lignes=True, aussi
+    « engagement_lignes » pour expliquer d'où viennent les points."""
+    ids = [l['id'] for l in leads if l.get('id') is not None]
+    par_lead = {}
+    if ids:
+        cur.execute("""SELECT lead_id, kind FROM lead_events
+                       WHERE user_id = %s AND lead_id = ANY(%s) GROUP BY lead_id, kind""", (user_id, ids))
+        for r in cur.fetchall():
+            par_lead.setdefault(r['lead_id'], set()).add(r['kind'])
+    for l in leads:
+        genres = par_lead.get(l.get('id'), set())
+        l['engagement'] = min(ENGAGEMENT_MAX, sum(ENGAGEMENT_POINTS.get(k, 0) for k in genres))
+        if lignes:
+            l['engagement_lignes'] = [[ENGAGEMENT_POINTS[k], ENGAGEMENT_LIBELLES[k]]
+                                      for k in ENGAGEMENT_POINTS if k in genres]
+    return leads
+
+
+def _points_engagement(lead):
+    try:
+        return max(0, min(ENGAGEMENT_MAX, int(lead.get('engagement') or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
 def points_qualite(lead):
     """Score de qualité d'un prospect, sur 100. C'est lui, et lui seul, qui
     fixe le niveau chaud, tiède ou froid : le chiffre affiché à l'agent et le
-    classement ne peuvent donc pas diverger."""
+    classement ne peuvent donc pas diverger.
+
+    Acquéreur : financement 36, échéance 32, coordonnées 8, dossier (budget 5,
+    secteur 4, type 3) et engagement 12 (voir ENGAGEMENT_POINTS)."""
     if _transaction(lead.get('transaction'), 'vente') == 'location':
         return min(100, _points_locataire(lead))
 
     points = 0
 
     financing = lead.get('financing_status') or 'unknown'
-    if financing == 'approved':
-        points += 40
-    elif financing == 'in_progress':
-        points += 25
-    elif financing == 'pending':
-        points += 12
+    points += {'approved': 36, 'in_progress': 22, 'pending': 11}.get(financing, 0)
 
     urgency = lead.get('purchase_urgency') or 'unknown'
-    if urgency == 'immediate':
-        points += 35
-    elif urgency == '1-3_months':
-        points += 28
-    elif urgency == '3-6_months':
-        points += 15
-    elif urgency == '6plus_months':
-        points += 5
+    points += {'immediate': 32, '1-3_months': 25, '3-6_months': 14, '6plus_months': 4}.get(urgency, 0)
 
-    # Un dossier complet est un signal d'engagement réel : 25 points au total,
-    # dont 10 pour les coordonnées (e-mail 5, téléphone 5).
-    points += _points_coordonnees(lead, 10)
+    points += _points_coordonnees(lead, 8)
     if lead.get('budget'):
-        points += 6
-    if lead.get('location'):
         points += 5
-    if lead.get('property_type'):
+    if lead.get('location'):
         points += 4
+    if lead.get('property_type'):
+        points += 3
 
+    points += _points_engagement(lead)
     return min(100, points)
 
 
@@ -1594,24 +1655,24 @@ def _compat_meuble(lead, bien):
 
 
 def _points_locataire(lead):
-    """Points d'un prospect en location : solidité du dossier + échéance +
-    complétude. Mêmes seuils que pour un acquéreur (chaud 80, tiède 45)."""
+    """Points d'un prospect en location, sur 100 : solidité du dossier (revenus
+    et garants jusqu'à 31), situation professionnelle 13, emménagement 24,
+    coordonnées 8, dossier (loyer 5, secteur 4, type 3) et engagement 12."""
     points = 0
     loyer = lead.get('budget')
     revenus = lead.get('revenus')
     garants = 0 if lead.get('property_type') in TYPES_PRO else (lead.get('garants') or 0)
     if revenus and loyer:
         r = revenus / loyer
-        points += 30 if r >= COEF_REVENUS_LOYER else 20 if r >= 2.5 else 10 if r >= 2 else 3
+        points += 27 if r >= COEF_REVENUS_LOYER else 18 if r >= 2.5 else 9 if r >= 2 else 3
         if garants:
-            points += 5 if r >= COEF_REVENUS_LOYER else 12
+            points += 4 if r >= COEF_REVENUS_LOYER else 11
     elif garants:
-        points += 15
-    points += {'cdi': 15, 'fonctionnaire': 15, 'retraite': 12, 'independant': 9, 'cdd': 6,
-               'etudiant': 5, 'autre': 2}.get(lead.get('situation_pro'), 0)
+        points += 13
+    points += {'cdi': 13, 'fonctionnaire': 13, 'retraite': 11, 'independant': 8, 'cdd': 5,
+               'etudiant': 4, 'autre': 2}.get(lead.get('situation_pro'), 0)
     urgency = lead.get('purchase_urgency') or 'unknown'
-    points += {'immediate': 30, '1-3_months': 24, '3-6_months': 13, '6plus_months': 4}.get(urgency, 0)
-    # Complétude : 20 points, dont 8 pour les coordonnées (e-mail 4, téléphone 4).
+    points += {'immediate': 24, '1-3_months': 19, '3-6_months': 10, '6plus_months': 3}.get(urgency, 0)
     points += _points_coordonnees(lead, 8)
     if lead.get('budget'):
         points += 5
@@ -1619,6 +1680,7 @@ def _points_locataire(lead):
         points += 4
     if lead.get('property_type'):
         points += 3
+    points += _points_engagement(lead)
     return points
 
 
@@ -2078,12 +2140,13 @@ def get_leads():
         cur.execute("""
             SELECT id, name, email, phone, budget, location, property_type, surface_min, activite, status,
                    financing_status, purchase_urgency, source, created_at,
-                   transaction, revenus, garants, situation_pro, meuble_souhaite,
+                   transaction, revenus, garants, situation_pro, meuble_souhaite, assigned_to,
                    (SELECT MIN(r.due_date) FROM lead_reminders r
                      WHERE r.lead_id = leads.id AND r.done_at IS NULL) AS next_reminder
             FROM leads WHERE user_id = %s ORDER BY id
         """, (request.agency_id,))
         leads = cur.fetchall()
+        _charger_engagement(cur, request.agency_id, leads)
         cur.close()
         conn.close()
         for lead in leads:
@@ -2093,6 +2156,81 @@ def get_leads():
         return jsonify(leads), 200
     except Exception:
         return erreur_interne()
+CSV_ENTETES = ["Nom", "E-mail", "Téléphone", "Projet", "Budget ou loyer max (€)", "Secteur", "Type de bien",
+               "Surface min (m²)", "Financement", "Échéance", "Revenus mensuels (€)", "Garants",
+               "Situation professionnelle", "Meublé souhaité", "Statut", "Origine", "Responsable", "Qualité", "Score /100",
+               "Créé le", "Premier contact le", "Prochaine relance", "Consentement recueilli le"]
+_FINANCEMENT_LIBELLES = {'approved': 'Approuvé', 'in_progress': 'En cours', 'pending': 'En attente',
+                         'rejected': 'Refusé', 'unknown': ''}
+_ECHEANCE_LIBELLES = {'immediate': 'Immédiate', '1-3_months': '1 à 3 mois', '3-6_months': '3 à 6 mois',
+                      '6plus_months': 'Plus de 6 mois', 'unknown': ''}
+_QUALITE_LIBELLES = {'hot': 'Chaud', 'warm': 'Tiède', 'cold': 'Froid'}
+
+
+def _cellule_csv(valeur):
+    """Une cellule de tableur. Un texte qui commence par =, +, - ou @ serait
+    exécuté comme une formule à l'ouverture : on le neutralise (OWASP)."""
+    if valeur is None:
+        return ''
+    if isinstance(valeur, bool):
+        return 'oui' if valeur else 'non'
+    if isinstance(valeur, datetime):
+        return valeur.strftime('%d/%m/%Y %H:%M')
+    if isinstance(valeur, date):
+        return valeur.strftime('%d/%m/%Y')
+    texte = str(valeur)
+    if texte[:1] in ('=', '+', '-', '@', '\t', '\r'):
+        texte = "'" + texte
+    return texte
+
+
+@app.route('/api/v1/leads/export', methods=['GET'])
+@limiter.limit("20 per hour", key_func=_cle_utilisateur)
+@token_required
+def export_leads():
+    """Tous les prospects de l'agence au format CSV (séparateur point-virgule,
+    UTF-8 avec marque d'ordre : s'ouvre correctement dans Excel en français).
+    Utile à l'agence et au droit à la portabilité. Les notes privées de
+    l'agent n'y figurent pas."""
+    try:
+        with _base() as (conn, cur):
+            cur.execute("""
+                SELECT l.*, (SELECT MIN(r.due_date) FROM lead_reminders r
+                             WHERE r.lead_id = l.id AND r.done_at IS NULL) AS prochaine_relance,
+                       u.first_name AS responsable_prenom, u.email AS responsable_email
+                FROM leads l LEFT JOIN users u ON u.id = l.assigned_to
+                WHERE l.user_id = %s ORDER BY l.id
+            """, (request.agency_id,))
+            leads = cur.fetchall()
+            _charger_engagement(cur, request.agency_id, leads)
+        sortie = io.StringIO()
+        ecrivain = csv.writer(sortie, delimiter=';', quoting=csv.QUOTE_MINIMAL, lineterminator='\r\n')
+        ecrivain.writerow(CSV_ENTETES)
+        for l in leads:
+            tel = str(l.get('phone') or '')
+            if tel.startswith('+'):
+                tel = '00' + tel[1:]       # « +33… » serait lu comme une formule
+            statut = l.get('status') if l.get('status') in STATUTS else 'nouveau'
+            ecrivain.writerow([_cellule_csv(x) for x in [
+                l.get('name'), l.get('email'), tel,
+                'Location' if _est_location(l) else 'Achat',
+                l.get('budget'), l.get('location'), l.get('property_type'), l.get('surface_min'),
+                _FINANCEMENT_LIBELLES.get(l.get('financing_status') or 'unknown', ''),
+                _ECHEANCE_LIBELLES.get(l.get('purchase_urgency') or 'unknown', ''),
+                l.get('revenus'), l.get('garants'), l.get('situation_pro'), l.get('meuble_souhaite'),
+                STATUTS_LIBELLES[statut], l.get('source'), (_nom_membre(l.get('responsable_prenom'), l.get('responsable_email')) if l.get('assigned_to') else ''),
+                _QUALITE_LIBELLES[derive_lead_quality(l)], points_qualite(l),
+                l.get('created_at'), l.get('first_contact_at'), l.get('prochaine_relance'), l.get('consent_at'),
+            ]])
+        nom = f"prospects-zelyro-{date.today().isoformat()}.csv"
+        reponse = Response("\ufeff" + sortie.getvalue(), mimetype="text/csv; charset=utf-8")
+        reponse.headers["Content-Disposition"] = f'attachment; filename="{nom}"'
+        reponse.headers["Cache-Control"] = "no-store"
+        return reponse
+    except Exception:
+        return erreur_interne()
+
+
 @app.route('/api/v1/leads', methods=['POST'])
 @token_required
 def create_lead():
@@ -2125,11 +2263,11 @@ def create_lead():
             INSERT INTO leads
                 (user_id, name, email, phone, budget, location, property_type, surface_min, activite,
                  status, financing_status, purchase_urgency, source,
-                 transaction, revenus, garants, situation_pro, meuble_souhaite)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s, %s, %s, %s, %s, %s)
+                 transaction, revenus, garants, situation_pro, meuble_souhaite, assigned_to)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id, name, email, phone, budget, location, property_type, surface_min, activite,
                       status, financing_status, purchase_urgency, source,
-                      transaction, revenus, garants, situation_pro, meuble_souhaite
+                      transaction, revenus, garants, situation_pro, meuble_souhaite, assigned_to
         """, (
             request.agency_id,
             nom[:255],
@@ -2147,7 +2285,10 @@ def create_lead():
             _entier_souple(data.get('revenus')),
             _garants_pour(_texte_court(data.get('property_type'), 100), data.get('garants')),
             _situation_pro(data.get('situation_pro')),
-            _booleen_souple(data.get('meuble_souhaite'))
+            _booleen_souple(data.get('meuble_souhaite')),
+            # Un collaborateur qui saisit un prospect en devient le responsable ;
+            # le directeur, lui, répartit après coup.
+            request.user_id if request.role == 'employe' else None
         ))
         lead = cur.fetchone()
         conn.commit()
@@ -2543,8 +2684,10 @@ def get_lead_detail(lead_id):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, user_id, name, email, phone, budget, location, property_type, surface_min, activite, status, financing_status, purchase_urgency, lead_quality, financing_amount, notes, created_at, source, status_changed_at, first_contact_at, consent_at, transaction, revenus, garants, situation_pro, meuble_souhaite FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.agency_id))
+        cur.execute("SELECT id, user_id, name, email, phone, budget, location, property_type, surface_min, activite, status, financing_status, purchase_urgency, lead_quality, financing_amount, notes, created_at, source, status_changed_at, first_contact_at, consent_at, transaction, revenus, garants, situation_pro, meuble_souhaite, assigned_to FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.agency_id))
         lead = cur.fetchone()
+        if lead:
+            _charger_engagement(cur, request.agency_id, [lead], lignes=True)
         cur.close()
         conn.close()
         if not lead:
@@ -2678,6 +2821,7 @@ def get_leads_by_quality(quality):
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("SELECT id, name, email, phone, budget, location, property_type, financing_status, purchase_urgency, transaction, revenus, garants, situation_pro FROM leads WHERE user_id = %s ORDER BY created_at DESC", (request.agency_id,))
         leads = cur.fetchall()
+        _charger_engagement(cur, request.agency_id, leads)
         cur.close()
         conn.close()
         # Le filtre s'applique sur la qualité déduite, pas sur la colonne.
@@ -2698,6 +2842,7 @@ def get_improved_matches():
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("SELECT id, name, email, phone, budget, location, property_type, surface_min, activite, financing_status, purchase_urgency, transaction, revenus, garants, situation_pro, meuble_souhaite FROM leads WHERE user_id = %s ORDER BY created_at DESC", (request.agency_id,))
         leads = cur.fetchall()
+        _charger_engagement(cur, request.agency_id, leads)
         cur.execute("SELECT id, title, address, price, rooms, size, property_type, description, activites_autorisees, extraction_air, transaction, meuble FROM properties WHERE user_id = %s", (request.agency_id,))
         properties = cur.fetchall()
         cur.close()
@@ -3361,9 +3506,11 @@ LIBELLES_EVENEMENTS = {
     'formulaire_ouvert': "a ouvert son formulaire",
     'formulaire_rempli': "a rempli son formulaire",
     'annonces_ouvertes': "a ouvert les annonces reçues",
+    'interet_bien': "souhaite visiter un bien",
 }
 EVENEMENT_FENETRE_MINUTES = 30      # une ouverture répétée dans la fenêtre ne compte qu'une fois
 ACTIVITE_JOURS = 14                 # durée d'affichage sur le tableau de bord
+UNTREATED_HEURES = 24               # un prospect « nouveau » depuis plus longtemps est signalé
 ANNONCES_VALIDITE_JOURS = 90        # au-delà, le lien des annonces expire
 
 # Aperçus de liens (WhatsApp, iMessage, Slack...), scanners de messagerie et
@@ -3393,12 +3540,39 @@ def _noter_evenement(cur, user_id, lead_id, kind, detail=None, fenetre=EVENEMENT
             return False
     cur.execute("""INSERT INTO lead_events (lead_id, user_id, kind, detail, created_at)
                    VALUES (%s, %s, %s, %s, %s)""", (lead_id, user_id, kind, detail, maintenant))
+    if has_request_context() and _push_configure():
+        # Lancée après la réponse (voir _envoyer_notifications_en_attente).
+        g.setdefault('push_attente', []).append((user_id, lead_id, kind, detail))
     return True
 
 
 def _libelle_evenement(kind, detail):
     base = LIBELLES_EVENEMENTS.get(kind, kind)
+    if kind == 'interet_bien' and detail:
+        return f"souhaite visiter « {detail} »"
     return f"{base} ({detail})" if detail else base
+
+
+def _prevenir_agent(user_id, lead_id, sujet, titre, paragraphes):
+    """Prévient l'agent par e-mail d'un événement important sur un prospect
+    (par exemple une demande de visite). Ne fait rien si l'envoi n'est pas
+    configuré ou si l'agent a coupé les alertes. Appelée en tâche de fond."""
+    try:
+        site = _site_url()
+        if not site or not _envoi_configure():
+            return
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("SELECT email, alerts_enabled FROM users WHERE id = %s", (user_id,))
+            agent = cur.fetchone()
+        if not agent or not agent['alerts_enabled']:
+            return
+        texte, html = _gabarit_email(
+            titre, list(paragraphes) + ["Vous pouvez désactiver ces e-mails depuis la page « Mon compte »."],
+            ("Ouvrir la fiche du prospect", f"{site}/leads-profile.html?id={lead_id}"))
+        _envoyer_email(agent['email'], sujet, texte, html)
+    except Exception:
+        app.logger.exception("Alerte de prospect impossible")
 
 
 def _prenom_prospect(nom):
@@ -3870,6 +4044,11 @@ def team_remove(employee_id):
             cur.execute("""UPDATE users SET is_active = FALSE, token_version = token_version + 1
                            WHERE id = %s AND agency_owner_id = %s""", (employee_id, request.user_id))
             modifie = cur.rowcount
+            if modifie:
+                # Ses prospects retournent dans le pot commun : sans responsable
+                # actif, personne ne les verrait dans « mes prospects ».
+                cur.execute("UPDATE leads SET assigned_to = NULL WHERE assigned_to = %s AND user_id = %s",
+                            (employee_id, request.user_id))
             conn.commit()
         if modifie == 0:
             return jsonify({"message": "Compte introuvable"}), 404
@@ -4281,6 +4460,7 @@ def get_proposals():
                            FROM leads WHERE user_id = %s""", (request.agency_id,))
             prospects = [l for l in cur.fetchall()
                          if (l['status'] or 'nouveau') not in STATUTS_CLOS and _prospect_complet(l)]
+            _charger_engagement(cur, request.agency_id, prospects)
             cur.execute("""SELECT id, title, address, price, rooms, size, property_type,
                                   activites_autorisees, extraction_air, transaction, meuble
                            FROM properties WHERE user_id = %s""", (request.agency_id,))
@@ -4490,15 +4670,25 @@ def send_lead_mail(lead_id):
 @app.route('/auth/preferences', methods=['PUT'])
 @token_required
 def update_preferences():
-    """Réglages du compte : pour l'instant, les alertes e-mail."""
+    """Réglages du compte : les alertes e-mail (celles de l'agence) et
+    l'e-mail du matin (propre à chaque utilisateur)."""
     try:
         data = request.get_json(silent=True) or {}
-        if not isinstance(data.get('alerts_enabled'), bool):
+        reponse = {}
+        if 'alerts_enabled' not in data and 'digest_enabled' not in data:
             return jsonify({"message": "Valeur « alerts_enabled » attendue (true ou false)"}), 400
+        for cle in ('alerts_enabled', 'digest_enabled'):
+            if cle in data and not isinstance(data[cle], bool):
+                return jsonify({"message": f"Valeur « {cle} » attendue (true ou false)"}), 400
         with _base() as (conn, cur):
-            cur.execute("UPDATE users SET alerts_enabled = %s WHERE id = %s", (data['alerts_enabled'], request.agency_id))
+            if 'alerts_enabled' in data:
+                cur.execute("UPDATE users SET alerts_enabled = %s WHERE id = %s", (data['alerts_enabled'], request.agency_id))
+                reponse['alerts_enabled'] = data['alerts_enabled']
+            if 'digest_enabled' in data:
+                cur.execute("UPDATE users SET digest_enabled = %s WHERE id = %s", (data['digest_enabled'], request.user_id))
+                reponse['digest_enabled'] = data['digest_enabled']
             conn.commit()
-        return jsonify({"alerts_enabled": data['alerts_enabled']}), 200
+        return jsonify(reponse), 200
     except Exception:
         return erreur_interne()
 
@@ -4525,10 +4715,21 @@ def annonces_publiques(token):
                 return jsonify({"message": "Not found"}), 404
             if mail['sent_at'] < _maintenant() - timedelta(days=ANNONCES_VALIDITE_JOURS):
                 return jsonify({"message": "Ce lien a expiré. Contactez votre agence pour recevoir les annonces."}), 410
-            cur.execute("""SELECT title, address, price, size, rooms, property_type, description, transaction, meuble
-                           FROM properties WHERE user_id = %s AND id = ANY(%s) ORDER BY id""",
+            cur.execute("""SELECT id, title, address, price, size, rooms, property_type, description, transaction, meuble
+                           FROM properties WHERE user_id = %s AND id = ANY(%s)""",
                         (mail['user_id'], list(mail['property_ids'] or [])))
-            biens = cur.fetchall()
+            par_id = {r['id']: r for r in cur.fetchall()}
+            cur.execute("""SELECT DISTINCT detail FROM lead_events
+                           WHERE lead_id = %s AND kind = 'interet_bien'""", (mail['lead_id'],))
+            deja_interesse = {r['detail'] for r in cur.fetchall()}
+            # « ref » : rang du bien dans le message. C'est ce que renvoie le bouton « Je souhaite visiter »,
+            # jamais un numéro interne.
+            biens = []
+            for ref, pid in enumerate(mail['property_ids'] or []):
+                r = par_id.get(pid)
+                if r:
+                    biens.append({"ref": ref, "interesse": (r['title'] or '')[:120] in deja_interesse,
+                                  **{k: v for k, v in r.items() if k != 'id'}})
             if biens and not _est_robot():
                 pluriel = 's' if len(biens) > 1 else ''
                 _noter_evenement(cur, mail['user_id'], mail['lead_id'], 'annonces_ouvertes',
@@ -4536,6 +4737,65 @@ def annonces_publiques(token):
                 conn.commit()
         return jsonify({"agence": mail['company_name'] or "", "prenom": _prenom_prospect(mail['name']),
                         "envoye_le": _iso(mail['sent_at']), "biens": biens}), 200
+    except Exception:
+        return erreur_interne()
+
+
+def _cle_jeton_public():
+    return "pub:" + str((request.view_args or {}).get('token', ''))[:64]
+
+
+@app.route('/public/annonces/<token>/interet', methods=['POST'])
+@limiter.limit("30 per hour")
+@limiter.limit("20 per hour", key_func=_cle_jeton_public)
+def annonce_interet(token):
+    """Le prospect clique sur « Je souhaite visiter ce bien » depuis la page
+    des annonces. L'agent est prévenu à l'instant : c'est le signal le plus
+    chaud qu'un prospect puisse envoyer."""
+    try:
+        if not COMPLETION_JETON_RE.match(token):
+            return jsonify({"message": "Not found"}), 404
+        data = request.get_json(silent=True) or {}
+        ref = data.get('ref')
+        if not isinstance(ref, int) or isinstance(ref, bool) or ref < 0:
+            return jsonify({"message": "Bien inconnu."}), 400
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("""
+                SELECT m.property_ids, m.sent_at, l.id AS lead_id, l.user_id, l.name, l.assigned_to
+                FROM lead_mails m
+                JOIN leads l ON l.id = m.lead_id
+                JOIN users u ON u.id = l.user_id AND u.is_active
+                WHERE m.suivi_token = %s
+            """, (token,))
+            mail = cur.fetchone()
+            if not mail:
+                return jsonify({"message": "Not found"}), 404
+            if mail['sent_at'] < _maintenant() - timedelta(days=ANNONCES_VALIDITE_JOURS):
+                return jsonify({"message": "Ce lien a expiré. Contactez votre agence."}), 410
+            ids = list(mail['property_ids'] or [])
+            if ref >= len(ids):
+                return jsonify({"message": "Bien inconnu."}), 400
+            cur.execute("SELECT title FROM properties WHERE id = %s AND user_id = %s", (ids[ref], mail['user_id']))
+            bien = cur.fetchone()
+            if not bien:
+                return jsonify({"message": "Ce bien n'est plus disponible."}), 404
+            titre = (bien['title'] or '')[:120]
+            nouveau = _noter_evenement(cur, mail['user_id'], mail['lead_id'], 'interet_bien', titre, fenetre=1440)
+            conn.commit()
+        if nouveau:
+            _lancer_en_arriere_plan(
+                _prevenir_agent, mail['user_id'], mail['lead_id'],
+                f"{mail['name'][:60]} souhaite visiter un bien", "Demande de visite",
+                [f"{mail['name']} souhaite visiter « {titre} ».",
+                 "Un prospect qui demande une visite est au plus chaud : le rappeler rapidement fait la différence."])
+            if mail['assigned_to'] and mail['assigned_to'] != mail['user_id']:
+                _lancer_en_arriere_plan(
+                    _prevenir_collaborateur, mail['assigned_to'], mail['lead_id'],
+                    f"{mail['name'][:60]} souhaite visiter un bien", "Demande de visite",
+                    [f"{mail['name']}, dont vous êtes le responsable, souhaite visiter « {titre} ».",
+                     "Un prospect qui demande une visite est au plus chaud : le rappeler rapidement fait la différence."])
+        return jsonify({"message": "Merci ! Votre agence est prévenue et vous recontacte pour organiser la visite."}), 200
     except Exception:
         return erreur_interne()
 
@@ -4588,11 +4848,15 @@ def get_dashboard():
     viennent, à quelle vitesse on les contacte et ce qui reste à faire."""
     try:
         with _base() as (conn, cur):
-            cur.execute("""SELECT id, status, source, created_at, first_contact_at, budget, location,
+            cur.execute("""SELECT id, name, status, source, created_at, first_contact_at, budget, location,
                                   property_type, financing_status, purchase_urgency,
-                                  transaction, revenus, garants, situation_pro, email, phone
+                                  transaction, revenus, garants, situation_pro, email, phone, assigned_to
                            FROM leads WHERE user_id = %s""", (request.agency_id,))
             prospects = cur.fetchall()
+            _charger_engagement(cur, request.agency_id, prospects)
+            membres = {m['id']: m['name'] for m in _membres_agence(cur, request.agency_id)}
+            cur.execute("SELECT commission_rate FROM users WHERE id = %s", (request.agency_id,))
+            taux_commission = float((cur.fetchone() or {}).get('commission_rate') or COMMISSION_TAUX_DEFAUT)
             cur.execute("""SELECT COUNT(*) AS n,
                                   COUNT(*) FILTER (WHERE transaction = 'location') AS n_location
                            FROM properties WHERE user_id = %s""", (request.agency_id,))
@@ -4620,7 +4884,7 @@ def get_dashboard():
         pipeline = {s: 0 for s in STATUTS}
         qualite = {'hot': 0, 'warm': 0, 'cold': 0}
         sources = {}
-        delais, recents, a_contacter = [], 0, 0
+        delais, recents, a_contacter, sans_suite = [], 0, 0, []
         for p in prospects:
             statut = p['status'] if p['status'] in STATUTS else 'nouveau'
             pipeline[statut] += 1
@@ -4636,8 +4900,11 @@ def get_dashboard():
                 recents += 1
             if statut == 'nouveau' and p['created_at'] and p['created_at'] < maintenant - timedelta(days=2):
                 a_contacter += 1
+            if statut == 'nouveau' and p['created_at'] and p['created_at'] < maintenant - timedelta(hours=UNTREATED_HEURES):
+                sans_suite.append(p)
 
         total = len(prospects)
+        sans_suite.sort(key=lambda p: p['created_at'])
         return jsonify({
             "total_leads": total,
             "total_properties": nb_biens,
@@ -4652,10 +4919,649 @@ def get_dashboard():
             "conversion_rate": round(100 * pipeline['signe'] / total) if total else None,
             "reminders": {"overdue": rappels['en_retard'], "today": rappels['aujourdhui'],
                           "this_week": rappels['semaine']},
+            "untreated": {"hours": UNTREATED_HEURES, "count": len(sans_suite),
+                          "items": [{"id": p['id'], "name": p['name'], "assigned_to": p['assigned_to'],
+                                     "assigned_name": membres.get(p['assigned_to']),
+                                     "hours": int((maintenant - p['created_at']).total_seconds() // 3600)}
+                                    for p in sans_suite[:8]]},
+            "commission": _potentiel_commission(prospects, taux_commission) if request.role == 'admin' else None,
             "activity": [{"id": e['id'], "lead_id": e['lead_id'], "name": e['name'], "kind": e['kind'],
                           "label": _libelle_evenement(e['kind'], e['detail']),
                           "created_at": _iso(e['created_at'])} for e in evenements],
         }), 200
+    except Exception:
+        return erreur_interne()
+
+
+# ===== NOTIFICATIONS SUR TÉLÉPHONE ET ORDINATEUR (Web Push) =====
+# L'agent active les notifications depuis « Mon compte », appareil par appareil.
+# Les clés VAPID (VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT) se génèrent
+# avec « python app.py vapid-keys » ; sans elles, la fonction reste simplement
+# inactive. Les notifications sont envoyées au directeur et au responsable du
+# prospect, pour les mêmes événements que le fil d'activité du tableau de bord.
+
+PUSH_MAX_PAR_UTILISATEUR = 10
+# Seuls les services de notification des navigateurs sont acceptés : le serveur
+# appelle l'adresse fournie par l'appareil, il ne doit pas pouvoir être dirigé
+# vers n'importe quel site.
+PUSH_HOTES = re.compile(
+    r'^(fcm\.googleapis\.com|android\.googleapis\.com|updates\.push\.services\.mozilla\.com'
+    r'|([a-z0-9-]+\.)?push\.services\.mozilla\.com|([a-z0-9-]+\.)*push\.apple\.com'
+    r'|([a-z0-9-]+\.)*notify\.windows\.com)$')
+_BASE64URL_RE = re.compile(r'^[A-Za-z0-9_-]+={0,2}$')
+
+
+def _push_configure():
+    return all((os.getenv(k) or "").strip() for k in ("VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT"))
+
+
+def _generer_cles_vapid():
+    """Une paire de clés VAPID : (publique, privée), en base64 « URL »."""
+    from py_vapid import Vapid
+    from cryptography.hazmat.primitives import serialization
+    v = Vapid()
+    v.generate_keys()
+    pub = v.public_key.public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+    priv = v.private_key.private_numbers().private_value.to_bytes(32, 'big')
+    enc = lambda b: base64.urlsafe_b64encode(b).rstrip(b'=').decode()
+    return enc(pub), enc(priv)
+
+
+def _base64url_octets(texte):
+    texte = str(texte or '')
+    if not texte or len(texte) > 200 or not _BASE64URL_RE.match(texte):
+        return None
+    try:
+        return base64.urlsafe_b64decode(texte + '=' * (-len(texte) % 4))
+    except Exception:
+        return None
+
+
+def _webpush_envoyer(abonnement, charge):
+    """Un envoi réel. Isolé pour pouvoir être remplacé dans les tests. Lève
+    l'exception de pywebpush ; l'appelant lit le code HTTP du service."""
+    from pywebpush import webpush
+    webpush(subscription_info=abonnement, data=_json.dumps(charge, ensure_ascii=False),
+            vapid_private_key=os.getenv("VAPID_PRIVATE_KEY").strip(),
+            vapid_claims={"sub": os.getenv("VAPID_SUBJECT").strip()}, ttl=6 * 3600, timeout=8)
+
+
+def _pousser(user_ids, titre, corps, url, tag=None):
+    """Envoie une notification à tous les appareils de ces utilisateurs.
+    Un appareil dont l'abonnement n'existe plus (404/410) est retiré. Appelée
+    en tâche de fond : ne lève jamais d'exception."""
+    try:
+        if not _push_configure() or not user_ids:
+            return 0
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ANY(%s)",
+                        (list(set(user_ids)),))
+            abonnements = cur.fetchall()
+        envoyes, obsoletes = 0, []
+        charge = {"title": titre[:80], "body": corps[:200], "url": url, "tag": tag}
+        for a in abonnements:
+            try:
+                _webpush_envoyer({"endpoint": a['endpoint'], "keys": {"p256dh": a['p256dh'], "auth": a['auth']}}, charge)
+                envoyes += 1
+            except Exception as e:
+                code = getattr(getattr(e, 'response', None), 'status_code', None)
+                if code in (404, 410):
+                    obsoletes.append(a['id'])
+                else:
+                    app.logger.warning("Notification non envoyée (%s)", code or type(e).__name__)
+        if obsoletes:
+            with _base() as (conn, cur):
+                cur.execute("DELETE FROM push_subscriptions WHERE id = ANY(%s)", (obsoletes,))
+                conn.commit()
+        return envoyes
+    except Exception:
+        app.logger.exception("Notifications : échec")
+        return 0
+
+
+def _pousser_evenement(agence_id, lead_id, kind, detail):
+    """Un prospect vient d'ouvrir un lien, de remplir son formulaire ou de
+    demander une visite : on prévient le directeur et le responsable."""
+    try:
+        site = _site_url()
+        if not site or not _push_configure():
+            return
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("SELECT name, assigned_to FROM leads WHERE id = %s AND user_id = %s", (lead_id, agence_id))
+            lead = cur.fetchone()
+        if not lead:
+            return
+        destinataires = [agence_id] + ([lead['assigned_to']] if lead['assigned_to'] else [])
+        titre = "Demande de visite" if kind == 'interet_bien' else lead['name']
+        corps = (f"{lead['name']} " if kind == 'interet_bien' else "") + _libelle_evenement(kind, detail)
+        if kind == 'interet_bien':
+            corps += " — à rappeler maintenant"
+        _pousser(destinataires, titre, corps, f"{site}/leads-profile.html?id={lead_id}", tag=f"lead-{lead_id}-{kind}")
+    except Exception:
+        app.logger.exception("Notification d'événement impossible")
+
+
+@app.after_request
+def _envoyer_notifications_en_attente(reponse):
+    """Les notifications se lancent une fois la réponse prête, donc une fois
+    l'événement enregistré : une requête qui échoue n'en envoie aucune."""
+    try:
+        if has_request_context():
+            attente = g.pop('push_attente', None)
+            if attente and reponse.status_code < 400:
+                for e in attente:
+                    _lancer_en_arriere_plan(_pousser_evenement, *e)
+    except Exception:
+        app.logger.exception("Notifications : lancement impossible")
+    return reponse
+
+
+@app.route('/api/v1/push/config', methods=['GET'])
+@token_required
+def push_config():
+    """Les notifications sont-elles disponibles, et la clé publique à donner au navigateur."""
+    try:
+        actif = _push_configure()
+        return jsonify({"enabled": actif, "public_key": os.getenv("VAPID_PUBLIC_KEY").strip() if actif else None}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/push/subscribe', methods=['POST'])
+@limiter.limit("30 per hour", key_func=_cle_utilisateur)
+@token_required
+def push_subscribe():
+    """Enregistre cet appareil pour recevoir les notifications."""
+    try:
+        if not _push_configure():
+            return jsonify({"message": "Les notifications ne sont pas encore activées sur ce service."}), 503
+        data = request.get_json(silent=True) or {}
+        endpoint = data.get('endpoint')
+        cles = data.get('keys') if isinstance(data.get('keys'), dict) else {}
+        p256dh, auth = cles.get('p256dh'), cles.get('auth')
+        hote = None
+        if isinstance(endpoint, str) and len(endpoint) <= 1000 and endpoint.startswith('https://'):
+            try:
+                from urllib.parse import urlsplit
+                morceaux = urlsplit(endpoint)
+                hote = (morceaux.hostname or '').lower() if not morceaux.username and not morceaux.password and morceaux.port in (None, 443) else None
+            except ValueError:
+                hote = None
+        if not hote or not PUSH_HOTES.match(hote):
+            return jsonify({"message": "Appareil non pris en charge."}), 400
+        octets_p, octets_a = _base64url_octets(p256dh), _base64url_octets(auth)
+        if not octets_p or len(octets_p) != 65 or not octets_a or len(octets_a) != 16:
+            return jsonify({"message": "Clés de notification invalides."}), 400
+        with _base() as (conn, cur):
+            cur.execute("SELECT COUNT(*) AS n FROM push_subscriptions WHERE user_id = %s AND endpoint <> %s",
+                        (request.user_id, endpoint))
+            if cur.fetchone()['n'] >= PUSH_MAX_PAR_UTILISATEUR:
+                return jsonify({"message": f"{PUSH_MAX_PAR_UTILISATEUR} appareils au maximum par compte."}), 400
+            cur.execute("""INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth)
+                           VALUES (%s, %s, %s, %s)
+                           ON CONFLICT (endpoint) DO UPDATE SET user_id = EXCLUDED.user_id,
+                               p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth""",
+                        (request.user_id, endpoint, p256dh, auth))
+            conn.commit()
+        return jsonify({"subscribed": True}), 201
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/push/unsubscribe', methods=['POST'])
+@token_required
+def push_unsubscribe():
+    """Retire cet appareil (celui du compte connecté seulement)."""
+    try:
+        endpoint = (request.get_json(silent=True) or {}).get('endpoint')
+        if not isinstance(endpoint, str) or len(endpoint) > 1000:
+            return jsonify({"message": "Appareil inconnu."}), 400
+        with _base() as (conn, cur):
+            cur.execute("DELETE FROM push_subscriptions WHERE endpoint = %s AND user_id = %s", (endpoint, request.user_id))
+            conn.commit()
+        return jsonify({"subscribed": False}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/push/test', methods=['POST'])
+@limiter.limit("10 per hour", key_func=_cle_utilisateur)
+@token_required
+def push_test():
+    """Envoie une notification d'essai aux appareils du compte connecté."""
+    try:
+        if not _push_configure():
+            return jsonify({"message": "Les notifications ne sont pas encore activées sur ce service."}), 503
+        n = _pousser([request.user_id], "Zelyro", "Les notifications fonctionnent sur cet appareil.",
+                     f"{_site_url() or ''}/dashboard.html", tag="test")
+        if n == 0:
+            return jsonify({"sent": 0, "message": "Aucun appareil n'a reçu la notification. Activez-la d'abord sur cet appareil."}), 200
+        return jsonify({"sent": n, "message": f"Notification envoyée à {n} appareil{'s' if n > 1 else ''}."}), 200
+    except Exception:
+        return erreur_interne()
+
+
+# ===== ÉTAPE 2 : RESPONSABLES, E-MAIL DU MATIN, PROSPECTS À RÉVEILLER, COMMISSION =====
+
+def _nom_membre(prenom, email):
+    """Prénom du collaborateur ou, à défaut, la partie de son adresse avant l'@."""
+    prenom = (prenom or '').strip()
+    if prenom:
+        return prenom
+    return (email or '').split('@')[0].strip().capitalize() or 'Collaborateur'
+
+
+def _membres_agence(cur, agence_id):
+    """Le directeur et les collaborateurs actifs : ceux à qui on peut confier un prospect."""
+    cur.execute("""SELECT id, email, first_name, COALESCE(role, 'admin') AS role FROM users
+                   WHERE id = %s OR (agency_owner_id = %s AND is_active)
+                   ORDER BY (id = %s) DESC, created_at, id""", (agence_id, agence_id, agence_id))
+    return [{"id": m['id'], "name": _nom_membre(m['first_name'], m['email']), "role": m['role'],
+             "is_me": m['id'] == request.user_id} for m in cur.fetchall()]
+
+
+@app.route('/api/v1/team/members', methods=['GET'])
+@token_required
+def team_members():
+    """Qui peut être responsable d'un prospect (visible par tous les comptes de l'agence)."""
+    try:
+        with _base() as (conn, cur):
+            return jsonify(_membres_agence(cur, request.agency_id)), 200
+    except Exception:
+        return erreur_interne()
+
+
+def _prevenir_collaborateur(cible_id, lead_id, sujet, titre, paragraphes):
+    """Prévient un collaborateur précis (un prospect vient de lui être confié, ou
+    son prospect demande une visite). Respecte le réglage d'alertes de l'agence.
+    Appelée en tâche de fond."""
+    try:
+        site = _site_url()
+        if not site or not _envoi_configure():
+            return
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("""SELECT u.email, a.alerts_enabled FROM users u
+                           JOIN users a ON a.id = COALESCE(u.agency_owner_id, u.id)
+                           WHERE u.id = %s AND u.is_active""", (cible_id,))
+            cible = cur.fetchone()
+        if not cible or not cible['alerts_enabled']:
+            return
+        texte, html = _gabarit_email(
+            titre, list(paragraphes) + ["Vous pouvez désactiver ces e-mails depuis la page « Mon compte »."],
+            ("Ouvrir la fiche du prospect", f"{site}/leads-profile.html?id={lead_id}"))
+        _envoyer_email(cible['email'], sujet, texte, html)
+    except Exception:
+        app.logger.exception("Alerte de collaborateur impossible")
+
+
+@app.route('/api/v1/leads/<int:lead_id>/assign', methods=['PUT'])
+@limiter.limit("200 per hour", key_func=_cle_utilisateur)
+@token_required
+def assign_lead(lead_id):
+    """Confier un prospect à un collaborateur (ou le laisser sans responsable
+    avec user_id null). Le changement est inscrit dans l'historique et le
+    collaborateur concerné est prévenu par e-mail."""
+    try:
+        data = request.get_json(silent=True) or {}
+        if 'user_id' not in data:
+            return jsonify({"message": "Indiquez le responsable (user_id), ou null pour n'en avoir aucun"}), 400
+        cible = data['user_id']
+        if cible is not None and (not isinstance(cible, int) or isinstance(cible, bool)):
+            return jsonify({"message": "Responsable invalide"}), 400
+        with _base() as (conn, cur):
+            cur.execute("SELECT name, assigned_to FROM leads WHERE id = %s AND user_id = %s FOR UPDATE",
+                        (lead_id, request.agency_id))
+            lead = cur.fetchone()
+            if not lead:
+                return jsonify({"message": "Lead not found"}), 404
+            nom_cible = None
+            if cible is not None:
+                membres = {m['id']: m['name'] for m in _membres_agence(cur, request.agency_id)}
+                if cible not in membres:
+                    return jsonify({"message": "Ce collaborateur ne fait pas partie de l'agence"}), 400
+                nom_cible = membres[cible]
+            if lead['assigned_to'] != cible:
+                cur.execute("UPDATE leads SET assigned_to = %s WHERE id = %s AND user_id = %s",
+                            (cible, lead_id, request.agency_id))
+                cur.execute("""INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
+                               VALUES (%s, %s, 'attrib', %s, %s)""",
+                            (lead_id, request.user_id,
+                             f"Responsable : {nom_cible}" if nom_cible else "Responsable retiré", _maintenant()))
+            conn.commit()
+        if cible is not None and cible != request.user_id and lead['assigned_to'] != cible:
+            _lancer_en_arriere_plan(
+                _prevenir_collaborateur, cible, lead_id, f"Un prospect vous est confié : {lead['name'][:60]}",
+                "Nouveau prospect à suivre", [f"« {lead['name']} » vous a été confié. Pensez à le contacter rapidement."])
+            _lancer_en_arriere_plan(
+                _pousser, [cible], "Un prospect vous est confié", lead['name'],
+                f"{_site_url()}/leads-profile.html?id={lead_id}", f"assign-{lead_id}")
+        return jsonify({"assigned_to": cible, "name": nom_cible}), 200
+    except Exception:
+        return erreur_interne()
+
+
+# --- Prospects à réveiller ---------------------------------------------------
+
+DORMANTS_JOURS = 30
+
+
+def _prospects_dormants(cur, agence_id, jours):
+    """Les prospects encore ouverts sans aucune nouvelle (note, statut, e-mail
+    envoyé, action du prospect) depuis au moins `jours` jours et pour lesquels
+    un bien du catalogue correspond aujourd'hui, jamais proposé à ce prospect."""
+    cur.execute("SELECT NOW()::timestamp AS maintenant")
+    maintenant = cur.fetchone()['maintenant']
+    cur.execute("""
+        SELECT l.id, l.name, l.email, l.phone, l.budget, l.location, l.property_type, l.surface_min, l.activite,
+               l.financing_status, l.purchase_urgency, l.status, l.transaction, l.revenus, l.garants,
+               l.situation_pro, l.meuble_souhaite, l.assigned_to,
+               GREATEST(l.created_at,
+                        COALESCE(l.status_changed_at, l.created_at),
+                        COALESCE((SELECT MAX(n.created_at) FROM lead_notes n WHERE n.lead_id = l.id), l.created_at),
+                        COALESCE((SELECT MAX(m.sent_at) FROM lead_mails m WHERE m.lead_id = l.id), l.created_at),
+                        COALESCE((SELECT MAX(e.created_at) FROM lead_events e WHERE e.lead_id = l.id), l.created_at)
+               ) AS derniere_activite
+        FROM leads l
+        WHERE l.user_id = %s AND COALESCE(l.status, 'nouveau') NOT IN ('signe', 'perdu')
+    """, (agence_id,))
+    limite = maintenant - timedelta(days=jours)
+    prospects = [l for l in cur.fetchall() if l['derniere_activite'] <= limite and _prospect_complet(l)]
+    if not prospects:
+        return []
+    _charger_engagement(cur, agence_id, prospects)
+    cur.execute("""SELECT id, title, address, price, rooms, size, property_type,
+                          activites_autorisees, extraction_air, transaction, meuble
+                   FROM properties WHERE user_id = %s""", (agence_id,))
+    biens = cur.fetchall()
+    cur.execute("""SELECT m.lead_id, m.property_ids FROM lead_mails m JOIN leads l ON l.id = m.lead_id
+                   WHERE l.user_id = %s""", (agence_id,))
+    deja = {}
+    for m in cur.fetchall():
+        deja.setdefault(m['lead_id'], set()).update(m['property_ids'] or [])
+    resultat = []
+    for l in prospects:
+        candidats = []
+        for b in biens:
+            if b['id'] in deja.get(l['id'], ()):
+                continue
+            score, raisons = _detail_score(l, b)
+            if score >= PROPOSITION_SCORE_MIN:
+                candidats.append({"property_id": b['id'], "title": b['title'], "price": b['price'],
+                                  "transaction": b['transaction'], "score": score, "reasons": raisons})
+        if not candidats:
+            continue
+        candidats.sort(key=lambda c: -c['score'])
+        points = points_qualite(l)
+        resultat.append({
+            "lead": {"id": l['id'], "name": l['name'], "phone": l['phone'], "email": l['email'],
+                     "budget": l['budget'], "location": l['location'], "transaction": l['transaction']},
+            "assigned_to": l['assigned_to'],
+            "days_inactive": max(0, (maintenant - l['derniere_activite']).days),
+            "last_activity": _iso(l['derniere_activite']),
+            "lead_quality": _niveau_qualite(points), "quality_score": points,
+            "biens": candidats[:3],
+        })
+    ordre = {'hot': 0, 'warm': 1, 'cold': 2}
+    resultat.sort(key=lambda x: (ordre[x['lead_quality']], -x['biens'][0]['score'], -x['days_inactive']))
+    return resultat
+
+
+@app.route('/api/v1/dormants', methods=['GET'])
+@token_required
+def get_dormants():
+    """Les prospects à réveiller : sans nouvelles depuis un moment, alors que
+    le catalogue contient aujourd'hui un bien qui leur correspond."""
+    try:
+        jours = request.args.get('days', type=int) or DORMANTS_JOURS
+        jours = max(7, min(365, jours))
+        with _base() as (conn, cur):
+            dormants = _prospects_dormants(cur, request.agency_id, jours)
+        return jsonify({"days": jours, "total": len(dormants), "dormants": dormants[:30]}), 200
+    except Exception:
+        return erreur_interne()
+
+
+# --- Potentiel de commission -------------------------------------------------
+
+COMMISSION_TAUX_DEFAUT = 4.0
+COMMISSION_TAUX_MAX = 15.0
+
+
+def _potentiel_commission(prospects, taux):
+    """Ce que représenterait la commission si les prospects chauds, puis tièdes,
+    achetaient à leur budget maximum. Un ordre de grandeur pour piloter, pas
+    une prévision : seuls les achats comptent (la commission d'une location
+    est d'une autre nature) et les prospects sans budget sont ignorés."""
+    groupes = {'hot': {"count": 0, "budget": 0}, 'warm': {"count": 0, "budget": 0}}
+    for p in prospects:
+        if _est_location(p) or (p.get('status') or 'nouveau') in STATUTS_CLOS or not p.get('budget'):
+            continue
+        niveau = derive_lead_quality(p)
+        if niveau in groupes:
+            groupes[niveau]["count"] += 1
+            groupes[niveau]["budget"] += int(p['budget'])
+    for g in groupes.values():
+        g["commission"] = int(round(g["budget"] * taux / 100))
+    return {"rate": taux, "hot": groupes['hot'], "warm": groupes['warm'],
+            "total": groupes['hot']["commission"] + groupes['warm']["commission"]}
+
+
+@app.route('/api/v1/commission-rate', methods=['PUT'])
+@token_required
+@agency_admin_required
+def set_commission_rate():
+    """Le taux de commission moyen de l'agence, pour le potentiel du tableau de bord."""
+    try:
+        data = request.get_json(silent=True) or {}
+        taux = data.get('rate')
+        if isinstance(taux, bool) or not isinstance(taux, (int, float)) or not (0.1 <= taux <= COMMISSION_TAUX_MAX):
+            return jsonify({"message": f"Indiquez un taux entre 0,1 et {COMMISSION_TAUX_MAX:g} %"}), 400
+        taux = round(float(taux), 1)
+        with _base() as (conn, cur):
+            cur.execute("UPDATE users SET commission_rate = %s WHERE id = %s", (taux, request.user_id))
+            conn.commit()
+        return jsonify({"rate": taux}), 200
+    except Exception:
+        return erreur_interne()
+
+
+# --- E-mail du matin ---------------------------------------------------------
+
+DIGEST_LIGNES_MAX = 6
+
+
+def _tronquer(lignes, maxi=DIGEST_LIGNES_MAX):
+    if len(lignes) <= maxi:
+        return lignes, 0
+    return lignes[:maxi], len(lignes) - maxi
+
+
+def _construire_digest(cur, agence_id, user_id, role):
+    """Ce qu'il y a à faire ce matin pour un utilisateur : le directeur voit
+    toute l'agence, un collaborateur ses prospects et ceux sans responsable.
+    Renvoie None s'il n'y a rien à signaler."""
+    cur.execute("SELECT NOW()::timestamp AS maintenant")
+    maintenant = cur.fetchone()['maintenant']
+    aujourdhui = _aujourdhui()
+    cur.execute("""
+        SELECT l.id, l.name, l.email, l.phone, l.budget, l.location, l.property_type, l.status,
+               l.financing_status, l.purchase_urgency, l.transaction, l.revenus, l.garants, l.situation_pro,
+               l.created_at, l.assigned_to, u.first_name AS resp_prenom, u.email AS resp_email
+        FROM leads l LEFT JOIN users u ON u.id = l.assigned_to WHERE l.user_id = %s
+    """, (agence_id,))
+    leads = [l for l in cur.fetchall() if role == 'admin' or l['assigned_to'] in (None, user_id)]
+    if not leads:
+        return None
+    _charger_engagement(cur, agence_id, leads)
+    ids = [l['id'] for l in leads]
+    ouverts = [l for l in leads if (l['status'] or 'nouveau') not in STATUTS_CLOS]
+    for l in leads:
+        l['_points'] = points_qualite(l)
+
+    sections, concernes = [], set()
+
+    chauds = sorted((l for l in ouverts if _niveau_qualite(l['_points']) == 'hot'), key=lambda l: -l['_points'])
+    lignes = []
+    for l in chauds:
+        detail = [x for x in (l['phone'], l['location']) if x]
+        lignes.append(f"{l['name']} — {l['_points']}/100" + (f" — {' · '.join(detail)}" if detail else ""))
+    if lignes:
+        concernes.update(l['id'] for l in chauds)
+        visibles, reste = _tronquer(lignes)
+        sections.append({"titre": "Prospects chauds à appeler", "lignes": visibles, "reste": reste})
+
+    cur.execute("""SELECT r.lead_id, r.due_date, r.label FROM lead_reminders r
+                   WHERE r.lead_id = ANY(%s) AND r.done_at IS NULL AND r.due_date <= %s
+                   ORDER BY r.due_date, r.id""", (ids, aujourdhui))
+    rappels = cur.fetchall()
+    noms = {l['id']: l['name'] for l in leads}
+    lignes = [f"{'En retard' if r['due_date'] < aujourdhui else 'Aujourd’hui'} — {r['label']} ({noms[r['lead_id']]})"
+              for r in rappels]
+    if lignes:
+        concernes.update(r['lead_id'] for r in rappels)
+        visibles, reste = _tronquer(lignes)
+        sections.append({"titre": "Relances à faire", "lignes": visibles, "reste": reste})
+
+    cur.execute("""SELECT e.lead_id, e.kind, e.detail FROM lead_events e
+                   WHERE e.user_id = %s AND e.lead_id = ANY(%s) AND e.created_at > %s
+                   ORDER BY e.created_at DESC, e.id DESC""", (agence_id, ids, maintenant - timedelta(hours=24)))
+    vus, lignes, ev_leads = set(), [], []
+    for e in cur.fetchall():
+        if (e['lead_id'], e['kind']) in vus:
+            continue
+        vus.add((e['lead_id'], e['kind']))
+        lignes.append(f"{noms[e['lead_id']]} {_libelle_evenement(e['kind'], e['detail'])}")
+        ev_leads.append(e['lead_id'])
+    if lignes:
+        concernes.update(ev_leads)
+        visibles, reste = _tronquer(lignes)
+        sections.append({"titre": "Ce que vos prospects ont fait depuis hier", "lignes": visibles, "reste": reste})
+
+    sans_suite = sorted((l for l in leads if (l['status'] or 'nouveau') == 'nouveau' and l['created_at']
+                         and l['created_at'] < maintenant - timedelta(hours=UNTREATED_HEURES)),
+                        key=lambda l: l['created_at'])
+    lignes = []
+    for l in sans_suite:
+        heures = int((maintenant - l['created_at']).total_seconds() // 3600)
+        age = f"{heures // 24} j" if heures >= 48 else f"{heures} h"
+        resp = _nom_membre(l['resp_prenom'], l['resp_email']) if l['assigned_to'] else "sans responsable"
+        lignes.append(f"{l['name']} — reçu il y a {age}" + (f" — {resp}" if role == 'admin' else ""))
+    if lignes:
+        concernes.update(l['id'] for l in sans_suite)
+        visibles, reste = _tronquer(lignes)
+        sections.append({"titre": f"Sans suite depuis plus de {UNTREATED_HEURES} h", "lignes": visibles, "reste": reste})
+
+    if not sections:
+        return None
+    return {"sections": sections, "nb": len(concernes)}
+
+
+def _gabarit_digest(prenom, sections, site):
+    """E-mail du matin, en texte et en HTML (listes simples, sobres)."""
+    salut = f"Bonjour {prenom}," if prenom else "Bonjour,"
+    texte = [salut, "Voici ce qui mérite votre attention ce matin."]
+    corps = (f'<p style="margin:0 0 16px;line-height:1.6">{_html.escape(salut)}</p>'
+             '<p style="margin:0 0 8px;line-height:1.6">Voici ce qui mérite votre attention ce matin.</p>')
+    for s in sections:
+        texte.append(s["titre"] + "\n" + "\n".join("- " + x for x in s['lignes'])
+                     + (f"\n… et {s['reste']} autre(s)" if s['reste'] else ""))
+        items = "".join(f'<li style="margin:0 0 6px">{_html.escape(x)}</li>' for x in s['lignes'])
+        plus = f'<li style="margin:0;color:#6A7168">… et {s["reste"]} autre(s)</li>' if s['reste'] else ''
+        corps += (f'<h4 style="margin:22px 0 8px;font-size:14px;color:#3E4F43">{_html.escape(s["titre"])}</h4>'
+                  f'<ul style="margin:0;padding-left:20px;line-height:1.5;font-size:14px">{items}{plus}</ul>')
+    lien = f"{site}/dashboard.html"
+    pied = "Vous ne souhaitez plus recevoir cet e-mail ? Décochez « E-mail du matin » dans Mon compte."
+    texte.append(f"Ouvrir mon tableau de bord : {lien}")
+    texte.append(pied + f" ({site}/compte.html)")
+    corps += (f'<p style="margin:24px 0"><a href="{_html.escape(lien)}" style="background:#4F6353;color:#ffffff;'
+              'text-decoration:none;padding:12px 22px;border-radius:6px;display:inline-block">'
+              'Ouvrir mon tableau de bord</a></p>'
+              f'<p style="margin:0;color:#6A7168;font-size:13px;line-height:1.5">{_html.escape(pied)}</p>')
+    html = ('<div style="font-family:Arial,Helvetica,sans-serif;color:#1F2A24;max-width:560px;margin:0 auto;padding:24px">'
+            '<h2 style="font-family:Georgia,serif;font-weight:500;letter-spacing:.08em">ZELYRO</h2>' + corps + '</div>')
+    return "\n\n".join(texte) + "\n\nZelyro", html
+
+
+def _envoyer_digest(cur, utilisateur):
+    """Construit et envoie l'e-mail du matin d'un utilisateur. Renvoie True s'il
+    est parti, False s'il n'y avait rien à signaler ou si l'envoi a échoué."""
+    digest = _construire_digest(cur, utilisateur['agence_id'], utilisateur['id'], utilisateur['role'])
+    if not digest:
+        return False
+    n = digest['nb']
+    sujet = f"Zelyro — {n} prospect{'s' if n > 1 else ''} à suivre ce matin"
+    texte, html = _gabarit_digest(_nom_membre(utilisateur['first_name'], '') if utilisateur['first_name'] else '',
+                                  digest['sections'], _site_url())
+    return bool(_envoyer_email(utilisateur['email'], sujet, texte, html))
+
+
+@app.route('/internal/digest/send', methods=['POST'])
+def digest_send_all():
+    """Appelé chaque matin par la tâche planifiée (même clé que la
+    synchronisation Gmail). Un utilisateur ne reçoit au plus qu'un e-mail par
+    jour, et seulement s'il y a quelque chose à traiter."""
+    cle = (os.getenv("CRON_SECRET") or "").strip()
+    if not cle or not secrets.compare_digest(request.headers.get('X-Cron-Key', ''), cle):
+        return jsonify({"message": "Not found"}), 404
+    if not _envoi_configure():
+        return jsonify({"message": "Envoi d'e-mails non configuré"}), 503
+    _assurer_schema()
+    aujourdhui = _aujourdhui()
+    with _base() as (conn, cur):
+        cur.execute("""
+            SELECT u.id, u.email, u.first_name, COALESCE(u.role, 'admin') AS role,
+                   COALESCE(u.agency_owner_id, u.id) AS agence_id
+            FROM users u LEFT JOIN users a ON a.id = u.agency_owner_id
+            WHERE u.is_active AND u.digest_enabled AND COALESCE(a.is_active, TRUE)
+              AND (u.digest_sent_on IS NULL OR u.digest_sent_on < %s)
+            ORDER BY u.id
+        """, (aujourdhui,))
+        utilisateurs = cur.fetchall()
+    envoyes = 0
+    for u in utilisateurs:
+        try:
+            with _base() as (conn, cur):
+                # On réserve la journée avant d'envoyer : deux appels simultanés
+                # n'enverraient jamais deux fois.
+                cur.execute("""UPDATE users SET digest_sent_on = %s
+                               WHERE id = %s AND (digest_sent_on IS NULL OR digest_sent_on < %s) RETURNING id""",
+                            (aujourdhui, u['id'], aujourdhui))
+                if not cur.fetchone():
+                    conn.rollback()
+                    continue
+                conn.commit()
+                if _envoyer_digest(cur, u):
+                    envoyes += 1
+                else:
+                    cur.execute("UPDATE users SET digest_sent_on = NULL WHERE id = %s", (u['id'],))
+                    conn.commit()
+        except Exception:
+            app.logger.exception("E-mail du matin : échec pour l'utilisateur %s", u['id'])
+    return jsonify({"utilisateurs": len(utilisateurs), "envoyes": envoyes}), 200
+
+
+@app.route('/api/v1/digest/preview', methods=['POST'])
+@limiter.limit("10 per hour", key_func=_cle_utilisateur)
+@token_required
+def digest_preview():
+    """Envoie dès maintenant l'e-mail du matin à l'utilisateur connecté, pour
+    voir à quoi il ressemble sans attendre demain."""
+    try:
+        if not _envoi_configure():
+            return jsonify({"message": "L'envoi d'e-mails n'est pas encore configuré sur le serveur."}), 503
+        with _base() as (conn, cur):
+            cur.execute("SELECT email, first_name FROM users WHERE id = %s", (request.user_id,))
+            moi = cur.fetchone()
+            envoye = _envoyer_digest(cur, {"id": request.user_id, "email": moi['email'],
+                                           "first_name": moi['first_name'], "role": request.role,
+                                           "agence_id": request.agency_id})
+        if envoye:
+            return jsonify({"sent": True, "message": f"E-mail envoyé à {moi['email']}."}), 200
+        return jsonify({"sent": False, "message": "Rien à signaler pour le moment : l'e-mail du matin "
+                        "n'est envoyé que s'il y a quelque chose à traiter."}), 200
     except Exception:
         return erreur_interne()
 
@@ -5658,6 +6564,13 @@ def email_inbound():
 if __name__ == '__main__':
     if sys.argv[1:2] == ['init-db']:
         init_database(demo='--demo' in sys.argv)
+    elif sys.argv[1:2] == ['vapid-keys']:
+        cle_publique, cle_privee = _generer_cles_vapid()
+        print("Variables à ajouter chez l'hébergeur du serveur (Render) :\n")
+        print(f"VAPID_PUBLIC_KEY={cle_publique}")
+        print(f"VAPID_PRIVATE_KEY={cle_privee}")
+        print("VAPID_SUBJECT=mailto:contact@zelyro.fr   (une adresse de contact à vous)\n")
+        print("La clé privée est un secret : ne la partagez pas et ne la mettez pas dans le code.")
     else:
         print(f"🚀 Backend running on http://localhost:{PORT}")
         app.run(host='0.0.0.0', port=PORT, debug=False)
