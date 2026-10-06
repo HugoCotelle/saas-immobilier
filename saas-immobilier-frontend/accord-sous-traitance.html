@@ -22,7 +22,7 @@
         <a class="logo" href="/" aria-label="Zelyro, retour à l’accueil">ZELYRO</a>
         <nav class="site-nav" id="site-nav" aria-label="Navigation principale">
             <a href="/#fonctionnalites">Fonctionnalités</a>
-            <a href="/#fonctionnement">Comment ça marche</a>
+            <a href="/#portails">Comment ça marche</a>
             <a href="/#securite">Sécurité</a>
             <a href="/#tarifs">Tarifs</a>
             <a href="/#faq">FAQ</a>
@@ -67,11 +67,11 @@
         <table>
             <thead><tr><th>Élément</th><th>Description</th></tr></thead>
             <tbody>
-                <tr><td data-label="Élément">Objet</td><td data-label="Description">Hébergement, stockage, qualification automatique, rapprochement avec les biens, suivi des Prospects de l’Agence et de leur activité sur les liens que l’Agence leur envoie, dans le Service</td></tr>
+                <tr><td data-label="Élément">Objet</td><td data-label="Description">Hébergement, stockage, qualification automatique, rapprochement avec les biens, suivi des Prospects de l’Agence et de leur activité sur les liens que l’Agence leur envoie, et réception des demandes de contact issues de ses e-mails de portails (SeLoger, Leboncoin), dans le Service</td></tr>
                 <tr><td data-label="Élément">Nature des opérations</td><td data-label="Description">Collecte, enregistrement, structuration, conservation, consultation, modification, extraction, rapprochement, limitation et effacement</td></tr>
                 <tr><td data-label="Élément">Finalité</td><td data-label="Description">Fournir à l’Agence les fonctionnalités du Service décrites à l’article 3 des CGU</td></tr>
                 <tr><td data-label="Élément">Catégories de personnes concernées</td><td data-label="Description">Les Prospects de l’Agence, les personnes que l’Agence associe le cas échéant à un bien ou à un dossier et, à titre accessoire, les collaborateurs de l’Agence désignés comme responsables d’un Prospect</td></tr>
-                <tr><td data-label="Élément">Catégories de données</td><td data-label="Description">Identité et coordonnées (nom, e-mail, téléphone), données relatives au projet immobilier (budget, secteur, type de bien recherché), situation de financement et échéance du projet, notes de suivi rédigées par l’Agence, statut et historique dans le pipeline, collaborateur responsable, événements d’activité (ouverture du formulaire ou de la sélection de biens, remplissage du formulaire, demande de visite, avec date et heure, sans adresse IP ni information sur l’appareil). À l’exclusion, sauf saisie non conforme aux CGU par l’Agence, de toute donnée sensible au sens de l’article 9 du RGPD</td></tr>
+                <tr><td data-label="Élément">Catégories de données</td><td data-label="Description">Identité et coordonnées (nom, e-mail, téléphone), données relatives au projet immobilier (budget, secteur, type de bien recherché), situation de financement et échéance du projet, notes de suivi rédigées par l’Agence, statut et historique dans le pipeline, collaborateur responsable, contenu des demandes de contact reçues des portails (e-mails SeLoger et Leboncoin), événements d’activité (ouverture du formulaire ou de la sélection de biens, remplissage du formulaire, demande de visite, avec date et heure, sans adresse IP ni information sur l’appareil). À l’exclusion, sauf saisie non conforme aux CGU par l’Agence, de toute donnée sensible au sens de l’article 9 du RGPD</td></tr>
                 <tr><td data-label="Élément">Durée du traitement</td><td data-label="Description">Celle prévue à l’article 2 du présent DPA</td></tr>
             </tbody>
         </table>
@@ -99,8 +99,9 @@
             <tr><td data-label="Sous-traitant">Vercel Inc.</td><td data-label="Rôle">Hébergement de l’interface web</td><td data-label="Localisation">États-Unis (EU-U.S. Data Privacy Framework)</td></tr>
             <tr><td data-label="Sous-traitant">Render Services, Inc.</td><td data-label="Rôle">Hébergement de l’API et de la base de données</td><td data-label="Localisation">Union européenne — Francfort, Allemagne (région Render « EU Central »)</td></tr>
             <tr><td data-label="Sous-traitant">Sendinblue SAS (Brevo)</td><td data-label="Rôle">Envoi d’e-mails (notifications, alertes, e-mail du matin, messages adressés aux Prospects au nom de l’Agence)</td><td data-label="Localisation">France</td></tr>
+            <tr><td data-label="Sous-traitant">Google (API Gmail), si l’Agence connecte sa boîte</td><td data-label="Rôle">Accès, en lecture seule et avec l’autorisation de l’Agence, aux e-mails de SeLoger et de Leboncoin</td><td data-label="Localisation">États-Unis ou selon l’infrastructure de Google</td></tr>
             <tr><td data-label="Sous-traitant">Services de notification des navigateurs et systèmes d’exploitation (Google, Apple, Mozilla, Microsoft selon l’appareil)</td><td data-label="Rôle">Acheminement de notifications chiffrées vers l’appareil des Utilisateurs de l’Agence qui les ont activées (le contenu ne peut pas être lu par ces services)</td><td data-label="Localisation">États-Unis ou selon le fournisseur de l’appareil</td></tr>
-            <tr><td data-label="Sous-traitant">Anthropic</td><td data-label="Rôle">Analyse du texte d’un message pour en extraire des critères, si cette fonction est activée par l’Agence</td><td data-label="Localisation">États-Unis</td></tr>
+            <tr><td data-label="Sous-traitant">Anthropic</td><td data-label="Rôle">Analyse du texte d’un message (texte collé ou e-mail de portail) pour en extraire des critères, si cette fonction est activée par l’Agence</td><td data-label="Localisation">États-Unis</td></tr>
         </tbody>
     </table>
     <p>Cette liste correspond à celle publiée dans la <a href="/confidentialite.html">politique de confidentialité</a>, qui fait foi en cas de mise à jour entre deux révisions du présent DPA. Zelyro impose contractuellement à chacun de ces sous-traitants des obligations de protection des données équivalentes à celles prévues par le présent DPA.</p>
@@ -164,7 +165,7 @@
                 <h2>Produit</h2>
                 <ul>
                     <li><a href="/#fonctionnalites">Fonctionnalités</a></li>
-                    <li><a href="/#fonctionnement">Comment ça marche</a></li>
+                    <li><a href="/#portails">Comment ça marche</a></li>
                     <li><a href="/#securite">Sécurité</a></li>
                     <li><a href="/#tarifs">Tarifs</a></li>
                     <li><a href="/#faq">FAQ</a></li>
