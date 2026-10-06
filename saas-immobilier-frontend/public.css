@@ -614,3 +614,32 @@ body.pub {
 .simu-seuil p:not(.simu-label) { font-size: 15.5px; line-height: 1.55; color: var(--ink); margin: 0 0 10px; }
 .simu-seuil .simu-note { font-size: 12.5px; color: var(--muted); }
 @media (max-width: 900px) { .simu-grid { grid-template-columns: 1fr; } }
+
+/* ===== Section « Portails d'annonces » ===== */
+.portails { background: var(--surface); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.portails-notes {
+    list-style: none; margin-top: clamp(40px, 5vw, 64px); padding: 0;
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px;
+}
+.portails-notes li { background: var(--bg); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; }
+.portails-notes h3 { font-size: 18px; margin-bottom: 8px; }
+.portails-notes p { font-size: 14.5px; line-height: 1.6; color: var(--ink-2); }
+@media (max-width: 900px) { .portails-notes { grid-template-columns: 1fr; } }
+
+/* Résumé en clair de la section sécurité */
+.deep-summary { list-style: none; margin: 18px 0 22px; padding: 0; display: grid; gap: 10px; }
+.deep-summary li { display: flex; gap: 12px; align-items: flex-start; font-size: 15px; line-height: 1.55; color: var(--ink-2); }
+.deep-summary li::before {
+    content: ""; flex: none; margin-top: 8px; width: 6px; height: 6px; background: var(--sage-600);
+    border-radius: 1px; transform: rotate(45deg);
+}
+
+/* Définition d'une « extraction » sous la grille tarifaire */
+.pricing-extraction { max-width: 760px; margin: 28px auto 0; text-align: center; font-size: 14.5px; line-height: 1.6; color: var(--ink-2); }
+.pricing-extraction strong { color: var(--ink); font-weight: 600; }
+
+
+/* ---------- Démonstration vidéo ---------- */
+.demo { background: var(--bg); }
+.demo-frame { margin: 0 auto; max-width: 960px; border: 1px solid var(--line-strong); border-radius: 16px; overflow: hidden; background: var(--surface-2); box-shadow: 0 18px 50px rgba(35, 43, 38, .10); }
+.demo-frame video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: #F6F2EA; }

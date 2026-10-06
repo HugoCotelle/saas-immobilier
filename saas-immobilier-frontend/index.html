@@ -126,6 +126,7 @@
     <div class="header-content">
         <a class="logo" href="/" aria-label="Zelyro, retour à l’accueil">ZELYRO</a>
         <nav class="site-nav" id="site-nav" aria-label="Navigation principale">
+            <a href="#demo">Démo vidéo</a>
             <a href="#fonctionnalites">Fonctionnalités</a>
             <a href="#fonctionnement">Comment ça marche</a>
             <a href="#securite">Sécurité</a>
@@ -156,6 +157,7 @@
             </div>
             <ul class="hero-points">
                 <li>Trois niveaux de qualification, calculés selon des règles lisibles.</li>
+                <li>Vos demandes SeLoger et Leboncoin arrivent toutes seules, déjà qualifiées.</li>
                 <li>Un score de correspondance sur 100 entre chaque prospect et vos biens, avec ses raisons.</li>
                 <li>Chaque agence ne voit que ses propres données.</li>
             </ul>
@@ -255,6 +257,23 @@
     </div>
 </section>
 
+<!-- ============ DÉMONSTRATION VIDÉO ============ -->
+<section class="section demo" id="demo" aria-labelledby="titre-demo">
+    <div class="wrap">
+        <div class="section-head">
+            <p class="eyebrow">En une minute</p>
+            <h2 id="titre-demo">Des demandes éparpillées à la visite programmée.</h2>
+            <p>Tout ce que Zelyro fait pour votre agence, en moins d’une minute. Vidéo sans son ; les noms et les chiffres sont fictifs.</p>
+        </div>
+        <figure class="demo-frame">
+            <video id="demo-video" controls preload="none" playsinline poster="/demo/zelyro-demo-poster.jpg" aria-label="Zelyro en une minute : demandes rassemblées et classées, fiche remplie depuis un mail de portail, biens proposés, message envoyé, prospect prévenu. Vidéo sans son.">
+                <source src="/demo/zelyro-demo.mp4" type="video/mp4">
+                Votre navigateur ne lit pas cette vidéo. <a href="/demo/zelyro-demo.mp4">Télécharger la vidéo</a>.
+            </video>
+        </figure>
+    </div>
+</section>
+
 <!-- ============ FONCTIONNALITÉS ============ -->
 <section class="section" id="fonctionnalites" aria-labelledby="titre-fonctions">
     <div class="wrap">
@@ -340,10 +359,11 @@
 
             <article class="feat w2">
                 <div class="feat-icon"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-inbox"/></svg></div>
-                <h3>Import et formulaire de contact</h3>
-                <p>Importez vos prospects existants depuis un fichier Excel ou CSV. Chaque agence dispose aussi d’un formulaire de contact hébergé : les demandes arrivent directement dans l’outil.</p>
+                <h3>Portails, import et formulaire de contact</h3>
+                <p>Les demandes de contact SeLoger et Leboncoin sont détectées dans votre boîte Gmail et deviennent des prospects. Importez aussi vos prospects existants depuis un fichier Excel ou CSV : chaque agence dispose enfin d’un formulaire de contact hébergé, dont les demandes arrivent directement dans l’outil.</p>
                 <div class="feat-visual">
                     <div class="sources">
+                        <div class="src"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-mail"/></svg><span>Mails SeLoger et Leboncoin</span></div>
                         <div class="src"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-file"/></svg><span><code>prospects.csv</code></span></div>
                         <div class="src"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-form"/></svg><span>Formulaire de contact de l’agence</span></div>
                         <div class="into"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-arrow-down"/></svg>Vos prospects, déjà qualifiés</div>
@@ -380,6 +400,36 @@
     </div>
 </section>
 
+<!-- ============ PORTAILS ============ -->
+<section class="section portails" id="portails" aria-labelledby="titre-portails">
+    <div class="wrap">
+        <div class="section-head">
+            <p class="eyebrow">Portails d’annonces</p>
+            <h2 id="titre-portails">Vos demandes SeLoger et Leboncoin arrivent directement dans Zelyro.</h2>
+            <p>Fini le copier-coller depuis votre messagerie : les mails de demande de contact des portails deviennent des prospects déjà qualifiés, rapprochés de vos biens.</p>
+        </div>
+        <ol class="steps">
+            <li class="step">
+                <h3>Connectez votre boîte Gmail, ou transférez les mails</h3>
+                <p>Autorisez Zelyro à lire, en lecture seule, les notifications de SeLoger et de Leboncoin de votre boîte Gmail. Sans Gmail, transférez simplement ces mails à Zelyro.</p>
+            </li>
+            <li class="step">
+                <h3>Zelyro lit le message et crée le prospect</h3>
+                <p>Nom, coordonnées, bien concerné, budget, projet : les informations utiles sont extraites du texte. Les alertes « nouvelles annonces » et les mails qui ne sont pas une demande de contact sont ignorés.</p>
+            </li>
+            <li class="step">
+                <h3>Il est qualifié, rapproché de vos biens et relancé</h3>
+                <p>Le prospect apparaît dans votre liste avec son niveau et son score. S’il a laissé son adresse e-mail, un message l’invite à préciser sa recherche, et les biens qui lui correspondent vous sont signalés.</p>
+            </li>
+        </ol>
+        <ul class="portails-notes">
+            <li><h3>Lecture seule, uniquement les portails</h3><p>L’accès à votre boîte Gmail ne sert qu’à repérer les messages envoyés par SeLoger et Leboncoin. Vous pouvez le déconnecter à tout moment depuis votre compte.</p></li>
+            <li><h3>Un quota qui ne compte que l’utile</h3><p>Une extraction n’est décomptée que lorsqu’un mail devient un prospect. Les alertes et les mails sans demande de contact ne consomment rien de votre forfait.</p></li>
+            <li><h3>L’IA lit, les règles qualifient</h3><p>L’intelligence artificielle sert uniquement à lire le texte des mails. La qualification et le score restent des règles de calcul lisibles, dont vous voyez les raisons.</p></li>
+        </ul>
+    </div>
+</section>
+
 <!-- ============ COMMENT ÇA MARCHE ============ -->
 <section class="section how" id="fonctionnement" aria-labelledby="titre-etapes">
     <div class="wrap">
@@ -390,7 +440,7 @@
         <ol class="steps">
             <li class="step">
                 <h3>Importez ou recevez vos prospects</h3>
-                <p>Chargez un fichier Excel ou CSV ou laissez vos contacts remplir le formulaire hébergé de votre agence. Ils arrivent directement dans Zelyro.</p>
+                <p>Connectez votre boîte Gmail pour recevoir automatiquement vos demandes SeLoger et Leboncoin, chargez un fichier Excel ou CSV, ou laissez vos contacts remplir le formulaire hébergé de votre agence. Tout arrive directement dans Zelyro.</p>
             </li>
             <li class="step">
                 <h3>Zelyro les qualifie et les rapproche de vos biens</h3>
@@ -468,15 +518,23 @@
         <div class="deep-copy">
             <p class="eyebrow">Pensé pour les agences</p>
             <h2 id="titre-securite">Vos données, séparées de celles des autres agences.</h2>
-            <p>Un fichier de prospects contient des données personnelles : il demande un traitement rigoureux. Voici ce que Zelyro met en place aujourd’hui.</p>
+            <p>Un fichier de prospects contient des données personnelles : il demande un traitement rigoureux. Voici, en clair, où elles sont et ce qui est prévu :</p>
+            <ul class="deep-summary">
+                <li>Vos prospects et vos biens sont stockés dans l’Union européenne, à Francfort (Allemagne).</li>
+                <li>Ils restent à votre agence : Zelyro les traite pour votre compte, ne les utilise que pour faire fonctionner le service et ne les partage pas avec d’autres agences.</li>
+                <li>Un accord de sous-traitance (article 28 du RGPD) est publié et fait partie des conditions générales.</li>
+            </ul>
             <div class="deep-links">
                 <a href="/confidentialite.html">Politique de confidentialité</a>
+                <a href="/accord-sous-traitance.html">Accord de sous-traitance (DPA)</a>
                 <a href="/cgu.html">Conditions générales d’utilisation</a>
             </div>
         </div>
         <ul class="checks">
+            <li><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-db"/></svg><h3>Hébergement dans l’Union européenne</h3><p>Base de données et API chez Render, à Francfort. Les e-mails partent via Brevo, en France. L’interface web est servie par Vercel, qui ne reçoit que des données techniques de connexion.</p></li>
             <li><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg><h3>Un espace par agence</h3><p>Chaque agence ne voit que ses propres prospects, ses biens et ses statistiques.</p></li>
             <li><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-lock"/></svg><h3>Mots de passe protégés</h3><p>Les mots de passe sont stockés sous forme hachée, jamais en clair.</p></li>
+            <li><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-lock"/></svg><h3>Accès Gmail en lecture seule</h3><p>Si vous connectez votre boîte Gmail, l’accès est limité à la lecture, les clés d’accès sont chiffrées dans la base et vous pouvez le retirer à tout moment.</p></li>
             <li><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-mail"/></svg><h3>Réinitialisation par e-mail</h3><p>En cas d’oubli, un lien à durée limitée est envoyé à l’adresse du compte.</p></li>
             <li><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg><h3>Sessions invalidées au changement de mot de passe</h3><p>Lorsque le mot de passe change, les sessions déjà ouvertes cessent de fonctionner.</p></li>
             <li><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-db"/></svg><h3>Des données qui restent à l’agence</h3><p>Les prospects et les biens sont ceux de l’agence, qui peut supprimer un prospect depuis sa fiche.</p></li>
@@ -504,7 +562,7 @@
                     <li><svg viewBox="0 0 12 12" aria-hidden="true" focusable="false"><use href="#ck"/></svg>100 extractions par mois</li>
                 </ul>
                 <a class="btn btn-ghost" href="/login.html#inscription">Créer un compte</a>
-                <p class="price-cta-note">Accès activé par notre équipe sous 24&nbsp;h.</p>
+                <p class="price-cta-note">Activation rapide de votre accès, en général sous un jour ouvré.</p>
             </article>
             <article class="price-card featured">
                 <p class="price-badge">Le plus choisi</p>
@@ -518,7 +576,7 @@
                     <li><svg viewBox="0 0 12 12" aria-hidden="true" focusable="false"><use href="#ck"/></svg>500 extractions par mois</li>
                 </ul>
                 <a class="btn" href="/login.html#inscription">Créer un compte</a>
-                <p class="price-cta-note">Accès activé par notre équipe sous 24&nbsp;h.</p>
+                <p class="price-cta-note">Activation rapide de votre accès, en général sous un jour ouvré.</p>
             </article>
             <article class="price-card">
                 <h3><a class="price-title-link" href="/tarifs.html#reseau">Réseau</a></h3>
@@ -533,6 +591,7 @@
                 <a class="btn btn-ghost" href="mailto:contact@zelyro.fr?subject=Question%20sur%20le%20forfait%20R%C3%A9seau%20Zelyro&amp;body=Bonjour%2C%0D%0A%0D%0AJe%20souhaite%20des%20informations%20sur%20le%20forfait%20R%C3%A9seau.%0D%0A%0D%0AAgence%20%3A%0D%0ANombre%20d%27agences%20%3A%0D%0A%0D%0AMerci.">Nous contacter</a>
             </article>
         </div>
+        <p class="pricing-extraction"><strong>Une extraction</strong>, c’est la lecture automatique d’un message (un mail SeLoger ou Leboncoin, par exemple) pour en tirer un prospect. Elle n’est décomptée que si elle crée un prospect : les alertes et les mails qui ne sont pas une demande de contact ne comptent pas.</p>
         <p class="pricing-compare"><a class="btn btn-ghost btn-sm" href="/tarifs.html">Comparer tous les forfaits en détail →</a></p>
         <p class="pricing-note">Besoin d’un volume différent, ou de plusieurs agences reliées entre elles&nbsp;? <a href="mailto:contact@zelyro.fr?subject=Augmentation%20ou%20personnalisation%20de%20mon%20forfait%20Zelyro&amp;body=Bonjour%2C%0D%0A%0D%0AJe%20souhaite%20%C3%A9changer%20sur%20une%20augmentation%20ou%20une%20personnalisation%20de%20mon%20forfait%20Zelyro.%0D%0A%0D%0AAgence%20%3A%20%0D%0AForfait%20actuel%20%3A%20%0D%0ABesoin%20%3A%20%0D%0A%0D%0AMerci.">Écrivez-nous</a>, nous construisons un forfait sur mesure.</p>
     </div>
@@ -548,15 +607,27 @@
         <div>
             <details>
                 <summary>De quoi Zelyro a-t-il besoin pour démarrer ?</summary>
-                <div class="answer"><p>D’un compte et de vos données de travail : vos biens, saisis dans le portefeuille ou importés depuis un fichier Excel ou CSV, et vos prospects, importés depuis un fichier Excel ou CSV, ou reçus par le formulaire de contact de l’agence. Rien n’est à installer, Zelyro s’utilise depuis un navigateur.</p></div>
+                <div class="answer"><p>D’un compte et de vos données de travail : vos biens, saisis dans le portefeuille ou importés depuis un fichier Excel ou CSV, et vos prospects, reçus de SeLoger et Leboncoin via votre boîte Gmail, importés depuis un fichier Excel ou CSV, ou reçus par le formulaire de contact de l’agence. Rien n’est à installer, Zelyro s’utilise depuis un navigateur.</p></div>
             </details>
             <details>
                 <summary>Puis-je importer mes prospects existants ?</summary>
                 <div class="answer"><p>Oui, par un fichier Excel ou CSV. Chaque prospect importé est qualifié automatiquement à partir des informations présentes dans le fichier : plus le dossier est complet, plus la qualification est précise.</p></div>
             </details>
             <details>
-                <summary>La qualification repose-t-elle sur de l’intelligence artificielle ?</summary>
-                <div class="answer"><p>Non. La qualification des prospects et le score de correspondance reposent sur des règles de calcul explicites, pas sur de l’apprentissage automatique. Vous pouvez donc comprendre pourquoi un prospect est classé à un niveau ou pourquoi un bien obtient un score.</p></div>
+                <summary>Comment mes demandes SeLoger et Leboncoin arrivent-elles dans Zelyro ?</summary>
+                <div class="answer"><p>Soit en connectant votre boîte Gmail (accès en lecture seule, limité aux messages de SeLoger et de Leboncoin), soit en transférant ces mails à Zelyro. Chaque demande de contact devient un prospect, qualifié et rapproché de vos biens. Les alertes « nouvelles annonces » sont ignorées.</p></div>
+            </details>
+            <details>
+                <summary>Qu’est-ce qu’une « extraction » dans les forfaits ?</summary>
+                <div class="answer"><p>C’est la lecture automatique d’un message pour en tirer les informations d’un prospect : un mail de portail ou un texte collé dans l’outil. Elle n’est décomptée que si elle aboutit à un prospect. Les alertes et les mails sans demande de contact ne consomment rien.</p></div>
+            </details>
+            <details>
+                <summary>La qualification repose-t-elle sur de l’intelligence artificielle ?</summary>
+                <div class="answer"><p>La qualification des prospects et le score de correspondance reposent sur des règles de calcul explicites, pas sur de l’apprentissage automatique : vous pouvez comprendre pourquoi un prospect est classé à un niveau ou pourquoi un bien obtient un score. L’intelligence artificielle intervient seulement en amont, pour lire le texte d’un mail de portail ou d’un message collé et en extraire les informations.</p></div>
+            </details>
+            <details>
+                <summary>Où sont hébergées mes données ?</summary>
+                <div class="answer"><p>Votre base de prospects et de biens est hébergée chez Render, à Francfort, en Allemagne. Les e-mails sont envoyés par Brevo, société française. Zelyro agit comme sous-traitant de votre agence pour les données de vos prospects, dans le cadre d’un accord de sous-traitance publié sur le site : <a href="/accord-sous-traitance.html">consulter l’accord</a>.</p></div>
             </details>
             <details>
                 <summary>À qui appartiennent les données ?</summary>
