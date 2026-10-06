@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="/zelyro.css">
 <link rel="stylesheet" href="/public.css">
 <script>document.documentElement.className+=' js';</script>
+<script src="/societe.js" defer></script>
 </head>
 <body class="pub">
 <!-- BANDEAU PROVISOIRE : supprimer ce bloc (et rien d’autre) une fois le texte validé par un juriste. -->
@@ -59,7 +60,7 @@
         <div class="wrap">
             <h1>Conditions générales d’utilisation</h1>
             <p>Conditions applicables à l’utilisation du service Zelyro par les agences immobilières et leurs utilisateurs.</p>
-            <p class="legal-meta">Dernière mise à jour : <span class="a-completer">[À COMPLÉTER : date de publication]</span></p>
+            <p class="legal-meta">Dernière mise à jour : <span data-societe="date_maj">6 octobre 2026</span></p>
         </div>
     </div>
     <div class="wrap">
@@ -89,7 +90,7 @@
 
 <section id="objet" aria-labelledby="h-objet">
     <h2 id="h-objet">1. Objet et définitions</h2>
-    <p>Les présentes conditions générales d’utilisation (« CGU ») régissent l’accès et l’utilisation du service en ligne Zelyro, accessible à l’adresse zelyro.fr, édité par <span class="a-completer">[À COMPLÉTER : raison sociale, forme juridique et siège, identiques à ceux des mentions légales]</span> (« Zelyro »).</p>
+    <p>Les présentes conditions générales d’utilisation (« CGU ») régissent l’accès et l’utilisation du service en ligne Zelyro, accessible à l’adresse zelyro.fr, édité par Zelyro SAS, société par actions simplifiée dont le siège social est situé <span class="a-completer" data-societe="adresse">[À COMPLÉTER : adresse complète du siège social]</span>, immatriculée sous le numéro SIREN <span class="a-completer" data-societe="siren">[À COMPLÉTER : numéro SIREN]</span> (« Zelyro »), dont les <a href="/mentions-legales.html">mentions légales</a> précisent l’identité complète.</p>
     <p>Dans les CGU, les termes suivants ont le sens ci-après :</p>
     <ul>
         <li>« Service » : l’application web Zelyro et ses fonctionnalités, décrites à l’article 3 ;</li>
@@ -111,24 +112,31 @@
     <h2 id="h-service">3. Description du service</h2>
     <p>Zelyro est un outil de gestion de prospects destiné aux agences immobilières. Il comprend, à la date de rédaction des CGU :</p>
     <ul>
-        <li>la qualification automatique des prospects en trois niveaux (« Acheteur actif », « Projet en cours », « Premier contact »), à partir de règles de calcul fondées sur le financement, l’urgence de l’achat et la complétude du dossier ;</li>
+        <li>la qualification automatique des prospects en trois niveaux (« Acheteur actif », « Projet en cours », « Premier contact »), à partir de règles de calcul fondées sur le financement, l’urgence de l’achat, la complétude du dossier et l’activité du prospect (ouverture des liens qui lui sont envoyés, demande de visite), avec un score sur 100 accompagné de son explication ;</li>
         <li>le rapprochement des prospects avec les biens de l’Agence, avec un score sur 100 et une explication ;</li>
         <li>le suivi des prospects : statuts (Nouveau, Contacté, Visite, Offre, Signé, Perdu), notes datées et rappels de relance ;</li>
         <li>des alertes par e-mail lorsqu’un bien correspond à un prospect ;</li>
         <li>l’import de prospects depuis un fichier CSV et un formulaire de contact hébergé pour chaque Agence ;</li>
         <li>un tableau de bord (pipeline, prospects par source, délai moyen de première réponse, conversion) et un portefeuille de biens ;</li>
+        <li>l’attribution d’un prospect à un collaborateur responsable et une alerte lorsqu’un prospect reste sans suite depuis plus de 24 heures ;</li>
+        <li>l’envoi de propositions de biens aux prospects par e-mail, avec, si l’Agence le choisit, un lien vers une page de sélection de biens sur laquelle le prospect peut demander une visite ;</li>
+        <li>le suivi de l’activité des prospects : lorsque l’Agence leur envoie un lien (formulaire de contact, sélection de biens), Zelyro enregistre l’ouverture du lien, le remplissage du formulaire et les demandes de visite, pour en informer l’Agence ;</li>
+        <li>l’identification des prospects à réveiller, c’est-à-dire sans activité depuis une durée donnée ;</li>
+        <li>un indicateur de potentiel de commission, calculé à partir du taux saisi par l’Agence et réservé au compte Administrateur ;</li>
+        <li>un e-mail récapitulatif le matin, que chaque Utilisateur peut désactiver, et des notifications sur ordinateur ou mobile, que chaque Utilisateur peut activer depuis son navigateur ou depuis l’application installée sur son appareil ;</li>
+        <li>l’export des prospects au format CSV, ainsi qu’un QR code et une affiche imprimable donnant accès au formulaire de contact de l’Agence ;</li>
         <li>la gestion sécurisée des comptes, avec cloisonnement des données par Agence et réinitialisation du mot de passe par e-mail.</li>
     </ul>
     <p>Le Service peut également proposer, si elle est activée, une fonction d’extraction de critères à partir d’un message rédigé en langage naturel (voir la <a href="/confidentialite.html#qualification">politique de confidentialité</a>).</p>
-    <p>La qualification et les scores sont des aides à l’organisation du travail : ils sont calculés selon des règles prédéfinies et ne constituent ni une évaluation de la solvabilité d’un Prospect, ni une garantie de conclusion d’une vente. L’Agence reste seule responsable de ses décisions commerciales.</p>
+    <p>La qualification et les scores sont des aides à l’organisation du travail : ils sont calculés selon des règles prédéfinies et ne constituent ni une évaluation de la solvabilité d’un Prospect, ni une garantie de conclusion d’une vente. L’indicateur de potentiel de commission et les résultats du simulateur présenté sur le site zelyro.fr sont de simples ordres de grandeur fondés sur des hypothèses modifiables : ils ne constituent ni une prévision, ni un engagement sur un résultat. L’Agence reste seule responsable de ses décisions commerciales.</p>
     <p>Zelyro peut faire évoluer le Service, l’améliorer ou en modifier certaines fonctionnalités. Elle en informe l’Agence lorsque la modification a un effet significatif sur son usage.</p>
 </section>
 
 <section id="acces" aria-labelledby="h-acces">
     <h2 id="h-acces">4. Accès et comptes</h2>
     <p>L’accès au Service nécessite la création d’un compte, au moyen d’une adresse e-mail valide et d’un mot de passe. L’Agence fournit des informations exactes et les tient à jour.</p>
-    <p>Chaque compte est rattaché à une Agence. Chaque forfait souscrit inclut jusqu’à trois (3) comptes utilisateurs pour l’Agence <span class="a-completer">[À VALIDER : nombre de comptes inclus par défaut]</span>. Au-delà de ce nombre, l’Agence peut ajouter des comptes utilisateurs supplémentaires, moyennant un supplément de 15&#160;€ HT par mois et par compte ajouté à la facturation du forfait souscrit <span class="a-completer">[À VALIDER : montant du supplément proposé]</span>.</p>
-    <p>Deux catégories de comptes sont proposées au sein d’une même Agence : le compte « Administrateur », créé lors de la souscription, qui dispose d’un accès à l’ensemble des données de l’Agence ainsi qu’aux statistiques d’activité des comptes « Agent » qui lui sont rattachés ; et le compte « Agent », destiné aux collaborateurs de l’Agence, dont l’accès aux fonctionnalités et aux données peut être paramétré par le compte Administrateur. <span class="a-completer">[À VALIDER : périmètre exact des droits de chaque rôle, à préciser selon les évolutions du Service]</span></p>
+    <p>Chaque compte est rattaché à une Agence. Le nombre de comptes utilisateurs inclus dépend du forfait souscrit par l’Agence, tel qu’indiqué dans le tableau tarifaire de l’article 8. Au-delà de ce nombre, l’Agence peut ajouter des comptes utilisateurs supplémentaires, moyennant un supplément de 15&#160;€ HT par mois et par compte ajouté à la facturation du forfait souscrit.</p>
+    <p>Deux catégories de comptes sont proposées au sein d’une même Agence : le compte « Administrateur », créé lors de la souscription, qui dispose d’un accès à l’ensemble des données de l’Agence, gère les comptes « Agent » et les réglages de l’Agence (par exemple le taux de commission indicatif) et consulte les indicateurs d’activité de l’équipe ; et le compte « Agent », destiné aux collaborateurs de l’Agence, qui travaille sur les prospects de l’Agence mais n’a pas accès à la gestion de l’équipe ni aux réglages réservés à l’Administrateur. Le périmètre détaillé des droits de chaque catégorie est décrit dans le Service et peut évoluer avec lui.</p>
     <p>L’Agence est responsable de la confidentialité de ses identifiants et de toute activité réalisée depuis son compte. Elle prévient sans délai Zelyro, à l’adresse <a href="mailto:contact@zelyro.fr">contact@zelyro.fr</a>, si elle suspecte un usage non autorisé. Le changement du mot de passe invalide les sessions ouvertes.</p>
     <p>L’Agence supporte les équipements, la connexion à Internet et le navigateur nécessaires à l’utilisation du Service.</p>
 </section>
@@ -140,6 +148,7 @@
         <li>elle ne saisit, n’importe et ne collecte que des données de Prospects obtenues de manière licite, pertinentes au regard de son activité et exactes ;</li>
         <li>elle dispose, pour chaque traitement, d’une base légale au sens du RGPD et recueille le consentement des Prospects lorsque la réglementation l’exige, notamment pour la prospection commerciale par voie électronique ou téléphonique ;</li>
         <li>elle informe les Prospects du traitement de leurs données, de l’usage d’un prestataire tel que Zelyro et de leurs droits, notamment sur les pages ou formulaires qu’elle diffuse, y compris le formulaire de contact hébergé ;</li>
+        <li>elle informe les Prospects que l’ouverture des liens qu’elle leur adresse (formulaire de contact, sélection de biens) et leurs demandes de visite sont enregistrées et portées à sa connaissance, et n’utilise ces informations que pour son suivi commercial ;</li>
         <li>elle répond aux demandes d’exercice de leurs droits par les Prospects et supprime les données qu’elle n’a plus lieu de conserver ;</li>
         <li>elle s’abstient de saisir des données sensibles au sens de l’article 9 du RGPD, ou des informations sans lien avec son activité, dans les champs du Service, y compris dans les messages soumis à la fonction d’extraction ;</li>
         <li>elle ne tente pas d’accéder aux données d’une autre Agence, de contourner les mesures de sécurité ou de limitation, ni de perturber le fonctionnement du Service ;</li>
@@ -153,6 +162,7 @@
     <h2 id="h-donnees">6. Protection des données personnelles</h2>
     <p>Pour les données des Prospects, l’Agence est responsable de traitement et Zelyro agit en qualité de sous-traitant, au sens de l’article 28 du RGPD. Zelyro ne traite ces données que sur instruction documentée de l’Agence, aux seules fins de fournir le Service.</p>
     <p>Les obligations respectives des parties sont précisées dans un accord de sous-traitance de données (DPA), qui figure en annexe aux présentes CGU et est consultable à l’adresse <a href="/accord-sous-traitance.html">zelyro.fr/accord-sous-traitance.html</a>, et qui fait partie intégrante des CGU. Il prévoit notamment l’objet, la durée, la nature et la finalité du traitement, les catégories de données et de personnes concernées, les mesures de sécurité, le recours à des sous-traitants ultérieurs, l’assistance apportée à l’Agence, la notification des violations de données et le sort des données en fin de contrat.</p>
+    <p>L’enregistrement de l’activité des Prospects sur les liens envoyés par l’Agence (ouverture, remplissage du formulaire, demande de visite) est réalisé par Zelyro pour le compte de l’Agence et dans le cadre du même DPA.</p>
     <p>Zelyro est responsable de traitement pour les données de compte des Utilisateurs. Les traitements, les sous-traitants ultérieurs et les droits des personnes sont décrits dans la <a href="/confidentialite.html">politique de confidentialité</a>.</p>
 </section>
 
@@ -161,7 +171,8 @@
     <p>Zelyro s’efforce d’assurer l’accès au Service en continu, mais n’est tenue qu’à une obligation de moyens. L’accès peut être interrompu pour des opérations de maintenance, de mise à jour ou en raison d’un incident affectant Zelyro ou ses prestataires d’hébergement. Zelyro s’efforce de limiter la durée de ces interruptions et d’en informer l’Agence lorsque cela est possible.</p>
     <p>Aucun engagement chiffré de disponibilité (SLA) n’est pris à ce stade : Zelyro est tenue à une obligation de moyens pour maintenir un haut niveau de disponibilité du Service.</p>
     <p>Le support est assuré par e-mail à l’adresse <a href="mailto:contact@zelyro.fr">contact@zelyro.fr</a>, du lundi au vendredi hors jours fériés, avec un objectif de première réponse sous 48 heures ouvrées.</p>
-    <p>Sauvegardes : les données sont hébergées sur une base PostgreSQL gérée par Render, qui assure des sauvegardes selon les modalités de l’offre souscrite par Zelyro. <span class="a-completer">[À COMPLÉTER : fréquence et durée de rétention des sauvegardes automatiques du plan Render retenu, à vérifier dans le tableau de bord Render ; préciser si Zelyro effectue en complément des sauvegardes propres]</span></p>
+    <p>Les e-mails et les notifications envoyés par le Service transitent par des prestataires tiers (service d’envoi d’e-mails, services de notification des navigateurs et des systèmes d’exploitation). Zelyro ne peut garantir ni leur remise, ni leur délai ; la réception des notifications dépend aussi des réglages de l’appareil de l’Utilisateur.</p>
+    <p>Sauvegardes : les données sont hébergées sur une base PostgreSQL gérée par Render, sur une offre payante qui comprend une restauration à un instant donné sur les derniers jours (trois jours ou sept jours selon l’offre de Render souscrite) ainsi que des sauvegardes logiques, que Zelyro peut déclencher et qui sont conservées sept jours. Ces sauvegardes servent à la reprise après un incident ; elles ne remplacent pas l’export régulier de ses données par l’Agence (export CSV). <span class="a-completer">[À VÉRIFIER : durée de restauration exacte (3 ou 7 jours) selon l’offre Render souscrite, visible dans le tableau de bord Render]</span></p>
 </section>
 
 <section id="financier" aria-labelledby="h-financier">
@@ -170,15 +181,15 @@
         <table>
             <thead><tr><th>Forfait</th><th>Tarif</th><th>Comprend</th></tr></thead>
             <tbody>
-                <tr><td data-label="Forfait">Essentiel</td><td data-label="Tarif">79 € HT / mois</td><td data-label="Comprend">300 prospects, 100 biens, 200 e-mails et 100 extractions par mois</td></tr>
-                <tr><td data-label="Forfait">Agence</td><td data-label="Tarif">199 € HT / mois</td><td data-label="Comprend">1 500 prospects, 400 biens, 1 000 e-mails et 500 extractions par mois</td></tr>
-                <tr><td data-label="Forfait">Réseau</td><td data-label="Tarif">449 € HT / mois</td><td data-label="Comprend">6 000 prospects, 1 500 biens, 4 000 e-mails et 2 000 extractions par mois</td></tr>
+                <tr><td data-label="Forfait">Essentiel</td><td data-label="Tarif">79 € HT / mois</td><td data-label="Comprend">300 prospects, 100 biens, 200 e-mails et 100 extractions par mois, jusqu’à 2 comptes utilisateurs</td></tr>
+                <tr><td data-label="Forfait">Agence</td><td data-label="Tarif">199 € HT / mois</td><td data-label="Comprend">1 500 prospects, 400 biens, 1 000 e-mails et 500 extractions par mois, jusqu’à 5 comptes utilisateurs</td></tr>
+                <tr><td data-label="Forfait">Réseau</td><td data-label="Tarif">449 € HT / mois</td><td data-label="Comprend">6 000 prospects, 1 500 biens, 4 000 e-mails et 2 000 extractions par mois, jusqu’à 10 comptes utilisateurs</td></tr>
             </tbody>
         </table>
     </div>
-    <p></p>
-    <p>La facturation est mensuelle. Le paiement s’effectue par carte bancaire ou par prélèvement automatique, prélevé au début de chaque période mensuelle. <span class="a-completer">[À VALIDER : une période d’essai gratuite est-elle proposée ? si oui, en préciser la durée]</span> Le paiement est dû dans les conditions indiquées lors de la souscription. En cas de retard de paiement, des pénalités sont exigibles de plein droit dès le lendemain de la date d’échéance, calculées au taux d’intérêt de la Banque centrale européenne applicable à son opération de refinancement la plus récente, majoré de dix points, ainsi qu’une indemnité forfaitaire pour frais de recouvrement de 40 euros par facture impayée, conformément à l’article L441-10 du Code de commerce (une indemnisation complémentaire peut être demandée sur justificatifs). Les tarifs sont indiqués hors taxes ; la TVA au taux en vigueur s’ajoute lors de la facturation. Zelyro peut réviser ses tarifs moyennant un préavis de trente (30) jours adressé par e-mail ; la poursuite de l’utilisation du Service après cette date vaut acceptation des nouveaux tarifs, l’Agence conservant la faculté de résilier dans les conditions de l’article 13.</p>
-    <p>Un tarif annuel est également proposé, avec une réduction de 10&#160;% par rapport au tarif mensuel <span class="a-completer">[À VALIDER : pourcentage de réduction proposé]</span>, réglé en une fois au début de la période. La souscription au tarif annuel emporte un engagement de douze (12) mois. En cas de résiliation anticipée par l’Agence, les sommes déjà versées restent acquises à Zelyro et ne font l’objet d’aucun remboursement ; l’Agence continue toutefois de bénéficier du Service jusqu’au terme de la période de douze (12) mois déjà réglée.</p>
+    <p>La facturation est mensuelle, sauf choix d’un tarif annuel. Le paiement s’effectue par carte bancaire ou par prélèvement automatique, prélevé au début de chaque période mensuelle. Les tarifs ci-dessus sont les tarifs standard. Des conditions commerciales particulières (par exemple une offre pilote) peuvent être convenues par écrit avec l’Agence ; elles prévalent alors, pour leur objet, sur le présent article. Le paiement est dû dans les conditions indiquées lors de la souscription. En cas de retard de paiement, des pénalités sont exigibles de plein droit dès le lendemain de la date d’échéance, calculées au taux d’intérêt de la Banque centrale européenne applicable à son opération de refinancement la plus récente, majoré de dix points, ainsi qu’une indemnité forfaitaire pour frais de recouvrement de 40 euros par facture impayée, conformément à l’article L441-10 du Code de commerce (une indemnisation complémentaire peut être demandée sur justificatifs). Les tarifs sont indiqués hors taxes ; la TVA au taux en vigueur s’ajoute lors de la facturation. Zelyro peut réviser ses tarifs moyennant un préavis de trente (30) jours adressé par e-mail ; la poursuite de l’utilisation du Service après cette date vaut acceptation des nouveaux tarifs, l’Agence conservant la faculté de résilier dans les conditions de l’article 13.</p>
+    <p>Deux formules avec engagement de douze (12) mois sont également proposées. La formule mensuelle engagée, réglée chaque mois, bénéficie d’une réduction de 5&#160;% sur le tarif mensuel, soit 75&#160;€, 189&#160;€ ou 427&#160;€ HT par mois selon le forfait. La formule annuelle, réglée en une fois au début de la période, bénéficie d’une réduction de 10&#160;%, soit 853&#160;€, 2&#160;149&#160;€ ou 4&#160;849&#160;€ HT par an selon le forfait. Ces montants sont ceux de la <a href="/tarifs.html">page des tarifs</a> en vigueur à la souscription.</p>
+    <p>En cas de résiliation anticipée par l’Agence d’une formule avec engagement, les sommes déjà versées restent acquises à Zelyro et ne font l’objet d’aucun remboursement ; l’Agence continue toutefois de bénéficier du Service jusqu’au terme de la période déjà réglée. <span class="a-completer">[À VALIDER : pour la formule mensuelle engagée, préciser si les mensualités restant à courir jusqu’au terme des douze mois restent dues]</span></p>
 </section>
 
 <section id="pi" aria-labelledby="h-pi">
@@ -198,7 +209,8 @@
 <section id="responsabilite" aria-labelledby="h-responsabilite">
     <h2 id="h-responsabilite">11. Responsabilité</h2>
     <p>Zelyro est tenue à une obligation de moyens. Elle ne garantit pas que le Service sera exempt d’erreurs ou d’interruptions, ni que les résultats de la qualification ou du rapprochement répondront aux attentes de l’Agence.</p>
-    <p>Zelyro ne peut être tenue responsable des dommages résultant : d’un usage du Service non conforme aux CGU, des données ou instructions fournies par l’Agence, d’une défaillance des réseaux de communication ou des équipements de l’Agence, du fait d’un tiers ou d’un cas de force majeure au sens de l’article 1218 du Code civil.</p>
+    <p>Zelyro ne garantit ni l’exactitude des estimations produites par le Service (potentiel de commission, prospects à réveiller, scores), ni la remise des e-mails et des notifications, qui dépendent notamment de prestataires tiers. Ces éléments aident l’Agence à organiser son travail, sans se substituer à son jugement.</p>
+    <p>Zelyro ne peut être tenue responsable des dommages résultant : d’un usage du Service non conforme aux CGU, des données ou instructions fournies par l’Agence, d’une défaillance des réseaux de communication ou des équipements de l’Agence, du fait d’un tiers ou d’un cas de force majeure au sens de l’article 1218 du Code civil.</p>
     <p>Dans la mesure permise par la loi, Zelyro n’est pas responsable des dommages indirects, tels que la perte de chiffre d’affaires, de clientèle, d’opportunités commerciales ou d’image.</p>
     <p>La responsabilité totale de Zelyro au titre du contrat est limitée aux sommes effectivement versées par l’Agence à Zelyro au titre du Service au cours des douze (12) mois précédant le fait générateur du dommage.</p>
     <p>Ces limitations ne s’appliquent pas en cas de dol, de faute lourde, de dommage corporel, ni dans les cas où la loi interdit de limiter ou d’exclure la responsabilité.</p>
@@ -242,7 +254,7 @@
 
 <section id="droit" aria-labelledby="h-droit">
     <h2 id="h-droit">16. Droit applicable et juridiction</h2>
-    <p>Les CGU sont soumises au droit français. Les parties s’efforcent de résoudre à l’amiable tout différend relatif à leur interprétation ou à leur exécution. À défaut, le litige est porté devant le tribunal compétent du ressort du siège social de Zelyro <span class="a-completer">[À COMPLÉTER : ville et juridiction exactes (par exemple tribunal de commerce de [ville]), une fois le siège social fixé]</span>, y compris en cas de pluralité de défendeurs ou d’appel en garantie.</p>
+    <p>Les CGU sont soumises au droit français. Les parties s’efforcent de résoudre à l’amiable tout différend relatif à leur interprétation ou à leur exécution. À défaut, le litige est porté devant le tribunal compétent du ressort du siège social de Zelyro (tribunal de commerce de <span class="a-completer" data-societe="tribunal_ville">[À COMPLÉTER : ville du siège social]</span>), y compris en cas de pluralité de défendeurs ou d’appel en garantie.</p>
     <p>Pour toute question sur les CGU : <a href="mailto:contact@zelyro.fr">contact@zelyro.fr</a>.</p>
 </section>
 

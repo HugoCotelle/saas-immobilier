@@ -22,6 +22,10 @@
         .annonce .caracteristiques { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
         .annonce .caracteristiques li { background: var(--sage-100, #E7EDE4); color: var(--sage-700, #3E4F43); border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 600; }
         .annonce .description { margin: 0; font-size: 14px; line-height: 1.6; color: var(--ink-2, #44504A); white-space: pre-line; }
+        .annonce .actions { margin-top: 16px; }
+        .annonce .actions button { width: auto; padding: 11px 20px; }
+        .annonce .merci { margin: 14px 0 0; font-size: 14px; color: var(--sage-700, #3E4F43); font-weight: 600; }
+        .annonce .erreur-visite { margin: 10px 0 0; font-size: 13px; color: var(--danger, #A8452F); }
         .contact-agence { margin-top: 24px; font-size: 14px; color: var(--ink-2, #44504A); line-height: 1.6; text-align: center; }
         .pied-formulaire { text-align: center; margin-top: 22px; font-size: 12px; color: var(--ink-3, #6A7168); line-height: 1.7; }
         .pied-formulaire a { color: var(--ink-3, #6A7168); }
@@ -36,7 +40,7 @@
 
         <div id="etat" class="loading masque"><div class="loader"></div></div>
         <div id="liste" class="liste-annonces masque"></div>
-        <p id="contact" class="contact-agence masque">Un de ces biens vous intéresse ? Répondez simplement à l'e-mail reçu pour organiser une visite.</p>
+        <p id="contact" class="contact-agence masque">Un de ces biens vous intéresse ? Cliquez sur « Je souhaite visiter ce bien » : votre agence est prévenue tout de suite. Vous pouvez aussi répondre simplement à l'e-mail reçu.</p>
 
         <p class="pied-formulaire">
             Votre agence est informée de l'ouverture de cette page.<br>
@@ -71,6 +75,27 @@
                 return Number(valeur).toLocaleString('fr-FR') + ' €' + (location ? ' / mois' : '');
             }
 
+            function demanderVisite(b, bouton, zone) {
+                bouton.disabled = true;
+                fetch(API_URL + '/public/annonces/' + encodeURIComponent(jeton) + '/interet', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ref: b.ref })
+                })
+                    .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+                    .then(function (res) {
+                        if (!res.ok) throw new Error(res.d.message || 'Une erreur est survenue.');
+                        bouton.remove();
+                        zone.appendChild(element('p', 'merci', res.d.message));
+                    })
+                    .catch(function (e) {
+                        bouton.disabled = false;
+                        var m = zone.querySelector('.erreur-visite');
+                        if (!m) { m = element('p', 'erreur-visite'); zone.appendChild(m); }
+                        m.textContent = (e && e.message) ? e.message : 'Une erreur est survenue. Réessayez dans un instant.';
+                    });
+            }
+
             function carte(b) {
                 var a = element('article', 'annonce');
                 a.appendChild(element('h2', '', b.title));
@@ -85,6 +110,16 @@
                     .filter(Boolean).forEach(function (t) { ul.appendChild(element('li', '', t)); });
                 if (ul.children.length) a.appendChild(ul);
                 if (b.description) a.appendChild(element('p', 'description', b.description));
+                var zone = element('div', 'actions');
+                if (b.interesse) {
+                    zone.appendChild(element('p', 'merci', 'Votre demande de visite a bien été transmise à votre agence.'));
+                } else {
+                    var bouton = element('button', '', 'Je souhaite visiter ce bien');
+                    bouton.type = 'button';
+                    bouton.addEventListener('click', function () { demanderVisite(b, bouton, zone); });
+                    zone.appendChild(bouton);
+                }
+                a.appendChild(zone);
                 return a;
             }
 

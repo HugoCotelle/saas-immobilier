@@ -404,6 +404,64 @@
     </div>
 </section>
 
+<!-- ============ SIMULATEUR ============ -->
+<section class="section simu" id="simulateur" aria-labelledby="titre-simu">
+    <div class="wrap">
+        <div class="section-head">
+            <p class="eyebrow">Faites vos calculs</p>
+            <h2 id="titre-simu">Combien vous coûte une demande sans réponse ?</h2>
+            <p>Un outil pour raisonner avec vos propres chiffres, pas une promesse de résultat : les valeurs de départ sont de simples hypothèses, remplacez-les par celles de votre agence.</p>
+        </div>
+        <div class="simu-grid">
+            <form class="simu-form" id="simu-form" onsubmit="return false" aria-label="Hypothèses du simulateur">
+                <div class="simu-champ">
+                    <label for="s-leads">Demandes reçues par mois</label>
+                    <input id="s-leads" type="number" inputmode="numeric" min="0" max="100000" step="1" value="60">
+                </div>
+                <div class="simu-champ">
+                    <label for="s-perdues">Part des demandes qui restent sans suite, faute de réponse rapide (%)</label>
+                    <input id="s-perdues" type="number" inputmode="decimal" min="0" max="100" step="1" value="20">
+                </div>
+                <div class="simu-champ">
+                    <label for="s-rattrapees">Part de ces demandes qu’un suivi organisé permettrait de rattraper (%)</label>
+                    <input id="s-rattrapees" type="number" inputmode="decimal" min="0" max="100" step="1" value="25">
+                    <span class="simu-aide">C’est l’hypothèse la plus incertaine : à vous de la fixer prudemment.</span>
+                </div>
+                <div class="simu-champ">
+                    <label for="s-transfo">Part des demandes suivies qui finissent en vente (%)</label>
+                    <input id="s-transfo" type="number" inputmode="decimal" min="0" max="100" step="0.5" value="3">
+                </div>
+                <div class="simu-champ">
+                    <label for="s-commission">Commission moyenne par vente (€ HT)</label>
+                    <input id="s-commission" type="number" inputmode="numeric" min="0" max="1000000" step="100" value="6000">
+                </div>
+                <div class="simu-champ">
+                    <label for="s-forfait">Forfait comparé</label>
+                    <select id="s-forfait">
+                        <option value="79">Essentiel : 79 € HT / mois</option>
+                        <option value="199" selected>Agence : 199 € HT / mois</option>
+                        <option value="449">Réseau : 449 € HT / mois</option>
+                    </select>
+                </div>
+            </form>
+            <div class="simu-resultat" aria-live="polite">
+                <p class="simu-label">Avec vos hypothèses</p>
+                <dl>
+                    <div><dt>Demandes sans suite par mois</dt><dd id="r-perdues">—</dd></div>
+                    <div><dt>Dont rattrapées grâce à un suivi organisé</dt><dd id="r-rattrapees">—</dd></div>
+                    <div><dt>Ventes supplémentaires par an</dt><dd id="r-ventes">—</dd></div>
+                    <div class="total"><dt>Commission supplémentaire par an</dt><dd id="r-commission">—</dd></div>
+                </dl>
+                <div class="simu-seuil">
+                    <p class="simu-label">Seuil de rentabilité</p>
+                    <p id="r-seuil">—</p>
+                    <p class="simu-note">Ce seuil ne dépend que de votre commission moyenne et du prix du forfait, pas d’une hypothèse sur Zelyro.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
 <!-- ============ SÉCURITÉ ============ -->
 <section class="section deep" id="securite" aria-labelledby="titre-securite">
     <div class="wrap deep-grid">
@@ -588,6 +646,42 @@
     b.addEventListener('click', function () { set(!n.classList.contains('open')); });
     n.addEventListener('click', function (e) { if (e.target.closest('a')) set(false); });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && n.classList.contains('open')) { set(false); b.focus(); } });
+})();
+
+/* Simulateur : tout le calcul se fait dans la page, rien n'est envoyé. */
+(function () {
+    var ids = ['s-leads', 's-perdues', 's-rattrapees', 's-transfo', 's-commission', 's-forfait'];
+    var el = {}; ids.forEach(function (i) { el[i] = document.getElementById(i); });
+    if (!el['s-leads']) return;
+    var nf = function (n, d) { return n.toLocaleString('fr-FR', { maximumFractionDigits: d, minimumFractionDigits: 0 }); };
+    function lire(id, max) {
+        var v = parseFloat(String(el[id].value).replace(',', '.'));
+        if (!isFinite(v) || v < 0) v = 0;
+        return Math.min(v, max);
+    }
+    function calcul() {
+        var leads = lire('s-leads', 100000), perdues = lire('s-perdues', 100) / 100, rattr = lire('s-rattrapees', 100) / 100;
+        var transfo = lire('s-transfo', 100) / 100, commission = lire('s-commission', 1000000), mensuel = parseFloat(el['s-forfait'].value) || 0;
+        var sansSuite = leads * perdues, rattrapees = sansSuite * rattr;
+        var ventes = rattrapees * transfo * 12, gain = ventes * commission, coutAn = mensuel * 12;
+        document.getElementById('r-perdues').textContent = nf(sansSuite, 1);
+        document.getElementById('r-rattrapees').textContent = nf(rattrapees, 1);
+        document.getElementById('r-ventes').textContent = nf(ventes, 1);
+        document.getElementById('r-commission').textContent = nf(Math.round(gain), 0) + ' €';
+        var seuil = document.getElementById('r-seuil');
+        if (commission > 0) {
+            var n = coutAn / commission;
+            var exact = nf(Math.round(n * 10) / 10, 1);
+            seuil.textContent = 'Le forfait coûte ' + nf(coutAn, 0) + ' € HT par an, soit ' + exact + ' vente' + (n >= 2 ? 's' : '') +
+                ' de ' + nf(commission, 0) + ' € : ' +
+                (n <= 1 ? 'une seule vente supplémentaire par an le couvre.'
+                        : 'il est couvert dès ' + nf(Math.ceil(n), 0) + ' ventes supplémentaires par an.');
+        } else {
+            seuil.textContent = 'Indiquez votre commission moyenne pour voir le seuil.';
+        }
+    }
+    ids.forEach(function (i) { el[i].addEventListener('input', calcul); el[i].addEventListener('change', calcul); });
+    calcul();
 })();
 
 /* Apparition en douceur des blocs au défilement */

@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="/zelyro.css">
 <link rel="stylesheet" href="/public.css">
 <script>document.documentElement.className+=' js';</script>
+<script src="/societe.js" defer></script>
 </head>
 <body class="pub">
 <!-- BANDEAU PROVISOIRE : supprimer ce bloc (et rien d’autre) une fois le texte validé par un juriste. -->
@@ -59,7 +60,7 @@
         <div class="wrap">
             <h1>Mentions légales</h1>
             <p>Informations relatives à l’éditeur et à l’hébergement du site zelyro.fr, publiées conformément à l’article 6 de la loi du 21 juin 2004 pour la confiance dans l’économie numérique.</p>
-            <p class="legal-meta">Dernière mise à jour : <span class="a-completer">[À COMPLÉTER : date de publication]</span></p>
+            <p class="legal-meta">Dernière mise à jour : <span data-societe="date_maj">6 octobre 2026</span></p>
         </div>
     </div>
     <div class="wrap">
@@ -69,24 +70,23 @@
 
 <section id="editeur" aria-labelledby="h-editeur">
     <h2 id="h-editeur">1. Éditeur du site</h2>
-    <p>Le site zelyro.fr et le service en ligne Zelyro sont exploités par leurs fondateurs.</p>
+    <p>Le site zelyro.fr et le service en ligne Zelyro sont édités et exploités par la société Zelyro SAS.</p>
     <dl class="deflist">
-        <dt>Raison sociale ou dénomination</dt><dd><span class="a-completer">[À COMPLÉTER : raison sociale]</span></dd>
-        <dt>Forme juridique</dt><dd><span class="a-completer">[À COMPLÉTER : forme juridique]</span></dd>
-        <dt>Capital social</dt><dd><span class="a-completer">[À COMPLÉTER : montant du capital social]</span></dd>
-        <dt>Siège social</dt><dd><span class="a-completer">[À COMPLÉTER : adresse complète du siège social]</span></dd>
-        <dt>SIREN</dt><dd><span class="a-completer">[À COMPLÉTER : numéro SIREN]</span></dd>
-        <dt>Immatriculation</dt><dd>RCS <span class="a-completer">[À COMPLÉTER : ville du greffe]</span> <span class="a-completer">[À COMPLÉTER : numéro RCS]</span></dd>
-        <dt>N° de TVA intracommunautaire</dt><dd><span class="a-completer">[À COMPLÉTER : numéro de TVA]</span></dd>
-        <dt>Téléphone</dt><dd><span class="a-completer">[À COMPLÉTER : numéro de téléphone]</span></dd>
+        <dt>Raison sociale ou dénomination</dt><dd>Zelyro SAS</dd>
+        <dt>Forme juridique</dt><dd>Société par actions simplifiée (SAS)</dd>
+        <dt>Capital social</dt><dd><span class="a-completer" data-societe="capital">[À COMPLÉTER : montant du capital social]</span></dd>
+        <dt>Siège social</dt><dd><span class="a-completer" data-societe="adresse">[À COMPLÉTER : adresse complète du siège social]</span></dd>
+        <dt>SIREN</dt><dd><span class="a-completer" data-societe="siren">[À COMPLÉTER : numéro SIREN]</span></dd>
+        <dt>Immatriculation</dt><dd>RCS <span class="a-completer" data-societe="rcs_ville">[À COMPLÉTER : ville du greffe]</span> <span class="a-completer" data-societe="siren">[À COMPLÉTER : numéro RCS, identique au SIREN]</span></dd>
+        <dt>N° de TVA intracommunautaire</dt><dd><span class="a-completer" data-societe="tva">[À COMPLÉTER : numéro de TVA intracommunautaire]</span></dd>
+        <dt>Téléphone</dt><dd><span class="a-completer" data-societe="telephone">[À COMPLÉTER : numéro de téléphone]</span></dd>
         <dt>Adresse électronique</dt><dd><a href="mailto:contact@zelyro.fr">contact@zelyro.fr</a></dd>
     </dl>
-    <p><span class="a-completer">[À COMPLÉTER : si l’activité est exercée sans société, remplacer les lignes ci-dessus par les nom, prénom, adresse et numéro SIRET de l’exploitant]</span></p>
 </section>
 
 <section id="publication" aria-labelledby="h-publication">
     <h2 id="h-publication">2. Directeur de la publication</h2>
-    <p>Le directeur de la publication est <span class="a-completer">[À COMPLÉTER : nom, prénom et qualité du directeur de la publication]</span>.</p>
+    <p>Le directeur de la publication est <span class="a-completer" data-societe="directeur">[À COMPLÉTER : nom, prénom et qualité du directeur de la publication]</span>.</p>
 </section>
 
 <section id="hebergement" aria-labelledby="h-hebergement">
@@ -133,7 +133,7 @@
 <section id="donnees" aria-labelledby="h-donnees">
     <h2 id="h-donnees">7. Données personnelles et cookies</h2>
     <p>Le traitement des données personnelles est décrit dans la <a href="/confidentialite.html">politique de confidentialité</a>, qui précise notamment les droits dont vous disposez et la manière de les exercer.</p>
-    <p>Zelyro n’utilise ni cookie publicitaire, ni outil de mesure d’audience, ni traceur tiers. Le service s’appuie uniquement sur un jeton de session technique, stocké dans le navigateur, nécessaire à la connexion. Aucun bandeau de consentement n’est donc affiché.</p>
+    <p>Zelyro n’utilise ni cookie publicitaire, ni outil de mesure d’audience, ni traceur tiers. Le service s’appuie uniquement sur des éléments techniques stockés dans le navigateur (jeton de session nécessaire à la connexion et, si l’utilisateur installe l’application ou active les notifications, un composant technique qui reçoit les notifications sans conserver de contenu). Aucun bandeau de consentement n’est donc affiché. Le détail figure dans la <a href="/confidentialite.html#cookies">politique de confidentialité</a>.</p>
 </section>
 
 <section id="credits" aria-labelledby="h-credits">
@@ -143,7 +143,7 @@
 
 <section id="droit" aria-labelledby="h-droit">
     <h2 id="h-droit">9. Droit applicable</h2>
-    <p>Les présentes mentions légales sont soumises au droit français. En cas de litige, et à défaut de résolution amiable, les tribunaux compétents sont ceux de <span class="a-completer">[À COMPLÉTER : ville du tribunal compétent]</span>.</p>
+    <p>Les présentes mentions légales sont soumises au droit français. En cas de litige, et à défaut de résolution amiable, les tribunaux compétents sont ceux de <span class="a-completer" data-societe="tribunal_ville">[À COMPLÉTER : ville du tribunal compétent]</span>.</p>
 </section>
 
             </article>

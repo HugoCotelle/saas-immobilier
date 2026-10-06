@@ -5,3 +5,4 @@ React 18.3.1 et React DOM 18.3.1      Licence MIT   https://github.com/facebook/
 Chart.js 3.9.1                        Licence MIT   https://www.chartjs.org
 Inter (variable, latin)               Licence SIL OFL 1.1   https://rsms.me/inter
 Playfair Display (variable, latin)    Licence SIL OFL 1.1   https://fonts.google.com/specimen/Playfair+Display
+qrcode-generator 1.4.4 (Kazuhiko Arase)   Licence MIT   https://github.com/kazuhikoarase/qrcode-generator

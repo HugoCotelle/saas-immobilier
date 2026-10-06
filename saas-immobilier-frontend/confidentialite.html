@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="/zelyro.css">
 <link rel="stylesheet" href="/public.css">
 <script>document.documentElement.className+=' js';</script>
+<script src="/societe.js" defer></script>
 </head>
 <body class="pub">
 <!-- BANDEAU PROVISOIRE : supprimer ce bloc (et rien d’autre) une fois le texte validé par un juriste. -->
@@ -59,7 +60,7 @@
         <div class="wrap">
             <h1>Politique de confidentialité</h1>
             <p>Comment Zelyro traite les données personnelles des utilisateurs et, pour le compte des agences, celles de leurs prospects.</p>
-            <p class="legal-meta">Dernière mise à jour : <span class="a-completer">[À COMPLÉTER : date de publication]</span></p>
+            <p class="legal-meta">Dernière mise à jour : <span data-societe="date_maj">6 octobre 2026</span></p>
         </div>
     </div>
     <div class="wrap">
@@ -71,7 +72,7 @@
                     <li><a href="#responsable">2. Responsable du traitement</a></li>
                     <li><a href="#donnees">3. Données traitées</a></li>
                     <li><a href="#finalites">4. Finalités et bases légales</a></li>
-                    <li><a href="#qualification">5. Qualification automatique des prospects</a></li>
+                    <li><a href="#qualification">5. Qualification automatique et suivi d’activité</a></li>
                     <li><a href="#destinataires">6. Destinataires et sous-traitants</a></li>
                     <li><a href="#transferts">7. Transferts hors de l’Union européenne</a></li>
                     <li><a href="#conservation">8. Durées de conservation</a></li>
@@ -92,7 +93,7 @@
         <table>
             <thead><tr><th>Données</th><th>Rôle de l’agence</th><th>Rôle de Zelyro</th></tr></thead>
             <tbody>
-                <tr><td data-label="Données">Données de compte des utilisateurs (adresse e-mail, prénom, nom de l’agence, mot de passe haché) et données techniques de connexion</td><td data-label="Rôle de l’agence">Cliente du service</td><td data-label="Rôle de Zelyro">Responsable de traitement</td></tr>
+                <tr><td data-label="Données">Données de compte des utilisateurs (adresse e-mail, prénom, nom de l’agence, mot de passe haché), préférences de notification, abonnements aux notifications et données techniques de connexion</td><td data-label="Rôle de l’agence">Cliente du service</td><td data-label="Rôle de Zelyro">Responsable de traitement</td></tr>
                 <tr><td data-label="Données">Données des prospects saisies, importées ou reçues par le formulaire de contact de l’agence</td><td data-label="Rôle de l’agence">Responsable de traitement</td><td data-label="Rôle de Zelyro">Sous-traitant, au sens de l’article 28 du RGPD</td></tr>
             </tbody>
         </table>
@@ -102,7 +103,7 @@
 
 <section id="responsable" aria-labelledby="h-responsable">
     <h2 id="h-responsable">2. Responsable du traitement</h2>
-    <p>Pour les données de compte, le responsable de traitement est <span class="a-completer">[À COMPLÉTER : raison sociale et adresse, identiques à celles des mentions légales]</span>, qui exploite le service Zelyro (site zelyro.fr). Voir les <a href="/mentions-legales.html">mentions légales</a>.</p>
+    <p>Pour les données de compte, le responsable de traitement est Zelyro SAS, société par actions simplifiée dont le siège social est situé <span class="a-completer" data-societe="adresse">[À COMPLÉTER : adresse complète du siège social]</span>, immatriculée sous le numéro SIREN <span class="a-completer" data-societe="siren">[À COMPLÉTER : numéro SIREN]</span>, qui exploite le service Zelyro (site zelyro.fr). Voir les <a href="/mentions-legales.html">mentions légales</a>.</p>
     <dl class="deflist">
         <dt>Contact pour vos données</dt><dd><a href="mailto:contact@zelyro.fr">contact@zelyro.fr</a></dd>
         <dt>Délégué à la protection des données</dt><dd>Aucun délégué à la protection des données n’a été désigné à ce jour : cette désignation n’est pas obligatoire pour Zelyro au regard de l’article 37 du RGPD, compte tenu de la nature et du volume des données traitées. Toute question relative aux données personnelles peut être adressée à <a href="mailto:contact@zelyro.fr">contact@zelyro.fr</a>. <span class="a-completer">[À CONFIRMER avec votre juriste : cette analyse est à revoir si l’activité ou le volume de données évolue]</span></dd>
@@ -115,7 +116,10 @@
     <ul>
         <li>adresse e-mail, prénom et nom de l’agence, renseignés lors de la création du compte ;</li>
         <li>mot de passe, conservé uniquement sous forme hachée (il n’est jamais stocké en clair) ;</li>
-        <li>éléments techniques liés à la sécurité du compte, comme les demandes de réinitialisation du mot de passe.</li>
+        <li>éléments techniques liés à la sécurité du compte, comme les demandes de réinitialisation du mot de passe ;</li>
+        <li>rattachement du compte à son agence et rôle (administrateur ou agent) ;</li>
+        <li>préférences de l’utilisateur (alertes par e-mail, e-mail du matin) et, pour l’administrateur, taux de commission indicatif utilisé dans son tableau de bord ;</li>
+        <li>si l’utilisateur active les notifications : l’adresse technique d’abonnement fournie par son navigateur et les clés de chiffrement associées, qui permettent d’acheminer une notification vers son appareil.</li>
     </ul>
     <h3>Données des prospects</h3>
     <p>Ces données sont saisies, importées (fichier CSV) ou reçues (formulaire de contact hébergé) par l’agence, qui en décide. Elles peuvent comprendre :</p>
@@ -123,7 +127,9 @@
         <li>nom, adresse e-mail et numéro de téléphone ;</li>
         <li>budget, secteur géographique recherché et type de bien recherché ;</li>
         <li>situation de financement et urgence du projet d’achat ;</li>
-        <li>notes de suivi, statut dans le pipeline et rappels de relance.</li>
+        <li>notes de suivi, statut dans le pipeline et rappels de relance ;</li>
+        <li>collaborateur de l’agence désigné comme responsable du prospect ;</li>
+        <li>activité du prospect sur les liens que l’agence lui envoie : ouverture du formulaire ou de la sélection de biens, remplissage du formulaire, demande de visite pour un bien, avec la date et l’heure. Ces événements ne comportent ni adresse IP, ni information sur l’appareil du prospect.</li>
     </ul>
     <p>Zelyro n’a pas vocation à traiter de données sensibles au sens de l’article 9 du RGPD. Les agences s’engagent à ne pas en saisir dans les champs libres.</p>
     <h3>Données techniques</h3>
@@ -140,10 +146,12 @@
             <tbody>
                 <tr><td data-label="Finalité">Créer et gérer le compte, fournir le service</td><td data-label="Base légale">Exécution du contrat (art. 6.1.b)</td><td data-label="Données concernées">Données de compte</td></tr>
                 <tr><td data-label="Finalité">Envoyer les e-mails liés au service (réinitialisation du mot de passe, notification de changement de mot de passe, alertes de correspondance)</td><td data-label="Base légale">Exécution du contrat (art. 6.1.b)</td><td data-label="Données concernées">Adresse e-mail de l’utilisateur</td></tr>
+                <tr><td data-label="Finalité">Envoyer à chaque utilisateur un e-mail récapitulatif le matin (désactivable à tout moment) et, s’il les a activées, des notifications sur son appareil (nouvelle activité d’un prospect, prospect qui lui est attribué)</td><td data-label="Base légale">Exécution du contrat (art. 6.1.b) pour l’e-mail ; consentement (art. 6.1.a) pour les notifications sur l’appareil, donné en acceptant l’autorisation demandée par le navigateur et retirable à tout moment</td><td data-label="Données concernées">Adresse e-mail, abonnement de l’appareil, contenu du récapitulatif ou de la notification</td></tr>
                 <tr><td data-label="Finalité">Assurer la sécurité du service, prévenir les abus et les accès non autorisés</td><td data-label="Base légale">Intérêt légitime (art. 6.1.f)</td><td data-label="Données concernées">Données techniques, données de compte</td></tr>
                 <tr><td data-label="Finalité">Répondre aux demandes reçues (démonstration, questions)</td><td data-label="Base légale">Mesures précontractuelles ou intérêt légitime (art. 6.1.b ou 6.1.f)</td><td data-label="Données concernées">Messages adressés à Zelyro</td></tr>
                 <tr><td data-label="Finalité">Respecter nos obligations légales (comptables, réponse aux autorités)</td><td data-label="Base légale">Obligation légale (art. 6.1.c)</td><td data-label="Données concernées">Selon l’obligation concernée</td></tr>
-                <tr><td data-label="Finalité">Traiter, pour le compte de l’agence, les données de ses prospects : stockage, qualification, rapprochement avec les biens, suivi</td><td data-label="Base légale">Instructions de l’agence, responsable de traitement (la base légale relève de l’agence)</td><td data-label="Données concernées">Données des prospects</td></tr>
+                <tr><td data-label="Finalité">Enregistrer, pour le compte de l’agence, l’activité des prospects sur les liens qu’elle leur envoie (ouverture, remplissage du formulaire, demande de visite) et la lui signaler</td><td data-label="Base légale">Instructions de l’agence, responsable de traitement (la base légale relève de l’agence)</td><td data-label="Données concernées">Données des prospects, événements d’activité</td></tr>
+                <tr><td data-label="Finalité">Traiter, pour le compte de l’agence, les données de ses prospects : stockage, qualification, rapprochement avec les biens, suivi</td><td data-label="Base légale">Instructions de l’agence, responsable de traitement (la base légale relève de l’agence)</td><td data-label="Données concernées">Données des prospects</td></tr>
             </tbody>
         </table>
     </div>
@@ -151,9 +159,12 @@
 </section>
 
 <section id="qualification" aria-labelledby="h-qualification">
-    <h2 id="h-qualification">5. Qualification automatique des prospects</h2>
-    <p>Zelyro classe chaque prospect selon trois niveaux (« Acheteur actif », « Projet en cours », « Premier contact ») à partir de règles de calcul fondées sur l’état du financement, l’urgence de l’achat et le caractère complet du dossier. Le rapprochement avec les biens produit un score sur 100 selon des critères de même nature (budget, type de bien, secteur, financement, urgence).</p>
+    <h2 id="h-qualification">5. Qualification automatique et suivi d’activité</h2>
+    <p>Zelyro classe chaque prospect selon trois niveaux (« Acheteur actif », « Projet en cours », « Premier contact ») à partir de règles de calcul fondées sur l’état du financement, l’urgence de l’achat et le caractère complet du dossier, ainsi que, pour une part limitée du score, sur l’activité du prospect sur les liens que l’agence lui a envoyés (ouverture, demande de visite). Le rapprochement avec les biens produit un score sur 100 selon des critères de même nature (budget, type de bien, secteur, financement, urgence).</p>
     <p>Ces calculs constituent une forme de profilage au sens du RGPD. Ils n’ont pas recours à l’apprentissage automatique et servent uniquement d’aide à l’organisation du travail de l’agence : aucune décision n’est prise par Zelyro à l’égard des prospects, et l’agent reste libre de contacter ou non un prospect, quel que soit son niveau.</p>
+    <h3>Suivi de l’activité des prospects</h3>
+    <p>Lorsque l’agence envoie à un prospect un lien (formulaire de contact à compléter, page de sélection de biens), Zelyro enregistre, pour le compte de l’agence, l’ouverture du lien, le remplissage du formulaire et les demandes de visite, afin de signaler à l’agence les prospects qui se manifestent. Chaque lien contient un identifiant aléatoire propre au prospect. Aucun cookie et aucun outil de mesure tiers ne sont utilisés pour cela, et les ouvertures répétées en un court laps de temps ne sont comptées qu’une fois. Les pages concernées indiquent au prospect que son agence est informée de l’ouverture de la page. Les événements enregistrés sont rattachés à la fiche du prospect et supprimés avec elle. L’agence, responsable de traitement, reste chargée d’informer ses prospects et de répondre à leurs demandes (voir l’article 12).</p>
+    <p>Les indicateurs « prospects à réveiller » et « potentiel de commission » du tableau de bord sont des calculs d’aide à l’organisation : ils ne produisent aucune décision à l’égard des prospects.</p>
     <h3>Fonction d’extraction de critères à partir d’un message</h3>
     <p>Si cette fonction est activée, le texte d’un message collé dans l’outil peut être transmis à Anthropic (États-Unis) afin d’en extraire des critères (par exemple budget, type de bien, échéance). Seul le texte du message est transmis pour cette analyse. Les agences doivent éviter d’y inclure des informations inutiles ou sensibles. Anthropic indique ne pas utiliser, par défaut, les données transmises via son API commerciale pour entraîner ses modèles. <span class="a-completer">[À VÉRIFIER : que les conditions commerciales signées avec Anthropic (Commercial Terms of Service) reflètent bien cette politique à la date de publication, et préciser la durée de conservation appliquée]</span></p>
 </section>
@@ -168,7 +179,8 @@
             <tbody>
                 <tr><td data-label="Prestataire">Vercel Inc.</td><td data-label="Rôle">Hébergement de l’interface web</td><td data-label="Données concernées">Données techniques de connexion (adresse IP, journaux d’accès)</td><td data-label="Localisation">États-Unis (adhérent au cadre européen de protection des données EU-U.S. Data Privacy Framework)</td></tr>
                 <tr><td data-label="Prestataire">Render</td><td data-label="Rôle">Hébergement de l’API et de la base de données PostgreSQL</td><td data-label="Données concernées">Données de compte et données des prospects</td><td data-label="Localisation">Union européenne — Francfort, Allemagne (région Render « EU Central »)</td></tr>
-                <tr><td data-label="Prestataire">Brevo</td><td data-label="Rôle">Envoi d’e-mails transactionnels</td><td data-label="Données concernées">Adresse e-mail du destinataire et contenu du message envoyé</td><td data-label="Localisation">France</td></tr>
+                <tr><td data-label="Prestataire">Brevo</td><td data-label="Rôle">Envoi d’e-mails (messages liés au compte, alertes, e-mail du matin, messages adressés aux prospects au nom de l’agence)</td><td data-label="Données concernées">Adresse e-mail du destinataire et contenu du message envoyé</td><td data-label="Localisation">France</td></tr>
+                <tr><td data-label="Prestataire">Services de notification des navigateurs et systèmes d’exploitation (Google, Apple, Mozilla, Microsoft selon l’appareil), si l’utilisateur active les notifications</td><td data-label="Rôle">Acheminement des notifications vers l’appareil de l’utilisateur</td><td data-label="Données concernées">Adresse technique d’abonnement et contenu de la notification, chiffré de bout en bout : le service d’acheminement ne peut pas le lire</td><td data-label="Localisation">États-Unis ou selon le fournisseur de l’appareil</td></tr>
                 <tr><td data-label="Prestataire">Anthropic (si la fonction d’extraction est activée)</td><td data-label="Rôle">Analyse du texte d’un message pour en extraire des critères</td><td data-label="Données concernées">Texte du message soumis</td><td data-label="Localisation">États-Unis</td></tr>
             </tbody>
         </table>
@@ -178,7 +190,7 @@
 
 <section id="transferts" aria-labelledby="h-transferts">
     <h2 id="h-transferts">7. Transferts hors de l’Union européenne</h2>
-    <p>Certains prestataires mentionnés ci-dessus sont établis aux États-Unis ou peuvent héberger des données hors de l’Union européenne. Dans ce cas, le transfert est encadré par les garanties prévues au chapitre V du RGPD : Vercel adhère au cadre européen de protection des données (EU-U.S. Data Privacy Framework) ; Render et Anthropic recourent, selon leurs informations publiées, aux clauses contractuelles types de la Commission européenne. <span class="a-completer">[À VÉRIFIER auprès de chaque prestataire, notamment dans son propre DPA, que le mécanisme retenu est toujours en vigueur à la date de publication]</span>.</p>
+    <p>Certains prestataires mentionnés ci-dessus sont établis aux États-Unis ou peuvent héberger des données hors de l’Union européenne. Dans ce cas, le transfert est encadré par les garanties prévues au chapitre V du RGPD : Vercel adhère au cadre européen de protection des données (EU-U.S. Data Privacy Framework) ; Render et Anthropic recourent, selon leurs informations publiées, aux clauses contractuelles types de la Commission européenne. Les services de notification des navigateurs relèvent des dispositifs de transfert de leurs fournisseurs ; le contenu des notifications y transite chiffré. <span class="a-completer">[À VÉRIFIER auprès de chaque prestataire, notamment dans son propre DPA, que le mécanisme retenu est toujours en vigueur à la date de publication]</span>.</p>
 </section>
 
 <section id="conservation" aria-labelledby="h-conservation">
@@ -190,6 +202,8 @@
             <tbody>
                 <tr><td data-label="Catégorie">Données de compte</td><td data-label="Durée de conservation">Pendant la durée du contrat, puis 30 jours après sa fin (délai permettant à l’agence de demander une restitution), sauf obligation légale de conservation plus longue</td></tr>
                 <tr><td data-label="Catégorie">Données des prospects</td><td data-label="Durée de conservation">Jusqu’à leur suppression par l’agence (fonction « supprimer ce prospect »), ou jusqu’à la fin du contrat puis 30 jours (même délai que les données de compte)</td></tr>
+                <tr><td data-label="Catégorie">Événements d’activité des prospects</td><td data-label="Durée de conservation">Supprimés avec la fiche du prospect concerné</td></tr>
+                <tr><td data-label="Catégorie">Abonnements aux notifications</td><td data-label="Durée de conservation">Jusqu’à la désactivation des notifications par l’utilisateur, la suppression de son compte ou l’expiration de l’abonnement signalée par le navigateur</td></tr>
                 <tr><td data-label="Catégorie">Journaux techniques</td><td data-label="Durée de conservation">12 mois</td></tr>
                 <tr><td data-label="Catégorie">Demandes de réinitialisation du mot de passe</td><td data-label="Durée de conservation">Lien valable pendant une durée limitée (30 minutes) ; l’enregistrement de la demande est supprimé dès son utilisation ou, au plus tard, 24 heures après son expiration</td></tr>
                 <tr><td data-label="Catégorie">Messages adressés à Zelyro (démonstration, questions)</td><td data-label="Durée de conservation">3 ans à compter du dernier contact, conformément aux recommandations usuelles en matière de prospection commerciale</td></tr>
@@ -209,7 +223,9 @@
         <li>des sessions de durée limitée, invalidées lors d’un changement de mot de passe ;</li>
         <li>une réinitialisation du mot de passe par e-mail au moyen d’un lien à durée limitée ;</li>
         <li>des échanges chiffrés (HTTPS) entre le navigateur, l’interface et l’API ;</li>
-        <li>une limitation du nombre de requêtes, pour réduire les risques d’abus.</li>
+        <li>une limitation du nombre de requêtes, pour réduire les risques d’abus ;</li>
+        <li>des liens à identifiant aléatoire pour le formulaire de contact et la sélection de biens, cette dernière expirant au bout de 90 jours ;</li>
+        <li>des notifications chiffrées de bout en bout entre Zelyro et l’appareil de l’utilisateur.</li>
     </ul>
     <p>Aucun système n’étant infaillible, en cas de violation de données susceptible d’engendrer un risque, Zelyro préviendra les agences concernées dans les meilleurs délais afin qu’elles puissent remplir leurs propres obligations de notification.</p>
 </section>
@@ -217,7 +233,7 @@
 <section id="cookies" aria-labelledby="h-cookies">
     <h2 id="h-cookies">10. Cookies et traceurs</h2>
     <p>Zelyro n’utilise aucun cookie publicitaire, aucun outil de mesure d’audience et aucun traceur tiers. Les polices de caractères sont hébergées avec le site.</p>
-    <p>Le seul élément stocké dans votre navigateur est un jeton de session technique (avec, le cas échéant, quelques informations de compte nécessaires à l’affichage), conservé dans le stockage local du navigateur (localStorage). Il est indispensable au fonctionnement du service et à votre authentification ; il n’est pas utilisé à d’autres fins. À ce titre, il est exempté de consentement et aucun bandeau de cookies n’est affiché. Vous pouvez l’effacer à tout moment en vous déconnectant ou en vidant les données du site dans votre navigateur.</p>
+    <p>Les seuls éléments stockés dans votre navigateur sont techniques : un jeton de session (avec, le cas échéant, quelques informations de compte nécessaires à l’affichage), conservé dans le stockage local du navigateur (localStorage), et, si vous installez l’application ou activez les notifications, un composant technique (service worker) qui reçoit les notifications. Ce composant ne met aucun contenu en cache et ne conserve aucune donnée personnelle. Ces éléments sont indispensables au fonctionnement du service que vous demandez ; ils ne sont pas utilisés à d’autres fins. À ce titre, ils sont exemptés de consentement et aucun bandeau de cookies n’est affiché. L’affichage des notifications nécessite en outre votre autorisation expresse dans le navigateur, que vous pouvez retirer à tout moment. Vous pouvez effacer ces éléments en vous déconnectant ou en vidant les données du site dans votre navigateur.</p>
 </section>
 
 <section id="droits" aria-labelledby="h-droits">
@@ -245,7 +261,8 @@
     <ul>
         <li>disposer d’une base légale pour collecter et utiliser ces données, et recueillir le consentement lorsque la réglementation l’exige, en particulier pour la prospection commerciale ;</li>
         <li>informer les prospects du traitement de leurs données, y compris de l’usage de Zelyro comme sous-traitant, et de leurs droits ;</li>
-        <li>ne saisir que des données pertinentes et nécessaires, et tenir ces données à jour ;</li>
+        <li>informer les prospects que l’ouverture des liens qu’elle leur envoie et leurs demandes de visite sont enregistrées et portées à sa connaissance ;</li>
+        <li>ne saisir que des données pertinentes et nécessaires, et tenir ces données à jour ;</li>
         <li>répondre aux demandes d’exercice des droits des prospects ;</li>
         <li>supprimer les données qui n’ont plus lieu d’être conservées.</li>
     </ul>

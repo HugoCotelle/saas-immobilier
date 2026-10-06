@@ -16,6 +16,9 @@
         .stats-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
         .stat-value { font-size: 42px; }
     </style>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <script src="/pwa.js" defer></script>
 </head>
 <body>
     <div id="root"></div>
@@ -92,6 +95,9 @@
             const [user, setUser] = useState(null);
             // Lu une fois, avant d'être mis à jour : ce qui est postérieur est « nouveau » pour l'agent.
             const [vueAvant] = useState(lireVue);
+            const [dormants, setDormants] = useState(null);
+            const [tauxSaisi, setTauxSaisi] = useState('');
+            const [tauxMessage, setTauxMessage] = useState(null);
 
             useEffect(() => {
                 const token = localStorage.getItem('token');
@@ -133,11 +139,45 @@
                     if (donnees.activity && donnees.activity.length) ecrireVue(donnees.activity[0].created_at);
                     setBiens(await rBiens.json());
                     setRappels(await rRappels.json());
+                    if (donnees.commission) setTauxSaisi(String(donnees.commission.rate).replace('.', ','));
                     setError(null);
+                    // Les prospects à réveiller se calculent à part : ils n'empêchent pas l'affichage du reste.
+                    fetch(`${API_URL}/api/v1/dormants`, { headers: entetes })
+                        .then((r) => (r.ok ? r.json() : null))
+                        .then((d) => setDormants(d))
+                        .catch(() => {});
                 } catch (err) {
                     setError(err.message);
                 } finally {
                     setLoading(false);
+                }
+            };
+
+            const euros = (n) => `${Number(n || 0).toLocaleString('fr-FR')} €`;
+
+            // Le taux se règle ici : on met aussi à jour les montants sans recharger la page.
+            const enregistrerTaux = async () => {
+                const taux = Number(String(tauxSaisi).replace(',', '.'));
+                if (!(taux >= 0.1 && taux <= 15)) { setTauxMessage('Indiquez un taux entre 0,1 et 15 %.'); return; }
+                setTauxMessage(null);
+                try {
+                    const r = await fetch(`${API_URL}/api/v1/commission-rate`, {
+                        method: 'PUT',
+                        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rate: taux })
+                    });
+                    const j = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(j.message || `Erreur ${r.status}`);
+                    setStats((st) => {
+                        const c = st.commission;
+                        const hot = { ...c.hot, commission: Math.round(c.hot.budget * j.rate / 100) };
+                        const warm = { ...c.warm, commission: Math.round(c.warm.budget * j.rate / 100) };
+                        return { ...st, commission: { rate: j.rate, hot, warm, total: hot.commission + warm.commission } };
+                    });
+                    setTauxSaisi(String(j.rate).replace('.', ','));
+                    setTauxMessage('Taux enregistré.');
+                } catch (err) {
+                    setTauxMessage(err.message);
                 }
             };
 
@@ -242,10 +282,13 @@
                                         ) : (
                                             <div>
                                                 {stats.activity.slice(0, 8).map((e) => (
-                                                    <div key={e.id} className="afaire-item">
+                                                    <div key={e.id} className="afaire-item"
+                                                        style={e.kind === 'interet_bien' ? { borderLeft: '3px solid var(--hot)', paddingLeft: '12px' } : undefined}>
                                                         <div className="afaire-quoi">
                                                             <a href={`/leads-profile.html?id=${e.lead_id}`}>{e.name}</a>
-                                                            <small>{e.label}</small>
+                                                            <small style={e.kind === 'interet_bien' ? { color: 'var(--hot)', fontWeight: 600 } : undefined}>
+                                                                {e.kind === 'interet_bien' ? 'À rappeler · ' : ''}{e.label}
+                                                            </small>
                                                         </div>
                                                         <div className="rappel-date" style={estNouveau(e.created_at) ? { color: 'var(--sage-700)', fontWeight: 600 } : undefined}>
                                                             {estNouveau(e.created_at) ? 'Nouveau · ' : ''}{ilYA(e.created_at)}
@@ -258,6 +301,83 @@
                                             </div>
                                         )}
                                     </div>
+
+                                    {stats.untreated && stats.untreated.count > 0 && (
+                                        <div className="panel" style={{ marginBottom: '24px' }}>
+                                            <div className="panel-header">
+                                                <div className="panel-title">Sans suite depuis {stats.untreated.hours} h</div>
+                                                <div className="panel-count">{stats.untreated.count} prospect{stats.untreated.count > 1 ? 's' : ''}</div>
+                                            </div>
+                                            {stats.untreated.items.map((p) => (
+                                                <div key={p.id} className="afaire-item">
+                                                    <div className="afaire-quoi">
+                                                        <a href={`/leads-profile.html?id=${p.id}`}>{p.name}</a>
+                                                        <small>{p.assigned_name ? `Responsable : ${p.assigned_name}` : 'Sans responsable'}</small>
+                                                    </div>
+                                                    <div className="rappel-date retard" style={{ color: 'var(--danger)', fontWeight: 600 }}>
+                                                        {p.hours >= 48 ? `${Math.floor(p.hours / 24)} j` : `${p.hours} h`} sans réponse
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {stats.untreated.count > stats.untreated.items.length && (
+                                                <div className="stat-note">… et {stats.untreated.count - stats.untreated.items.length} autre{stats.untreated.count - stats.untreated.items.length > 1 ? 's' : ''}. Ils sont aussi dans votre e-mail du matin.</div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {dormants && dormants.total > 0 && (
+                                        <div className="panel" style={{ marginBottom: '24px' }}>
+                                            <div className="panel-header">
+                                                <div className="panel-title">Prospects à réveiller</div>
+                                                <div className="panel-count">{dormants.total} prospect{dormants.total > 1 ? 's' : ''}</div>
+                                            </div>
+                                            <div className="panel-note">
+                                                Sans nouvelles depuis plus de {dormants.days} jours, et un bien de votre portefeuille leur correspond
+                                                aujourd'hui (un bien qu'on ne leur a pas déjà envoyé).
+                                            </div>
+                                            {dormants.dormants.slice(0, 5).map((d) => (
+                                                <div key={d.lead.id} className="afaire-item">
+                                                    <div className="afaire-quoi">
+                                                        <a href={`/leads-profile.html?id=${d.lead.id}`}>{d.lead.name}</a>
+                                                        <small>
+                                                            {d.days_inactive} j sans nouvelles · {d.biens[0].title}
+                                                            {d.biens.length > 1 ? ` (+${d.biens.length - 1})` : ''}
+                                                        </small>
+                                                    </div>
+                                                    <a className="lien-fiche" href={`/propositions.html?id=${d.lead.id}`}>Préparer la relance →</a>
+                                                </div>
+                                            ))}
+                                            {dormants.total > 5 && (
+                                                <div className="stat-note">… et {dormants.total - 5} autre{dormants.total - 5 > 1 ? 's' : ''}, à retrouver dans <a href="/propositions.html">Propositions</a>.</div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {stats.commission && (
+                                        <div className="panel" style={{ marginBottom: '24px' }}>
+                                            <div className="panel-header">
+                                                <div className="panel-title">Potentiel de commission</div>
+                                                <div className="panel-count">achats en cours</div>
+                                            </div>
+                                            <div className="chips-relances">
+                                                <span className="chip">{stats.commission.hot.count} chaud{stats.commission.hot.count > 1 ? 's' : ''} · budgets {euros(stats.commission.hot.budget)} · {euros(stats.commission.hot.commission)}</span>
+                                                <span className="chip">{stats.commission.warm.count} tiède{stats.commission.warm.count > 1 ? 's' : ''} · budgets {euros(stats.commission.warm.budget)} · {euros(stats.commission.warm.commission)}</span>
+                                            </div>
+                                            <div className="stat-value" style={{ marginTop: '12px' }}>{euros(stats.commission.total)}</div>
+                                            <div className="stat-note">
+                                                Commission si tous ces prospects achetaient à leur budget maximum, au taux de {String(stats.commission.rate).replace('.', ',')} %.
+                                                C'est un ordre de grandeur, pas une prévision : seuls les achats comptent, et pas les locations.
+                                            </div>
+                                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '14px', flexWrap: 'wrap' }}>
+                                                <label htmlFor="taux-commission" style={{ fontSize: '14px' }}>Taux moyen de votre agence (%)</label>
+                                                <input id="taux-commission" type="text" inputMode="decimal" value={tauxSaisi}
+                                                    onChange={(e) => { setTauxSaisi(e.target.value); setTauxMessage(null); }}
+                                                    style={{ width: '90px' }} />
+                                                <button className="btn petit" onClick={enregistrerTaux}>Enregistrer</button>
+                                                {tauxMessage && <span className="stat-note" role="status">{tauxMessage}</span>}
+                                            </div>
+                                        </div>
+                                    )}
 
                                     <div className="content-grid">
                                         <div className="panel">

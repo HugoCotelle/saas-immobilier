@@ -16,6 +16,9 @@
         .form-row { grid-template-columns: 1fr 1fr; }
         @media (max-width: 700px) { .form-row { grid-template-columns: 1fr; } }
     </style>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <script src="/pwa.js" defer></script>
 </head>
 <body>
     <div id="root"></div>
@@ -39,32 +42,58 @@
             };
         }
 
+        // Numéro au format international sans « + » (06 12 34 56 78 -> 33612345678), pour tel: et WhatsApp.
+        function numeroInternational(tel) {
+            var d = String(tel || '').replace(/[^\d+]/g, '');
+            if (!d) return '';
+            if (d.charAt(0) === '+') return d.slice(1).replace(/\D/g, '');
+            if (d.slice(0, 2) === '00') return d.slice(2);
+            if (d.charAt(0) === '0' && d.length === 10) return '33' + d.slice(1);
+            return d;
+        }
+        // Prénom pour le message, sauf nom provisoire donné à un contact de portail.
+        function prenomPourMessage(nom) {
+            var n = String(nom || '').trim();
+            if (!n || /^Contact (LeBonCoin|SeLoger|\()/.test(n)) return '';
+            return n.split(' ')[0];
+        }
+
+        // Engagement : ce que le prospect a fait avec les liens reçus (points calculés par le serveur).
+        function ajouterEngagement(lead, ajouter) {
+            var lignes = lead.engagement_lignes || [];
+            var total = 0;
+            lignes.forEach(function (l) { total += l[0]; ajouter(l[0], l[1]); });
+            if (total > 12) ajouter(12 - total, 'Plafond de l\'engagement (12 points)');
+            return Math.min(total, 12);
+        }
+
         function expliquerQualite(lead) {
             if (lead.transaction === 'location') return expliquerQualiteLocataire(lead);
             const lignes = [];
             let points = 0;
 
             const fin = {
-                approved: [40, 'Financement approuvé'],
-                in_progress: [25, 'Financement en cours'],
-                pending: [12, 'Financement en attente']
+                approved: [36, 'Financement approuvé'],
+                in_progress: [22, 'Financement en cours'],
+                pending: [11, 'Financement en attente']
             }[lead.financing_status];
             if (fin) { points += fin[0]; lignes.push(`+${fin[0]} ${fin[1]}`); }
 
             const urg = {
-                immediate: [35, 'Achat immédiat'],
-                '1-3_months': [28, 'Achat sous 3 mois'],
-                '3-6_months': [15, 'Achat sous 6 mois'],
-                '6plus_months': [5, 'Achat au-delà de 6 mois']
+                immediate: [32, 'Achat immédiat'],
+                '1-3_months': [25, 'Achat sous 3 mois'],
+                '3-6_months': [14, 'Achat sous 6 mois'],
+                '6plus_months': [4, 'Achat au-delà de 6 mois']
             }[lead.purchase_urgency];
             if (urg) { points += urg[0]; lignes.push(`+${urg[0]} ${urg[1]}`); }
 
-            const coord = coordonnees(lead, 10);
+            const coord = coordonnees(lead, 8);
             if (coord.email) { points += coord.email; lignes.push(`+${coord.email} E-mail renseigné`); }
             if (coord.phone) { points += coord.phone; lignes.push(`+${coord.phone} Téléphone renseigné`); }
-            if (lead.budget) { points += 6; lignes.push('+6 Budget renseigné'); }
-            if (lead.location) { points += 5; lignes.push('+5 Secteur renseigné'); }
-            if (lead.property_type) { points += 4; lignes.push('+4 Type de bien renseigné'); }
+            if (lead.budget) { points += 5; lignes.push('+5 Budget renseigné'); }
+            if (lead.location) { points += 4; lignes.push('+4 Secteur renseigné'); }
+            if (lead.property_type) { points += 3; lignes.push('+3 Type de bien renseigné'); }
+            points += ajouterEngagement(lead, (n, t) => lignes.push(`${n > 0 ? '+' : ''}${n} ${t}`));
 
             points = Math.min(100, points);
             const quality = points >= 80 ? 'hot' : points >= 45 ? 'warm' : 'cold';
@@ -80,28 +109,28 @@
             const revenus = parseInt(lead.revenus, 10) || 0;
             // Un local commercial ou un bureau se loue à un professionnel : on ne compte aucun garant.
             const garants = ['Local commercial', 'Bureau'].includes(lead.property_type) ? 0 : (parseInt(lead.garants, 10) || 0);
-            const ajouter = (n, texte) => { points += n; lignes.push(`+${n} ${texte}`); };
+            const ajouter = (n, texte) => { points += n; lignes.push(`${n > 0 ? '+' : ''}${n} ${texte}`); };
 
             if (revenus && loyer) {
                 const r = revenus / loyer;
                 const txt = r.toFixed(1).replace('.', ',').replace(',0', '');
-                if (r >= 3) ajouter(30, `Revenus de ${txt} fois le loyer`);
-                else if (r >= 2.5) ajouter(20, `Revenus de ${txt} fois le loyer (3 fois exigés)`);
-                else if (r >= 2) ajouter(10, `Revenus de ${txt} fois le loyer (3 fois exigés)`);
+                if (r >= 3) ajouter(27, `Revenus de ${txt} fois le loyer`);
+                else if (r >= 2.5) ajouter(18, `Revenus de ${txt} fois le loyer (3 fois exigés)`);
+                else if (r >= 2) ajouter(9, `Revenus de ${txt} fois le loyer (3 fois exigés)`);
                 else ajouter(3, `Revenus de ${txt} fois le loyer, insuffisants`);
-                if (garants) ajouter(r >= 3 ? 5 : 12, 'Garant disponible');
+                if (garants) ajouter(r >= 3 ? 4 : 11, 'Garant disponible');
             } else if (garants) {
-                ajouter(15, 'Garant disponible');
+                ajouter(13, 'Garant disponible');
             }
 
-            const situation = { cdi: 15, fonctionnaire: 15, retraite: 12, independant: 9, cdd: 6, etudiant: 5, autre: 2 }[lead.situation_pro];
+            const situation = { cdi: 13, fonctionnaire: 13, retraite: 11, independant: 8, cdd: 5, etudiant: 4, autre: 2 }[lead.situation_pro];
             if (situation) ajouter(situation, `Situation : ${(SITUATIONS.find((x) => x[0] === lead.situation_pro) || [])[1]}`);
 
             const urg = {
-                immediate: [30, 'Emménagement immédiat'],
-                '1-3_months': [24, 'Emménagement sous 3 mois'],
-                '3-6_months': [13, 'Emménagement sous 6 mois'],
-                '6plus_months': [4, 'Emménagement au-delà de 6 mois']
+                immediate: [24, 'Emménagement immédiat'],
+                '1-3_months': [19, 'Emménagement sous 3 mois'],
+                '3-6_months': [10, 'Emménagement sous 6 mois'],
+                '6plus_months': [3, 'Emménagement au-delà de 6 mois']
             }[lead.purchase_urgency];
             if (urg) ajouter(urg[0], urg[1]);
 
@@ -111,6 +140,7 @@
             if (lead.budget) ajouter(5, 'Loyer maximum renseigné');
             if (lead.location) ajouter(4, 'Secteur renseigné');
             if (lead.property_type) ajouter(3, 'Type de bien renseigné');
+            ajouterEngagement(lead, (n, t) => ajouter(n, t));
 
             points = Math.min(100, points);
             const quality = points >= 80 ? 'hot' : points >= 45 ? 'warm' : 'cold';
@@ -171,6 +201,7 @@
             const [notes, setNotes] = useState([]);
             const [lienPerso, setLienPerso] = useState(null);
             const [lienCopie, setLienCopie] = useState(false);
+            const [membres, setMembres] = useState([]);
             const [rappels, setRappels] = useState([]);
             const [nouvelleNote, setNouvelleNote] = useState('');
             const [rappelDate, setRappelDate] = useState('');
@@ -196,6 +227,7 @@
                 }
                 fetchLead(token);
                 chargerSuivi();
+                appel('/api/v1/team/members').then(setMembres).catch(() => {});
             }, []);
 
             const deconnecter = () => {
@@ -246,6 +278,13 @@
             const changerStatut = (statut) => agir(async () => {
                 await appel(`/api/v1/leads/${leadId}/status`, { method: 'PUT', body: JSON.stringify({ status: statut }) });
                 setLead((l) => ({ ...l, status: statut }));
+            });
+
+            // Confier le prospect à un collaborateur (ou à personne).
+            const changerResponsable = (valeur) => agir(async () => {
+                const cible = valeur === '' ? null : Number(valeur);
+                await appel(`/api/v1/leads/${leadId}/assign`, { method: 'PUT', body: JSON.stringify({ user_id: cible }) });
+                setLead((l) => ({ ...l, assigned_to: cible }));
             });
 
             const ajouterNote = () => agir(async () => {
@@ -411,6 +450,7 @@
                 property_type: form.property_type,
                 email: form.email,
                 phone: form.phone,
+                engagement_lignes: lead ? lead.engagement_lignes : [],
                 transaction: form.transaction,
                 revenus: form.revenus,
                 garants: form.garants,
@@ -502,6 +542,16 @@
                                                         placeholder="prenom.nom@exemple.fr" />
                                                 </div>
                                             </div>
+                                            {numeroInternational(form.phone).length >= 9 && (
+                                                <div className="btn-ligne" style={{ marginTop: 0 }}>
+                                                    <a className="btn petit" href={`tel:+${numeroInternational(form.phone)}`}>Appeler</a>
+                                                    <a className="btn petit secondary" target="_blank" rel="noopener noreferrer"
+                                                        href={`https://wa.me/${numeroInternational(form.phone)}?text=${encodeURIComponent(
+                                                            `Bonjour${prenomPourMessage(form.name) ? ' ' + prenomPourMessage(form.name) : ''}, je vous contacte suite à votre demande${user && user.company_name ? ' auprès de ' + user.company_name : ''}. Quand seriez-vous disponible pour en parler ?`)}`}>
+                                                        WhatsApp
+                                                    </a>
+                                                </div>
+                                            )}
                                         </div>
 
                                         <div className="panel">
@@ -730,6 +780,20 @@
                                             </div>
                                             {erreurSuivi && <div className="error" style={{ marginTop: '16px', marginBottom: 0 }}>{erreurSuivi}</div>}
 
+                                            {membres.length > 1 && (
+                                                <div className="form-group" style={{ marginTop: '20px', marginBottom: 0 }}>
+                                                    <label htmlFor="responsable">Responsable</label>
+                                                    <select id="responsable" value={lead.assigned_to == null ? '' : String(lead.assigned_to)}
+                                                        disabled={occupe} onChange={(e) => changerResponsable(e.target.value)}>
+                                                        <option value="">Personne pour l'instant</option>
+                                                        {membres.map((m) => (
+                                                            <option key={m.id} value={String(m.id)}>{m.name}{m.is_me ? ' (moi)' : ''}</option>
+                                                        ))}
+                                                    </select>
+                                                    <div className="field-hint">Le collaborateur choisi est prévenu par e-mail.</div>
+                                                </div>
+                                            )}
+
                                             <div className="section-divider"></div>
                                             <div className="panel-title" style={{ fontSize: '17px' }}>Relances</div>
                                             {rappels.length === 0 && (
@@ -782,7 +846,7 @@
                                                     <div className="panel-note" style={{ marginBottom: 0 }}>Rien pour l'instant.</div>
                                                 )}
                                                 {notes.map((n) => (
-                                                    <div key={n.id} className={`hist-item ${n.kind === 'statut' ? 'statut' : n.kind === 'activite' ? 'activite' : ''}`}>
+                                                    <div key={n.id} className={`hist-item ${n.kind === 'statut' || n.kind === 'attrib' ? 'statut' : n.kind === 'activite' ? 'activite' : ''}`}>
                                                         <div className="hist-date">
                                                             {dateHeure(n.created_at)}
                                                             {n.kind === 'note' && (

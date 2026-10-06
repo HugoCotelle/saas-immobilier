@@ -11,6 +11,9 @@
     <meta name="theme-color" content="#F6F2EA">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="zelyro.css">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <script src="/pwa.js" defer></script>
 </head>
 <body>
     <div id="root"></div>
@@ -27,6 +30,13 @@
             const [message, setMessage] = useState(null);
             const [alertes, setAlertes] = useState(null);      // null tant que non chargé
             const [messageAlertes, setMessageAlertes] = useState(null);
+            const [matin, setMatin] = useState(null);          // e-mail du matin : null tant que non chargé
+            const [messageMatin, setMessageMatin] = useState(null);
+            const [apercuEnCours, setApercuEnCours] = useState(false);
+            const [notif, setNotif] = useState(null);           // { permission, abonne } ; null tant que non lu
+            const [messageNotif, setMessageNotif] = useState(null);
+            const [notifOccupe, setNotifOccupe] = useState(false);
+            const [installable, setInstallable] = useState(false);
             const [lien, setLien] = useState(null);
             const [messageLien, setMessageLien] = useState(null);
             const [confirmerLien, setConfirmerLien] = useState(false);
@@ -63,6 +73,7 @@
                 if (userData) setUser(JSON.parse(userData));
                 appel('/auth/profile').then((p) => {
                     setAlertes(p.alerts_enabled !== false);
+                    setMatin(p.digest_enabled !== false);
                     // Met à jour ce que le navigateur sait du compte (forfait, rôle, droits d'administration).
                     try {
                         const u = JSON.parse(localStorage.getItem('user') || '{}');
@@ -73,6 +84,12 @@
                     } catch (e) { /* sans importance */ }
                 }).catch(() => {});
                 appel('/api/v1/plan').then(setForfait).catch(() => {});
+                const pwa = window.zelyroPwa;
+                if (pwa) {
+                    pwa.etat().then(setNotif);
+                    // Le navigateur propose l'installation un peu après le chargement de la page.
+                    setTimeout(() => setInstallable(pwa.installable()), 1500);
+                }
                 appel('/api/v1/capture-link').then(setLien).catch((e) => setMessageLien({ type: 'error', text: e.message }));
                 appel('/api/v1/gmail/status').then(setGmailStatus).catch((e) => setMessageGmail({ type: 'error', text: e.message }));
 
@@ -102,6 +119,55 @@
                 } catch (e) {
                     setAlertes(!valeur);
                     setMessageAlertes({ type: 'error', text: e.message });
+                }
+            };
+
+            const changerMatin = async (valeur) => {
+                setMatin(valeur);
+                setMessageMatin(null);
+                try {
+                    await appel('/auth/preferences', { method: 'PUT', body: JSON.stringify({ digest_enabled: valeur }) });
+                    setMessageMatin({ type: 'success', text: valeur ? 'E-mail du matin activé.' : 'E-mail du matin désactivé.' });
+                } catch (e) {
+                    setMatin(!valeur);
+                    setMessageMatin({ type: 'error', text: e.message });
+                }
+            };
+
+            const pwa = window.zelyroPwa;
+            const actionNotif = async (fonction, succes) => {
+                setNotifOccupe(true);
+                setMessageNotif(null);
+                try {
+                    const r = await fonction();
+                    setNotif(await pwa.etat());
+                    if (succes) setMessageNotif({ type: 'success', text: typeof succes === 'function' ? succes(r) : succes });
+                } catch (e) {
+                    setNotif(await pwa.etat());
+                    setMessageNotif({ type: 'error', text: e.message });
+                } finally {
+                    setNotifOccupe(false);
+                }
+            };
+            const activerNotif = () => actionNotif(() => pwa.activer(), 'Notifications activées sur cet appareil.');
+            const couperNotif = () => actionNotif(() => pwa.desactiver(), 'Notifications désactivées sur cet appareil.');
+            const essaiNotif = () => actionNotif(() => pwa.essai(), (r) => r.message);
+            const installerAppli = async () => {
+                const ok = await pwa.installer();
+                setInstallable(false);
+                if (ok) setMessageNotif({ type: 'success', text: 'Application installée.' });
+            };
+
+            const recevoirApercu = async () => {
+                setApercuEnCours(true);
+                setMessageMatin(null);
+                try {
+                    const d = await appel('/api/v1/digest/preview', { method: 'POST' });
+                    setMessageMatin({ type: d.sent ? 'success' : 'info', text: d.message });
+                } catch (e) {
+                    setMessageMatin({ type: 'error', text: e.message });
+                } finally {
+                    setApercuEnCours(false);
                 }
             };
 
@@ -382,8 +448,9 @@
                                 <p className="panel-note">
                                     Recevez un e-mail quand un bien correspond à un prospect (score de 70 sur 100
                                     ou plus), quand un import ajoute des prospects qui correspondent à vos biens,
-                                    et quand un nouveau prospect arrive via votre formulaire de contact ou via
-                                    LeBonCoin/SeLoger. Une même correspondance n'est signalée qu'une fois.
+                                    quand un nouveau prospect arrive via votre formulaire de contact ou via
+                                    LeBonCoin/SeLoger, et quand un prospect demande à visiter un bien depuis les annonces
+                                    que vous lui avez envoyées. Une même correspondance n'est signalée qu'une fois.
                                 </p>
                                 {messageAlertes && (
                                     <div className={messageAlertes.type === 'error' ? 'error' : 'success'}>{messageAlertes.text}</div>
@@ -393,6 +460,80 @@
                                         onChange={(e) => changerAlertes(e.target.checked)} />
                                     <span>Me prévenir par e-mail à l'adresse {user ? user.email : 'de mon compte'}</span>
                                 </label>
+                            </div>
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">E-mail du matin</h2>
+                                </div>
+                                <p className="panel-note">
+                                    Chaque matin, un seul e-mail pour savoir par où commencer : les prospects chauds à
+                                    appeler, les relances du jour, ce que vos prospects ont fait depuis la veille et ceux
+                                    restés sans suite depuis plus de 24 h. Il n'est envoyé que s'il y a quelque chose à traiter.
+                                </p>
+                                {messageMatin && (
+                                    <div className={messageMatin.type === 'error' ? 'error' : messageMatin.type === 'info' ? 'info-box' : 'success'}>{messageMatin.text}</div>
+                                )}
+                                <label className="interrupteur">
+                                    <input type="checkbox" checked={matin === true} disabled={matin === null}
+                                        onChange={(e) => changerMatin(e.target.checked)} />
+                                    <span>Recevoir l'e-mail du matin à l'adresse {user ? user.email : 'de mon compte'}</span>
+                                </label>
+                                <button type="button" className="btn secondary petit" style={{ marginTop: '14px' }}
+                                    disabled={apercuEnCours} onClick={recevoirApercu}>
+                                    {apercuEnCours ? 'Envoi…' : "Recevoir un aperçu maintenant"}
+                                </button>
+                            </div>
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Application et notifications</h2>
+                                </div>
+                                <p className="panel-note">
+                                    Installez Zelyro sur votre téléphone ou votre ordinateur comme une application, et
+                                    recevez une notification dès qu'un prospect ouvre un lien que vous lui avez envoyé,
+                                    remplit son formulaire ou demande une visite, ou quand un prospect vous est confié.
+                                    Le réglage se fait appareil par appareil.
+                                </p>
+                                {messageNotif && (
+                                    <div className={messageNotif.type === 'error' ? 'error' : 'success'}>{messageNotif.text}</div>
+                                )}
+                                {pwa && pwa.iphoneAInstaller() && (
+                                    <div className="info-box" style={{ marginBottom: '12px' }}>
+                                        Sur iPhone, ajoutez d'abord Zelyro à l'écran d'accueil (bouton Partager de Safari,
+                                        puis « Sur l'écran d'accueil »), ouvrez l'application depuis cette icône, puis revenez
+                                        ici pour activer les notifications.
+                                    </div>
+                                )}
+                                {notif && notif.permission === 'unsupported' && !(pwa && pwa.iphoneAInstaller()) && (
+                                    <div className="info-box" style={{ marginBottom: '12px' }}>
+                                        Ce navigateur ne gère pas les notifications. Essayez Chrome, Edge, Firefox ou Safari récent.
+                                    </div>
+                                )}
+                                {notif && notif.permission === 'denied' && (
+                                    <div className="info-box" style={{ marginBottom: '12px' }}>
+                                        Les notifications sont bloquées pour ce site : autorisez-les dans les réglages de votre navigateur, puis revenez ici.
+                                    </div>
+                                )}
+                                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                    {notif && notif.permission !== 'unsupported' && !notif.abonne && (
+                                        <button type="button" className="btn petit" disabled={notifOccupe || notif.permission === 'denied'}
+                                            onClick={activerNotif}>Activer les notifications sur cet appareil</button>
+                                    )}
+                                    {notif && notif.abonne && (
+                                        <>
+                                            <button type="button" className="btn secondary petit" disabled={notifOccupe} onClick={essaiNotif}>
+                                                Envoyer une notification d'essai
+                                            </button>
+                                            <button type="button" className="btn secondary petit" disabled={notifOccupe} onClick={couperNotif}>
+                                                Désactiver sur cet appareil
+                                            </button>
+                                        </>
+                                    )}
+                                    {installable && (
+                                        <button type="button" className="btn secondary petit" onClick={installerAppli}>Installer l'application</button>
+                                    )}
+                                </div>
                             </div>
 
                             <div className="panel">
@@ -416,6 +557,7 @@
                                         </div>
                                         <div className="btn-ligne" style={{ marginTop: '14px' }}>
                                             <a className="btn secondary petit" href={lien.url} target="_blank" rel="noopener">Voir le formulaire</a>
+                                            <a className="btn secondary petit" href="/affiche.html">QR code et affiche à imprimer</a>
                                             {!confirmerLien ? (
                                                 <button className="btn secondary petit" onClick={() => setConfirmerLien(true)}>Créer une nouvelle adresse</button>
                                             ) : (
@@ -427,7 +569,7 @@
                                         </div>
                                         <p className="field-hint">
                                             Une nouvelle adresse est utile en cas de messages indésirables :
-                                            l'ancienne est aussitôt désactivée.
+                                            l'ancienne est aussitôt désactivée, ainsi que les QR codes déjà imprimés.
                                         </p>
                                     </>
                                 ) : !messageLien && <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}

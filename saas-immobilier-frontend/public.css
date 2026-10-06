@@ -591,3 +591,26 @@ body.pub {
     .pricing-grid { grid-template-columns: 1fr; }
     .price-card.featured { order: -1; }
 }
+
+/* ---------- Simulateur ---------- */
+.simu-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 28px; align-items: start; }
+.simu-form { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 28px; display: grid; gap: 18px; }
+.simu-champ { display: grid; gap: 6px; }
+.simu-champ label { font-size: 14px; font-weight: 600; color: var(--ink); line-height: 1.4; }
+.simu-champ input, .simu-champ select {
+    width: 100%; padding: 11px 14px; font: inherit; font-size: 16px; color: var(--ink);
+    background: var(--bg, #fff); border: 1px solid var(--line-strong); border-radius: 10px;
+}
+.simu-champ input:focus-visible, .simu-champ select:focus-visible { outline: 2px solid var(--sage-600); outline-offset: 2px; }
+.simu-aide { font-size: 12.5px; color: var(--muted); }
+.simu-resultat { background: var(--surface); border: 2px solid var(--sage-600); border-radius: 18px; padding: 28px; }
+.simu-label { font-size: 11.5px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 0 0 14px; }
+.simu-resultat dl { margin: 0; display: grid; gap: 0; }
+.simu-resultat dl > div { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+.simu-resultat dt { font-size: 14.5px; color: var(--ink-2); }
+.simu-resultat dd { margin: 0; font-family: var(--serif); font-size: 24px; color: var(--ink); white-space: nowrap; }
+.simu-resultat .total dd { font-size: 30px; color: var(--sage-600); }
+.simu-seuil { margin-top: 22px; }
+.simu-seuil p:not(.simu-label) { font-size: 15.5px; line-height: 1.55; color: var(--ink); margin: 0 0 10px; }
+.simu-seuil .simu-note { font-size: 12.5px; color: var(--muted); }
+@media (max-width: 900px) { .simu-grid { grid-template-columns: 1fr; } }
