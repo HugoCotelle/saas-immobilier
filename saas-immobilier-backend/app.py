@@ -1225,6 +1225,22 @@ def _envoyer_email(destinataire, sujet, texte, html, nom_expediteur=None, repond
         return False
 
 
+# Logo des e-mails : une image publique hébergée avec le site (fichier
+# logo-email.png à la racine du frontend). Les e-mails ne peuvent pas utiliser
+# le logo CSS du site ; LOGO_EMAIL_URL permet de changer l'adresse si besoin.
+LOGO_EMAIL_URL = (os.getenv("LOGO_EMAIL_URL") or "https://www.zelyro.fr/logo-email.png").strip()
+
+
+def _entete_logo_email():
+    """Bandeau crème avec le logo Zelyro, en tête des e-mails envoyés par Zelyro.
+    Si l'image est bloquée par le logiciel de messagerie, le texte « ZELYRO »
+    s'affiche à la place."""
+    return ('<div style="background:#F6F2EA;padding:14px 20px;border-radius:8px;margin:0 0 20px">'
+            f'<img src="{_html.escape(LOGO_EMAIL_URL)}" width="170" height="48" alt="ZELYRO" '
+            'style="display:block;border:0;outline:none;text-decoration:none;height:48px;width:170px;'
+            'font-family:Georgia,serif;font-size:22px;letter-spacing:.14em;color:#1F2A24"></div>')
+
+
 def _gabarit_email(titre, paragraphes, bouton=None):
     """E-mail sobre, en texte et en HTML."""
     texte = "\n\n".join(paragraphes + ([f"{bouton[0]} : {bouton[1]}"] if bouton else [])) + "\n\nZelyro"
@@ -1237,7 +1253,7 @@ def _gabarit_email(titre, paragraphes, bouton=None):
                   f'Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :<br>'
                   f'{_html.escape(bouton[1])}</p>')
     html = ('<div style="font-family:Arial,Helvetica,sans-serif;color:#1F2A24;max-width:520px;margin:0 auto;padding:24px">'
-            f'<h2 style="font-family:Georgia,serif;font-weight:500;letter-spacing:.08em">ZELYRO</h2>'
+            f'{_entete_logo_email()}'
             f'<h3 style="font-weight:600;margin:24px 0 16px">{_html.escape(titre)}</h3>{corps}</div>')
     return texte, html
 
@@ -5481,7 +5497,7 @@ def _gabarit_digest(prenom, sections, site):
               'Ouvrir mon tableau de bord</a></p>'
               f'<p style="margin:0;color:#6A7168;font-size:13px;line-height:1.5">{_html.escape(pied)}</p>')
     html = ('<div style="font-family:Arial,Helvetica,sans-serif;color:#1F2A24;max-width:560px;margin:0 auto;padding:24px">'
-            '<h2 style="font-family:Georgia,serif;font-weight:500;letter-spacing:.08em">ZELYRO</h2>' + corps + '</div>')
+            + _entete_logo_email() + corps + '</div>')
     return "\n\n".join(texte) + "\n\nZelyro", html
 
 
