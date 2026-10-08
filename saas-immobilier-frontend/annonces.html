@@ -24,6 +24,9 @@
         .annonce .description { margin: 0; font-size: 14px; line-height: 1.6; color: var(--ink-2, #44504A); white-space: pre-line; }
         .annonce .actions { margin-top: 16px; }
         .annonce .actions button { width: auto; padding: 11px 20px; }
+        a.bouton-rdv { display: inline-block; margin-top: 14px; padding: 11px 20px; border-radius: 6px; background: var(--sage-600, #4F6353); color: #fff; text-decoration: none; font-weight: 600; font-size: 15px; }
+        .rappel-rdv { margin: 0 0 4px; text-align: center; }
+        .rappel-rdv a.bouton-rdv { margin-top: 0; }
         .annonce .merci { margin: 14px 0 0; font-size: 14px; color: var(--sage-700, #3E4F43); font-weight: 600; }
         .annonce .erreur-visite { margin: 10px 0 0; font-size: 13px; color: var(--danger, #A8452F); }
         .contact-agence { margin-top: 24px; font-size: 14px; color: var(--ink-2, #44504A); line-height: 1.6; text-align: center; }
@@ -75,6 +78,14 @@
                 return Number(valeur).toLocaleString('fr-FR') + ' €' + (location ? ' / mois' : '');
             }
 
+            // Le lien du planning vient du serveur ; on ne le suit que s'il a bien la forme attendue.
+            function lienPlanning(url, texte) {
+                if (typeof url !== 'string' || !/^https:\/\/[A-Za-z0-9.-]+\/rdv\.html\?t=[A-Za-z0-9_-]{16,64}$/.test(url)) return null;
+                var a = element('a', 'bouton-rdv', texte);
+                a.href = url;
+                return a;
+            }
+
             function demanderVisite(b, bouton, zone) {
                 bouton.disabled = true;
                 fetch(API_URL + '/public/annonces/' + encodeURIComponent(jeton) + '/interet', {
@@ -87,6 +98,8 @@
                         if (!res.ok) throw new Error(res.d.message || 'Une erreur est survenue.');
                         bouton.remove();
                         zone.appendChild(element('p', 'merci', res.d.message));
+                        var choisir = lienPlanning(res.d.rdv_url, 'Choisir mon créneau de visite');
+                        if (choisir) zone.appendChild(choisir);
                     })
                     .catch(function (e) {
                         bouton.disabled = false;
@@ -144,6 +157,8 @@
                     $('sous-titre').textContent = (agence ? agence + ' vous propose ' : 'Votre agence vous propose ')
                         + n + (n > 1 ? ' biens qui correspondent' : ' bien qui correspond') + ' à votre recherche.';
                     var liste = $('liste');
+                    var rappel = d.biens.some(function (b) { return b.interesse; }) ? lienPlanning(d.rdv_url, 'Choisir ou modifier mon créneau de visite') : null;
+                    if (rappel) { var p = element('p', 'rappel-rdv'); p.appendChild(rappel); liste.appendChild(p); }
                     d.biens.forEach(function (b) { liste.appendChild(carte(b)); });
                     montrer('etat', false);
                     montrer('liste', true);

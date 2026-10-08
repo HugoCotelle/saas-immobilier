@@ -38,6 +38,9 @@
             const [notifOccupe, setNotifOccupe] = useState(false);
             const [installable, setInstallable] = useState(false);
             const [lien, setLien] = useState(null);
+            const [rdv, setRdv] = useState(null);              // disponibilités : null tant que non chargées
+            const [messageRdv, setMessageRdv] = useState(null);
+            const [rdvEnCours, setRdvEnCours] = useState(false);
             const [messageLien, setMessageLien] = useState(null);
             const [confirmerLien, setConfirmerLien] = useState(false);
             const [forfait, setForfait] = useState(null);
@@ -84,6 +87,7 @@
                     } catch (e) { /* sans importance */ }
                 }).catch(() => {});
                 appel('/api/v1/plan').then(setForfait).catch(() => {});
+                appel('/api/v1/rdv/reglages').then(setRdv).catch((e) => setMessageRdv({ type: 'error', text: e.message }));
                 const pwa = window.zelyroPwa;
                 if (pwa) {
                     pwa.etat().then(setNotif);
@@ -133,6 +137,38 @@
                     setMessageMatin({ type: 'error', text: e.message });
                 }
             };
+
+            // Planning de rendez-vous : les modifications restent dans la page jusqu'à « Enregistrer ».
+            const JOURS_RDV = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+            const majRdv = (cle, valeur) => { setMessageRdv(null); setRdv((r) => ({ ...r, [cle]: valeur })); };
+            const majPlage = (i, cle, valeur) => { setMessageRdv(null); setRdv((r) => ({ ...r, plages: r.plages.map((p, k) => k === i ? { ...p, [cle]: valeur } : p) })); };
+            const ajouterPlage = (jour) => { setMessageRdv(null); setRdv((r) => ({ ...r, plages: [...r.plages, { jour, debut: '09:00', fin: '12:00' }] })); };
+            const retirerPlage = (i) => { setMessageRdv(null); setRdv((r) => ({ ...r, plages: r.plages.filter((_, k) => k !== i) })); };
+            const plagesTypes = () => {
+                setMessageRdv(null);
+                const plages = [];
+                for (let j = 0; j < 5; j++) {
+                    plages.push({ jour: j, debut: '09:00', fin: '12:00' }, { jour: j, debut: '14:00', fin: '18:00' });
+                }
+                setRdv((r) => ({ ...r, plages }));
+            };
+            const enregistrerRdv = async () => {
+                setRdvEnCours(true);
+                setMessageRdv(null);
+                try {
+                    const plages = rdv.plages.filter((p) => p.debut && p.fin);
+                    const maj = await appel('/api/v1/rdv/reglages', { method: 'PUT', body: JSON.stringify({ ...rdv, plages }) });
+                    setRdv(maj);
+                    setMessageRdv({ type: 'success', text: maj.plages.length
+                        ? 'Planning enregistré. Vos prospects verront ces créneaux quand ils demanderont une visite.'
+                        : 'Planning enregistré, mais aucune plage n\'est définie : aucun créneau ne sera proposé.' });
+                } catch (e) {
+                    setMessageRdv({ type: 'error', text: e.message });
+                } finally {
+                    setRdvEnCours(false);
+                }
+            };
+            const optionsAvec = (base, courante) => [...new Set([...base, courante])].sort((a, b) => a - b);
 
             const pwa = window.zelyroPwa;
             const actionNotif = async (fonction, succes) => {
@@ -483,6 +519,103 @@
                                     disabled={apercuEnCours} onClick={recevoirApercu}>
                                     {apercuEnCours ? 'Envoi…' : "Recevoir un aperçu maintenant"}
                                 </button>
+                            </div>
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Planning de rendez-vous</h2>
+                                </div>
+                                <p className="panel-note">
+                                    Quand un prospect demande à visiter un bien, il reçoit un lien vers votre planning et
+                                    choisit lui-même un créneau libre parmi vos disponibilités. Le rendez-vous s'inscrit sur
+                                    sa fiche, une relance est posée le jour même, vous êtes prévenu et il reçoit une
+                                    confirmation avec une invitation de calendrier. Les heures sont celles de Paris.
+                                </p>
+                                {messageRdv && (
+                                    <div className={messageRdv.type === 'error' ? 'error' : 'success'}>{messageRdv.text}</div>
+                                )}
+                                {rdv === null ? (
+                                    !messageRdv && <div className="panel-note" style={{ marginBottom: 0 }}>Chargement…</div>
+                                ) : (
+                                    <div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '14px' }}>
+                                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                                <label htmlFor="rdv-duree">Durée d'une visite</label>
+                                                <select id="rdv-duree" value={rdv.duree_min}
+                                                    onChange={(e) => majRdv('duree_min', Number(e.target.value))}>
+                                                    {[30, 45, 60].map((n) => <option key={n} value={n}>{n} minutes</option>)}
+                                                </select>
+                                            </div>
+                                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                                <label htmlFor="rdv-delai">Délai minimum</label>
+                                                <select id="rdv-delai" value={rdv.delai_heures}
+                                                    onChange={(e) => majRdv('delai_heures', Number(e.target.value))}>
+                                                    {optionsAvec([0, 2, 4, 12, 24, 48, 72], rdv.delai_heures).map((n) => (
+                                                        <option key={n} value={n}>{n === 0 ? 'Aucun' : `${n} h à l'avance`}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                                <label htmlFor="rdv-horizon">Ouvert sur</label>
+                                                <select id="rdv-horizon" value={rdv.horizon_jours}
+                                                    onChange={(e) => majRdv('horizon_jours', Number(e.target.value))}>
+                                                    {optionsAvec([7, 14, 21, 30, 45, 60], rdv.horizon_jours).map((n) => (
+                                                        <option key={n} value={n}>{n} jours</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div className="form-group" style={{ marginTop: '14px' }}>
+                                            <label htmlFor="rdv-lieu">Lieu du rendez-vous (facultatif)</label>
+                                            <input id="rdv-lieu" type="text" maxLength={255} value={rdv.lieu}
+                                                onChange={(e) => majRdv('lieu', e.target.value)}
+                                                placeholder="Adresse de l'agence, ou « sur place, devant le bien »" />
+                                            <div className="field-hint">Indiqué au prospect sur la page et dans sa confirmation.</div>
+                                        </div>
+
+                                        <div className="panel-title" style={{ fontSize: '17px', margin: '18px 0 8px' }}>Vos disponibilités</div>
+                                        {rdv.plages.length === 0 && (
+                                            <div className="panel-note">
+                                                Aucune plage pour l'instant : aucun créneau n'est proposé.{' '}
+                                                <button type="button" className="raccourci" onClick={plagesTypes}>
+                                                    Du lundi au vendredi, 9 h–12 h et 14 h–18 h
+                                                </button>
+                                            </div>
+                                        )}
+                                        {JOURS_RDV.map((nom, jour) => (
+                                            <div key={nom} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 10px', padding: '8px 0', borderTop: '1px solid var(--line, #E3DCCC)' }}>
+                                                <div style={{ width: '92px', fontWeight: 600, fontSize: '14px' }}>{nom}</div>
+                                                {rdv.plages.map((p, i) => p.jour !== jour ? null : (
+                                                    <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                                        <input type="time" step="300" value={p.debut} aria-label={`${nom} : début`}
+                                                            style={{ width: '132px', padding: '7px 8px' }}
+                                                            onChange={(e) => majPlage(i, 'debut', e.target.value)} />
+                                                        <span>à</span>
+                                                        <input type="time" step="300" value={p.fin} aria-label={`${nom} : fin`}
+                                                            style={{ width: '132px', padding: '7px 8px' }}
+                                                            onChange={(e) => majPlage(i, 'fin', e.target.value)} />
+                                                        <button type="button" className="rappel-suppr" aria-label={`Retirer cette plage du ${nom.toLowerCase()}`}
+                                                            onClick={() => retirerPlage(i)}>×</button>
+                                                    </span>
+                                                ))}
+                                                <button type="button" className="raccourci" onClick={() => ajouterPlage(jour)}>
+                                                    + Ajouter une plage
+                                                </button>
+                                            </div>
+                                        ))}
+
+                                        <label className="interrupteur" style={{ marginTop: '18px' }}>
+                                            <input type="checkbox" checked={rdv.auto_envoi === true}
+                                                onChange={(e) => majRdv('auto_envoi', e.target.checked)} />
+                                            <span>Envoyer automatiquement le planning dès qu'un prospect demande une visite.
+                                                Désactivé, vous pouvez toujours l'envoyer à la main depuis la fiche du prospect.</span>
+                                        </label>
+                                        <button type="button" className="btn" style={{ marginTop: '18px' }}
+                                            disabled={rdvEnCours} onClick={enregistrerRdv}>
+                                            {rdvEnCours ? 'Enregistrement…' : 'Enregistrer mon planning'}
+                                        </button>
+                                    </div>
+                                )}
                             </div>
 
                             <div className="panel">

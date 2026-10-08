@@ -203,6 +203,10 @@
             const [lienCopie, setLienCopie] = useState(false);
             const [membres, setMembres] = useState([]);
             const [rappels, setRappels] = useState([]);
+            const [rdvInfo, setRdvInfo] = useState(null);          // planning et rendez-vous ; null tant que non chargé
+            const [messageRdv, setMessageRdv] = useState(null);
+            const [lienRdv, setLienRdv] = useState(null);
+            const [confirmerAnnulRdv, setConfirmerAnnulRdv] = useState(false);
             const [nouvelleNote, setNouvelleNote] = useState('');
             const [rappelDate, setRappelDate] = useState('');
             const [rappelTexte, setRappelTexte] = useState('');
@@ -254,12 +258,14 @@
 
             const chargerSuivi = async () => {
                 try {
-                    const [n, r] = await Promise.all([
+                    const [n, r, rdv] = await Promise.all([
                         appel(`/api/v1/leads/${leadId}/notes`),
-                        appel(`/api/v1/leads/${leadId}/reminders`)
+                        appel(`/api/v1/leads/${leadId}/reminders`),
+                        appel(`/api/v1/leads/${leadId}/rdv`).catch(() => null)
                     ]);
                     setNotes(n);
                     setRappels(r);
+                    setRdvInfo(rdv);
                 } catch (err) {
                     setErreurSuivi(err.message);
                 }
@@ -300,6 +306,28 @@
                 setLienPerso(d);
                 try { await navigator.clipboard.writeText(d.message); setLienCopie(true); }
                 catch (e) { setLienCopie(false); }
+            });
+
+            // Planning de rendez-vous : envoi par e-mail, ou lien à coller (SMS, WhatsApp, messagerie du portail).
+            const envoyerPlanning = () => agir(async () => {
+                setMessageRdv(null);
+                const d = await appel(`/api/v1/leads/${leadId}/rdv/envoyer`, { method: 'POST', body: JSON.stringify({ canal: 'email' }) });
+                setLienRdv(null);
+                setMessageRdv({ type: 'success', text: 'Planning envoyé par e-mail. Le rendez-vous apparaîtra ici dès que le prospect aura choisi un créneau.' });
+            });
+            const copierPlanning = () => agir(async () => {
+                setMessageRdv(null);
+                const d = await appel(`/api/v1/leads/${leadId}/rdv/envoyer`, { method: 'POST', body: JSON.stringify({ canal: 'lien' }) });
+                let copie = false;
+                try { await navigator.clipboard.writeText(d.message); copie = true; } catch (e) { copie = false; }
+                setLienRdv({ message: d.message, copie });
+            });
+            const annulerRdv = () => agir(async () => {
+                setMessageRdv(null);
+                await appel(`/api/v1/leads/${leadId}/rdv`, { method: 'DELETE' });
+                setConfirmerAnnulRdv(false);
+                setLienRdv(null);
+                setMessageRdv({ type: 'success', text: 'Rendez-vous annulé. Le prospect est prévenu et peut choisir un autre créneau.' });
             });
 
             const supprimerNote = (id) => agir(() => appel(`/api/v1/leads/${leadId}/notes/${id}`, { method: 'DELETE' }));
@@ -792,6 +820,57 @@
                                                     </select>
                                                     <div className="field-hint">Le collaborateur choisi est prévenu par e-mail.</div>
                                                 </div>
+                                            )}
+
+                                            <div className="section-divider"></div>
+                                            <div className="panel-title" style={{ fontSize: '17px' }}>Rendez-vous</div>
+                                            {rdvInfo && rdvInfo.rdv && rdvInfo.rdv.statut === 'confirme' ? (
+                                                <div className="info-box" style={{ marginBottom: '12px' }} role="status">
+                                                    Visite fixée : {rdvInfo.rdv.libelle}{rdvInfo.rdv.bien ? ` · ${rdvInfo.rdv.bien}` : ''}
+                                                </div>
+                                            ) : (
+                                                <div className="panel-note" style={{ marginBottom: '12px' }}>
+                                                    {rdvInfo && !rdvInfo.planning_pret
+                                                        ? <>Pour proposer des créneaux, réglez d'abord vos disponibilités dans <a href="/compte.html">Mon compte</a>.</>
+                                                        : rdvInfo && rdvInfo.rdv
+                                                            ? 'Le planning a été envoyé : le prospect n\'a pas encore choisi de créneau.'
+                                                            : 'Aucun rendez-vous pour l\'instant. Envoyez le planning : le prospect choisit son créneau et cette fiche se met à jour toute seule.'}
+                                                </div>
+                                            )}
+                                            {rdvInfo && rdvInfo.planning_pret && (
+                                                <div className="btn-ligne" style={{ marginTop: 0 }}>
+                                                    <button className="btn petit" disabled={occupe || !rdvInfo.email_ok} onClick={envoyerPlanning}
+                                                        title={rdvInfo.email_ok ? '' : 'Ce prospect n\'a pas d\'adresse e-mail valide'}>
+                                                        {rdvInfo.rdv && rdvInfo.rdv.statut === 'confirme' ? 'Renvoyer le lien par e-mail' : 'Envoyer le planning par e-mail'}
+                                                    </button>
+                                                    <button className="btn petit secondary" disabled={occupe} onClick={copierPlanning}>
+                                                        Copier le lien du planning
+                                                    </button>
+                                                    {rdvInfo.rdv && rdvInfo.rdv.statut === 'confirme' && !confirmerAnnulRdv && (
+                                                        <button className="btn petit secondary" disabled={occupe} onClick={() => setConfirmerAnnulRdv(true)}>
+                                                            Annuler le rendez-vous
+                                                        </button>
+                                                    )}
+                                                    {confirmerAnnulRdv && (
+                                                        <>
+                                                            <button className="btn petit danger" disabled={occupe} onClick={annulerRdv}>Oui, annuler et prévenir le prospect</button>
+                                                            <button className="btn petit secondary" disabled={occupe} onClick={() => setConfirmerAnnulRdv(false)}>Garder</button>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {messageRdv && <div className={messageRdv.type === 'error' ? 'error' : 'success'} style={{ marginTop: '12px', marginBottom: 0 }}>{messageRdv.text}</div>}
+                                            {lienRdv && (
+                                                <>
+                                                    <div className="info-box" style={{ marginTop: '12px' }} role="status">
+                                                        {lienRdv.copie
+                                                            ? 'Message copié. Il ne reste qu\'à le coller.'
+                                                            : 'Copie automatique impossible : sélectionnez le message ci-dessous et copiez-le.'}
+                                                    </div>
+                                                    <textarea readOnly className="mail-corps" value={lienRdv.message}
+                                                        style={{ minHeight: '90px', marginTop: '10px' }}
+                                                        onFocus={(e) => e.target.select()} aria-label="Message avec le lien du planning"></textarea>
+                                                </>
                                             )}
 
                                             <div className="section-divider"></div>

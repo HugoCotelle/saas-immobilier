@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Choisissez votre créneau de visite</title>
+    <meta name="robots" content="noindex">
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="zelyro.css">
+    <style>
+        body.auth { align-items: flex-start; }
+        .rdv-carte { max-width: 620px; margin: 24px auto; }
+        .rdv-carte .auth-header h1 { font-size: 28px; letter-spacing: 0.02em; }
+        .rdv-carte .auth-header h1::before { display: none; }
+        .masque { display: none; }
+        .rdv-bloc { text-align: left; }
+        .rdv-fixe { border: 1px solid var(--sage-600, #4F6353); background: var(--sage-100, #E7EDE4); border-radius: 12px; padding: 18px 20px; margin: 0 0 20px; }
+        .rdv-fixe p { margin: 0 0 4px; }
+        .rdv-fixe .quand { font-family: Georgia, serif; font-size: 22px; color: var(--sage-700, #3E4F43); }
+        .rdv-fixe .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+        .rdv-carte button { width: auto; padding: 11px 20px; }
+        .rdv-carte button.secondaire { background: transparent; color: var(--sage-700, #3E4F43); border: 1px solid var(--line, #E3DCCC); }
+        .jours { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; padding: 0; list-style: none; }
+        .jours button { padding: 9px 14px; border-radius: 999px; font-size: 14px; background: #FFFEFB; color: var(--ink, #1F2A24); border: 1px solid var(--line, #E3DCCC); }
+        .jours button[aria-pressed="true"] { background: var(--sage-600, #4F6353); color: #fff; border-color: var(--sage-600, #4F6353); }
+        .heures { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; margin: 0 0 18px; }
+        .heures button { padding: 10px 0; width: 100%; background: #FFFEFB; color: var(--ink, #1F2A24); border: 1px solid var(--line, #E3DCCC); border-radius: 8px; font-size: 15px; }
+        .heures button[aria-pressed="true"] { background: var(--sage-600, #4F6353); color: #fff; border-color: var(--sage-600, #4F6353); }
+        .rdv-choix { margin: 0 0 8px; font-size: 15px; color: var(--ink-2, #44504A); }
+        .rdv-message { margin: 14px 0 0; font-size: 14px; color: var(--sage-700, #3E4F43); font-weight: 600; }
+        .rdv-erreur { margin: 14px 0 0; font-size: 14px; color: var(--danger, #A8452F); }
+        .rdv-vide { padding: 18px 0; color: var(--ink-2, #44504A); line-height: 1.6; }
+        .pied-formulaire { text-align: center; margin-top: 22px; font-size: 12px; color: var(--ink-3, #6A7168); line-height: 1.7; }
+        .pied-formulaire a { color: var(--ink-3, #6A7168); }
+    </style>
+</head>
+<body class="auth">
+    <main class="auth-container rdv-carte" id="carte">
+        <div class="auth-header">
+            <h1 id="titre">Choisissez votre créneau de visite</h1>
+            <p id="sous-titre"></p>
+        </div>
+
+        <div id="etat" class="loading masque"><div class="loader"></div></div>
+
+        <div id="contenu" class="rdv-bloc masque">
+            <div id="fixe" class="rdv-fixe masque">
+                <p>Votre visite est fixée :</p>
+                <p class="quand" id="fixe-quand"></p>
+                <div class="actions">
+                    <button type="button" class="secondaire" id="changer">Choisir un autre créneau</button>
+                    <button type="button" class="secondaire" id="annuler">Annuler le rendez-vous</button>
+                </div>
+            </div>
+
+            <div id="choix" class="masque">
+                <ul class="jours" id="jours"></ul>
+                <div class="heures" id="heures"></div>
+                <p class="rdv-choix masque" id="recap"></p>
+                <button type="button" id="valider" class="masque">Confirmer ce créneau</button>
+            </div>
+            <p id="vide" class="rdv-vide masque">Aucun créneau n'est disponible pour le moment. Contactez directement votre agence pour fixer un rendez-vous.</p>
+            <p id="message" class="rdv-message masque"></p>
+            <p id="erreur" class="rdv-erreur masque"></p>
+        </div>
+
+        <p class="pied-formulaire">
+            Les horaires affichés sont ceux de Paris.<br>
+            Page propulsée par Zelyro · <a href="/mentions-legales.html" target="_blank" rel="noopener">Mentions légales</a>
+        </p>
+    </main>
+
+    <script>
+        (function () {
+            var API_URL = 'https://saas-immobilier-921a.onrender.com';
+            var jeton = new URLSearchParams(window.location.search).get('t') || '';
+            var $ = function (id) { return document.getElementById(id); };
+            var montrer = function (id, oui) { $(id).classList.toggle('masque', !oui); };
+
+            var donnees = null;      // dernière réponse du serveur
+            var jourChoisi = null;   // index du jour sélectionné
+            var creneauChoisi = null;
+            var confirmerAnnulation = false;
+
+            function indisponible(texte) {
+                montrer('etat', false);
+                montrer('contenu', false);
+                $('titre').textContent = 'Lien indisponible';
+                $('sous-titre').textContent = texte || "Ce lien n'est plus valable. Contactez directement votre agence pour fixer un rendez-vous.";
+            }
+
+            function element(balise, texte) {
+                var e = document.createElement(balise);
+                if (texte !== undefined && texte !== null) e.textContent = texte;
+                return e;
+            }
+
+            function dire(texte, erreur) {
+                montrer('message', !erreur && !!texte);
+                montrer('erreur', !!erreur && !!texte);
+                $(erreur ? 'erreur' : 'message').textContent = texte || '';
+                if (erreur) $('message').textContent = ''; else $('erreur').textContent = '';
+            }
+
+            function api(chemin, options) {
+                return fetch(API_URL + chemin, options).then(function (r) {
+                    return r.json().catch(function () { return {}; }).then(function (d) { return { ok: r.ok, status: r.status, d: d }; });
+                });
+            }
+
+            function dessinerJours() {
+                var ul = $('jours');
+                ul.textContent = '';
+                donnees.jours.forEach(function (j, i) {
+                    var li = element('li');
+                    var b = element('button', j.libelle);
+                    b.type = 'button';
+                    b.setAttribute('aria-pressed', i === jourChoisi ? 'true' : 'false');
+                    b.addEventListener('click', function () { jourChoisi = i; creneauChoisi = null; dessiner(); });
+                    li.appendChild(b);
+                    ul.appendChild(li);
+                });
+            }
+
+            function dessinerHeures() {
+                var zone = $('heures');
+                zone.textContent = '';
+                if (jourChoisi === null) return;
+                donnees.jours[jourChoisi].creneaux.forEach(function (c) {
+                    var b = element('button', c.heure.replace(':', 'h'));
+                    b.type = 'button';
+                    b.setAttribute('aria-pressed', creneauChoisi === c.debut ? 'true' : 'false');
+                    b.addEventListener('click', function () { creneauChoisi = c.debut; dire(''); dessiner(); });
+                    zone.appendChild(b);
+                });
+            }
+
+            function dessiner() {
+                var d = donnees;
+                var fixe = !!d.rdv;
+                var montrerChoix = !fixe || d.changement;
+                montrer('fixe', fixe);
+                if (fixe) {
+                    $('fixe-quand').textContent = d.rdv.libelle;
+                    $('annuler').textContent = confirmerAnnulation ? "Oui, annuler le rendez-vous" : 'Annuler le rendez-vous';
+                    montrer('changer', !d.changement);
+                }
+                var aDesCreneaux = d.jours.length > 0;
+                montrer('choix', montrerChoix && aDesCreneaux);
+                montrer('vide', montrerChoix && !aDesCreneaux);
+                if (montrerChoix && aDesCreneaux) {
+                    dessinerJours();
+                    dessinerHeures();
+                    var jour = jourChoisi !== null ? donnees.jours[jourChoisi] : null;
+                    var c = jour && creneauChoisi ? jour.creneaux.filter(function (x) { return x.debut === creneauChoisi; })[0] : null;
+                    montrer('recap', !!c);
+                    montrer('valider', !!c);
+                    if (c) $('recap').textContent = jour.libelle + ' à ' + c.heure.replace(':', 'h');
+                    $('valider').textContent = fixe ? 'Déplacer mon rendez-vous' : 'Confirmer ce créneau';
+                }
+            }
+
+            function charger(apres) {
+                return api('/public/rdv/' + encodeURIComponent(jeton)).then(function (res) {
+                    if (res.status === 410) { indisponible(res.d.message); return; }
+                    if (!res.ok) { indisponible(); return; }
+                    var d = res.d;
+                    d.changement = false;
+                    donnees = d;
+                    jourChoisi = null;
+                    creneauChoisi = null;
+                    confirmerAnnulation = false;
+                    var agence = d.agence || 'Votre agence';
+                    document.title = 'Votre visite : ' + agence;
+                    $('titre').textContent = d.prenom ? ('Bonjour ' + d.prenom + ', choisissez votre créneau') : 'Choisissez votre créneau de visite';
+                    var morceaux = [agence + ' vous reçoit' + (d.bien ? ' pour « ' + d.bien + ' »' : '') + '.'];
+                    morceaux.push('Durée : ' + d.duree_min + ' minutes.');
+                    if (d.lieu) morceaux.push('Lieu : ' + d.lieu + '.');
+                    $('sous-titre').textContent = morceaux.join(' ');
+                    montrer('etat', false);
+                    montrer('contenu', true);
+                    if (!d.rdv && d.jours.length) jourChoisi = 0;
+                    dessiner();
+                    if (apres) apres();
+                }).catch(function () { indisponible("Une erreur est survenue. Réessayez dans un instant."); });
+            }
+
+            $('changer').addEventListener('click', function () {
+                donnees.changement = true;
+                jourChoisi = donnees.jours.length ? 0 : null;
+                creneauChoisi = null;
+                dire('');
+                dessiner();
+            });
+
+            $('valider').addEventListener('click', function () {
+                if (!creneauChoisi) return;
+                var bouton = $('valider');
+                bouton.disabled = true;
+                dire('');
+                api('/public/rdv/' + encodeURIComponent(jeton) + '/reserver', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ debut: creneauChoisi })
+                }).then(function (res) {
+                    bouton.disabled = false;
+                    if (res.ok) {
+                        var texte = res.d.libelle ? 'Votre visite est fixée : ' + res.d.libelle + '. Un e-mail de confirmation vous est envoyé.' : res.d.message;
+                        charger(function () { dire(texte); });
+                    } else if (res.status === 409) {
+                        charger(function () { dire(res.d.message || "Ce créneau n'est plus disponible.", true); });
+                    } else {
+                        dire(res.d.message || 'Une erreur est survenue. Réessayez dans un instant.', true);
+                    }
+                }).catch(function () {
+                    bouton.disabled = false;
+                    dire('Une erreur est survenue. Réessayez dans un instant.', true);
+                });
+            });
+
+            $('annuler').addEventListener('click', function () {
+                if (!confirmerAnnulation) { confirmerAnnulation = true; dessiner(); return; }
+                var bouton = $('annuler');
+                bouton.disabled = true;
+                api('/public/rdv/' + encodeURIComponent(jeton) + '/annuler', { method: 'POST' }).then(function (res) {
+                    bouton.disabled = false;
+                    if (res.ok) {
+                        charger(function () { dire('Votre rendez-vous est annulé. Vous pouvez choisir un autre créneau quand vous le souhaitez.'); });
+                    } else {
+                        confirmerAnnulation = false;
+                        dire(res.d.message || 'Une erreur est survenue. Réessayez dans un instant.', true);
+                        dessiner();
+                    }
+                }).catch(function () {
+                    bouton.disabled = false;
+                    dire('Une erreur est survenue. Réessayez dans un instant.', true);
+                });
+            });
+
+            if (!/^[A-Za-z0-9_-]{16,64}$/.test(jeton)) { indisponible(); return; }
+            montrer('etat', true);
+            charger();
+        })();
+    </script>
+</body>
+</html>
