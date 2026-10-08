@@ -28,6 +28,11 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 
+try:
+    import stripe
+except ImportError:  # paquet absent : la facturation en ligne reste simplement désactivée
+    stripe = None
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -749,12 +754,15 @@ def _assurer_schema():
                                WHERE table_name = 'users' AND column_name = 'commission_rate'),
                        to_regclass('push_subscriptions') IS NOT NULL,
                        to_regclass('lead_rdv') IS NOT NULL,
-                       to_regclass('site_visites') IS NOT NULL
+                       to_regclass('site_visites') IS NOT NULL,
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'users' AND column_name = 'billing_suspended'),
+                       to_regclass('stripe_events') IS NOT NULL
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
                 for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
-                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS):
+                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS + _DDL_FACTURATION):
                     cur.execute(ddl)
             conn.commit()
             _schema_pret = True
@@ -928,7 +936,7 @@ def init_database(demo=False):
         ):
             cursor.execute(ddl)
         for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
-                    + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS):
+                    + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS + _DDL_FACTURATION):
             cursor.execute(ddl)
 
         # Vérifier si vide
@@ -4004,14 +4012,16 @@ LIEN_INVITATION_EQUIPE_INVALIDE = ("Ce lien d'invitation est invalide ou a expir
 def _limite_comptes(cur, agency_id):
     """(max_users, label du forfait) du compte administrateur d'une agence.
     max_users à None signifie illimité."""
-    cur.execute("""SELECT p.max_users, p.label FROM users u LEFT JOIN plans p ON p.code = u.plan
+    cur.execute("""SELECT p.max_users, p.label, COALESCE(u.extra_seats, 0) AS extra_seats
+                   FROM users u LEFT JOIN plans p ON p.code = u.plan
                    WHERE u.id = %s""", (agency_id,))
     r = cur.fetchone()
     if not r or r['label'] is None:
         # Forfait inconnu : comme _forfait(), on retombe sur le plus petit
         # (PLANS_PAR_DEFAUT ne porte pas max_users, d'ou la valeur en dur).
-        return 2, PLANS_PAR_DEFAUT[0][1]
-    return r['max_users'], r['label']
+        return 2 + (r['extra_seats'] if r else 0), PLANS_PAR_DEFAUT[0][1]
+    # Les comptes supplémentaires (15 € HT / mois) s'ajoutent à ceux du forfait.
+    return (None if r['max_users'] is None else r['max_users'] + r['extra_seats']), r['label']
 
 
 def _comptes_utilises(cur, agency_id):
@@ -8095,6 +8105,458 @@ def admin_stats_resume():
     except Exception:
         return erreur_interne()
 
+
+
+STRIPE_SECRET_KEY = (os.getenv("STRIPE_SECRET_KEY") or "").strip()
+STRIPE_WEBHOOK_SECRET = (os.getenv("STRIPE_WEBHOOK_SECRET") or "").strip()
+SITE_PUBLIC_URL = (os.getenv("SITE_PUBLIC_URL") or "https://www.zelyro.fr").strip().rstrip("/")
+if stripe is not None and STRIPE_SECRET_KEY:
+    stripe.api_key = STRIPE_SECRET_KEY
+    stripe.max_network_retries = 2
+
+# ===== FACTURATION : ABONNEMENTS STRIPE (CARTE ET PRÉLÈVEMENT SEPA) =====
+#
+# Stripe encaisse et garde les moyens de paiement : Zelyro ne voit ni numéro de
+# carte ni IBAN. L'application ne fait que trois choses :
+#   1. envoyer l'administrateur d'une agence vers une page de paiement Stripe
+#      (Checkout) ou vers son espace de gestion (portail client) ;
+#   2. recevoir les événements de Stripe (/stripe/webhook) et en déduire le
+#      forfait, le statut de l'abonnement et le nombre de comptes en plus ;
+#   3. couper l'accès d'une agence dont l'abonnement est résilié ou impayé.
+#
+# Les comptes sans abonnement Stripe (équipe Zelyro, agences pilotes) ne sont
+# jamais touchés : rien ne change tant qu'une agence n'a pas souscrit.
+#
+# Les tarifs vivent dans Stripe, retrouvés par leur « lookup key » :
+#   zelyro_<forfait>_<formule>     avec forfait = essentiel | agence | reseau
+#                                  et formule = mensuel | engage | annuel
+#   zelyro_siege_mensuel           compte supplémentaire (15 € HT / mois)
+# Le script stripe_setup.py les crée.
+
+FORMULES = ('mensuel', 'engage', 'annuel')
+PLANS_PAYANTS = ('essentiel', 'agence', 'reseau')
+CLE_PRIX_SIEGE = 'zelyro_siege_mensuel'
+PRIX_SIEGE_HT = 15
+ENGAGEMENT_MOIS = 12
+SIEGES_SUPPLEMENTAIRES_MAX = 50
+_STATUTS_ACCES = ('active', 'trialing')
+_STATUTS_COUPURE = ('unpaid', 'canceled', 'incomplete_expired')
+
+_DDL_FACTURATION = (
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(64)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS users_stripe_customer_idx ON users (stripe_customer_id) "
+    "WHERE stripe_customer_id IS NOT NULL",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR(64)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_seats_subscription_id VARCHAR(64)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_status VARCHAR(24)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_formula VARCHAR(10)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_period_end TIMESTAMP",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_commit_end TIMESTAMP",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_seats INTEGER NOT NULL DEFAULT 0",
+    # Vrai quand l'accès a été coupé par la facturation (et non par l'équipe
+    # Zelyro) : seul ce cas est rétabli automatiquement au paiement suivant.
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_suspended BOOLEAN NOT NULL DEFAULT FALSE",
+    """CREATE TABLE IF NOT EXISTS stripe_events (
+        event_id VARCHAR(80) PRIMARY KEY,
+        event_type VARCHAR(80),
+        received_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )""",
+)
+
+_prix_en_cache = {}
+
+
+def _stripe_pret():
+    return stripe is not None and bool(STRIPE_SECRET_KEY)
+
+
+def _prix_par_cle(cle):
+    """Identifiant du tarif Stripe portant cette clé, ou None."""
+    if cle in _prix_en_cache:
+        return _prix_en_cache[cle]
+    r = stripe.Price.list(lookup_keys=[cle], active=True, limit=1).to_dict()
+    data = r.get('data') or []
+    if data:
+        _prix_en_cache[cle] = data[0]['id']
+        return data[0]['id']
+    return None
+
+
+def _ts(valeur):
+    """Horodatage Unix de Stripe -> heure UTC sans fuseau (comme le reste de la base)."""
+    if not valeur:
+        return None
+    return datetime.fromtimestamp(int(valeur), tz=timezone.utc).replace(tzinfo=None)
+
+
+def _ajouter_mois(d, n):
+    import calendar
+    m = d.month - 1 + n
+    annee, mois = d.year + m // 12, m % 12 + 1
+    return d.replace(year=annee, month=mois, day=min(d.day, calendar.monthrange(annee, mois)[1]))
+
+
+def _journal_stripe(cur, action, cible=None, detail=None):
+    """Comme _journal(), mais pour les actions qui n'ont pas d'utilisateur connecté."""
+    cur.execute("""INSERT INTO admin_log (admin_email, action, target, detail, created_at)
+                   VALUES (%s, %s, %s, %s, %s)""", ('stripe', action, cible, detail, _maintenant()))
+
+
+def _taxe_stripe():
+    """Paramètres de TVA à joindre à une ligne ou à un abonnement.
+    Les tarifs sont affichés hors taxes. Soit un taux fixe (STRIPE_TAX_RATE_ID,
+    créé par stripe_setup.py), soit le calcul automatique de Stripe Tax
+    (STRIPE_AUTOMATIC_TAX=1), soit rien."""
+    taux = (os.getenv("STRIPE_TAX_RATE_ID") or "").strip()
+    return taux, (os.getenv("STRIPE_AUTOMATIC_TAX") or "").strip() == "1"
+
+
+def _etat_facturation(cur, user_id):
+    cur.execute("""SELECT email, first_name, company_name, plan, stripe_customer_id, stripe_subscription_id,
+                          stripe_seats_subscription_id, billing_status, billing_formula, billing_period_end,
+                          billing_commit_end, billing_cancel_at_period_end, extra_seats
+                   FROM users WHERE id = %s""", (user_id,))
+    return cur.fetchone()
+
+
+@app.route('/api/v1/billing', methods=['GET'])
+@token_required
+def billing_etat():
+    """Où en est l'abonnement de l'agence (visible de tous ses comptes, modifiable par l'administrateur)."""
+    try:
+        with _base() as (conn, cur):
+            e = _etat_facturation(cur, request.agency_id)
+        abonnement = None
+        if e and e['billing_status']:
+            abonnement = {"plan": e['plan'], "formule": e['billing_formula'], "status": e['billing_status'],
+                          "period_end": _iso(e['billing_period_end']), "commit_end": _iso(e['billing_commit_end']),
+                          "cancel_at_period_end": bool(e['billing_cancel_at_period_end'])}
+        return jsonify({"configured": _stripe_pret(), "can_manage": request.role == 'admin',
+                        "subscription": abonnement, "extra_seats": (e['extra_seats'] if e else 0) or 0,
+                        "seat_price_ht": PRIX_SIEGE_HT}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/billing/checkout', methods=['POST'])
+@limiter.limit("20 per hour", key_func=_cle_utilisateur)
+@token_required
+@agency_admin_required
+def billing_checkout():
+    """Ouvre la page de paiement Stripe pour un forfait et une formule."""
+    try:
+        data = request.get_json(silent=True) or {}
+        plan, formule = data.get('plan'), data.get('formule')
+        if plan not in PLANS_PAYANTS or formule not in FORMULES:
+            return jsonify({"message": "Forfait ou formule inconnus"}), 400
+        site = _site_url()
+        if not _stripe_pret() or not site:
+            return jsonify({"message": "Le paiement en ligne n'est pas encore disponible. "
+                                       "Écrivez à contact@zelyro.fr pour souscrire."}), 503
+        with _base() as (conn, cur):
+            e = _etat_facturation(cur, request.user_id)
+            if e['billing_status'] in ('active', 'trialing', 'past_due'):
+                return jsonify({"message": "Cette agence a déjà un abonnement. "
+                                           "Utilisez « Gérer mon abonnement »."}), 409
+            client = e['stripe_customer_id']
+            if not client:
+                c = stripe.Customer.create(
+                    email=e['email'], name=e['company_name'] or e['first_name'] or e['email'],
+                    metadata={"user_id": str(request.user_id)}, preferred_locales=['fr'])
+                client = c.id
+                cur.execute("UPDATE users SET stripe_customer_id = %s WHERE id = %s", (client, request.user_id))
+                conn.commit()
+        prix = _prix_par_cle(f"zelyro_{plan}_{formule}")
+        if not prix:
+            app.logger.error("Tarif Stripe introuvable : zelyro_%s_%s (stripe_setup.py a-t-il été lancé ?)", plan, formule)
+            return jsonify({"message": "Ce tarif n'est pas encore configuré. Écrivez-nous à contact@zelyro.fr."}), 503
+        ligne = {"price": prix, "quantity": 1}
+        taux, auto = _taxe_stripe()
+        if taux:
+            ligne["tax_rates"] = [taux]
+        meta = {"user_id": str(request.user_id), "kind": "plan", "plan": plan, "formule": formule}
+        params = dict(
+            mode='subscription', customer=client, client_reference_id=str(request.user_id),
+            line_items=[ligne], locale='fr', payment_method_types=['card', 'sepa_debit'],
+            billing_address_collection='required', tax_id_collection={"enabled": True},
+            customer_update={"name": "auto", "address": "auto"},
+            subscription_data={"metadata": meta}, metadata=meta,
+            custom_text={"submit": {"message": (
+                "En vous abonnant, vous acceptez les conditions d'utilisation de Zelyro (" + SITE_PUBLIC_URL +
+                "/cgu.html). Pour un prélèvement SEPA, vous autorisez Zelyro SAS à débiter votre compte.")}},
+            success_url=f"{site}/compte.html?abonnement=ok",
+            cancel_url=f"{site}/compte.html?abonnement=annule",
+        )
+        if auto:
+            params["automatic_tax"] = {"enabled": True}
+        session = stripe.checkout.Session.create(**params)
+        return jsonify({"url": session.url}), 200
+    except Exception as exc:
+        if stripe is not None and isinstance(exc, stripe.StripeError):
+            app.logger.exception("Stripe : ouverture du paiement impossible")
+            return jsonify({"message": "Le service de paiement ne répond pas. Réessayez dans un instant."}), 502
+        return erreur_interne()
+
+
+@app.route('/api/v1/billing/portal', methods=['POST'])
+@limiter.limit("30 per hour", key_func=_cle_utilisateur)
+@token_required
+@agency_admin_required
+def billing_portail():
+    """Ouvre l'espace Stripe où l'administrateur change de moyen de paiement,
+    télécharge ses factures, ou résilie. Pendant l'engagement de 12 mois d'une
+    formule engagée, la résiliation y est retirée (portail « engagé »)."""
+    try:
+        if not _stripe_pret() or not _site_url():
+            return jsonify({"message": "Le paiement en ligne n'est pas encore disponible."}), 503
+        with _base() as (conn, cur):
+            e = _etat_facturation(cur, request.user_id)
+        if not e or not e['stripe_customer_id']:
+            return jsonify({"message": "Aucun abonnement pour cette agence."}), 404
+        en_engagement = (e['billing_formula'] == 'engage' and e['billing_commit_end']
+                         and e['billing_commit_end'] > _maintenant())
+        config = (os.getenv("STRIPE_PORTAL_CONFIG_ENGAGE" if en_engagement else "STRIPE_PORTAL_CONFIG_FLEX") or "").strip()
+        params = {"customer": e['stripe_customer_id'], "return_url": f"{_site_url()}/compte.html"}
+        if config:
+            params["configuration"] = config
+        session = stripe.billing_portal.Session.create(**params)
+        return jsonify({"url": session.url}), 200
+    except Exception as exc:
+        if stripe is not None and isinstance(exc, stripe.StripeError):
+            app.logger.exception("Stripe : ouverture du portail impossible")
+            return jsonify({"message": "Le service de paiement ne répond pas. Réessayez dans un instant."}), 502
+        return erreur_interne()
+
+
+@app.route('/api/v1/billing/seats', methods=['POST'])
+@limiter.limit("30 per hour", key_func=_cle_utilisateur)
+@token_required
+@agency_admin_required
+def billing_sieges():
+    """Fixe le nombre de comptes utilisateurs en plus de ceux du forfait
+    (15 € HT par mois et par compte). Abonnement mensuel à part, quelle que
+    soit la formule du forfait, pour que l'ajout prenne effet tout de suite."""
+    try:
+        data = request.get_json(silent=True) or {}
+        qte = data.get('quantity')
+        if not isinstance(qte, int) or isinstance(qte, bool) or not 0 <= qte <= SIEGES_SUPPLEMENTAIRES_MAX:
+            return jsonify({"message": f"Indiquez un nombre entre 0 et {SIEGES_SUPPLEMENTAIRES_MAX}"}), 400
+        if not _stripe_pret():
+            return jsonify({"message": "Le paiement en ligne n'est pas encore disponible."}), 503
+        with _base() as (conn, cur):
+            e = _etat_facturation(cur, request.user_id)
+            if not e or e['billing_status'] not in _STATUTS_ACCES:
+                return jsonify({"message": "Souscrivez d'abord à un forfait pour ajouter des comptes."}), 409
+            max_users, _ = _limite_comptes(cur, request.user_id)
+            if max_users is None:
+                return jsonify({"message": "Votre forfait inclut déjà un nombre illimité de comptes."}), 400
+            base = max_users - (e['extra_seats'] or 0)
+            if _comptes_utilises(cur, request.user_id) > base + qte:
+                return jsonify({"message": "Retirez d'abord des comptes de l'équipe : vous en utilisez "
+                                           "plus que ce nombre."}), 409
+            client, sub_id = e['stripe_customer_id'], e['stripe_seats_subscription_id']
+            taux, auto = _taxe_stripe()
+            if sub_id:
+                sub = stripe.Subscription.retrieve(sub_id).to_dict()
+                item = sub['items']['data'][0]['id']
+                if qte == 0:
+                    sub = stripe.Subscription.modify(sub_id, cancel_at_period_end=True).to_dict()
+                else:
+                    sub = stripe.Subscription.modify(
+                        sub_id, items=[{"id": item, "quantity": qte}], cancel_at_period_end=False,
+                        proration_behavior='create_prorations').to_dict()
+            elif qte == 0:
+                return jsonify({"extra_seats": 0}), 200
+            else:
+                prix = _prix_par_cle(CLE_PRIX_SIEGE)
+                if not prix:
+                    return jsonify({"message": "Ce tarif n'est pas encore configuré."}), 503
+                params = dict(customer=client, items=[{"price": prix, "quantity": qte}],
+                              metadata={"user_id": str(request.user_id), "kind": "seats"},
+                              payment_behavior='error_if_incomplete')
+                if taux:
+                    params["default_tax_rates"] = [taux]
+                if auto:
+                    params["automatic_tax"] = {"enabled": True}
+                sub = stripe.Subscription.create(**params).to_dict()
+            _sync_abonnement(cur, sub)
+            conn.commit()
+            e = _etat_facturation(cur, request.user_id)
+        return jsonify({"extra_seats": e['extra_seats'] or 0,
+                        "cancel_at_period_end": bool(qte == 0 and sub_id)}), 200
+    except Exception as exc:
+        if stripe is not None and isinstance(exc, stripe.StripeError):
+            app.logger.exception("Stripe : modification des comptes supplémentaires impossible")
+            return jsonify({"message": "Le paiement n'a pas pu être effectué. Vérifiez votre moyen de paiement "
+                                       "dans « Gérer mon abonnement »."}), 402
+        return erreur_interne()
+
+
+def _identifier_abonnement(sub):
+    """(nature, forfait, formule) d'un abonnement Stripe : 'plan' ou 'seats'.
+    Le tarif (sa « lookup key ») fait foi, pas les métadonnées : changer le tarif
+    d'un abonnement dans Stripe (passage à un forfait supérieur) met donc
+    automatiquement le forfait à jour dans Zelyro. Les métadonnées ne servent
+    qu'en secours."""
+    items = ((sub.get('items') or {}).get('data')) or []
+    cle = ((items[0].get('price') or {}).get('lookup_key') or '') if items else ''
+    if cle == CLE_PRIX_SIEGE:
+        return 'seats', None, None
+    m = re.fullmatch(r'zelyro_(essentiel|agence|reseau)_(mensuel|engage|annuel)', cle)
+    if m:
+        return 'plan', m.group(1), m.group(2)
+    meta = sub.get('metadata') or {}
+    return (meta.get('kind') or 'plan'), meta.get('plan'), meta.get('formule')
+
+
+def _sync_abonnement(cur, sub, supprime=False):
+    """Recopie dans la base l'état d'un abonnement Stripe (forfait, statut,
+    échéance, comptes en plus) et coupe ou rétablit l'accès. Idempotent."""
+    meta = sub.get('metadata') or {}
+    client = sub.get('customer')
+    uid = int(meta['user_id']) if str(meta.get('user_id') or '').isdigit() else None
+    if uid is None and client:
+        cur.execute("SELECT id FROM users WHERE stripe_customer_id = %s", (client,))
+        ligne = cur.fetchone()
+        uid = ligne['id'] if ligne else None
+    if uid is None:
+        app.logger.warning("Stripe : abonnement %s sans compte Zelyro associé", sub.get('id'))
+        return
+    cur.execute("""SELECT id, email, plan, is_active, stripe_customer_id, stripe_subscription_id,
+                          stripe_seats_subscription_id, billing_suspended FROM users WHERE id = %s FOR UPDATE""", (uid,))
+    u = cur.fetchone()
+    if not u:
+        return
+    if u['stripe_customer_id'] and client and u['stripe_customer_id'] != client:
+        app.logger.warning("Stripe : l'abonnement %s ne correspond pas au client du compte %s", sub.get('id'), uid)
+        return
+    statut = 'canceled' if supprime else sub.get('status')
+    items = ((sub.get('items') or {}).get('data')) or []
+
+    nature, plan, formule = _identifier_abonnement(sub)
+    if nature == 'seats':
+        if supprime and u['stripe_seats_subscription_id'] not in (None, sub.get('id')):
+            return  # ancien abonnement de comptes, remplacé depuis
+        qte = sum(int(i.get('quantity') or 0) for i in items)
+        actif = statut in ('active', 'trialing', 'past_due')
+        cur.execute("""UPDATE users SET extra_seats = %s, stripe_seats_subscription_id = %s,
+                           stripe_customer_id = COALESCE(stripe_customer_id, %s) WHERE id = %s""",
+                    (qte if actif else 0, sub.get('id') if actif else None, client, uid))
+        if (qte if actif else 0) != 0 or supprime:
+            _journal_stripe(cur, 'comptes supplémentaires', u['email'], str(qte if actif else 0))
+        return
+
+    if statut == 'incomplete':
+        return  # paiement pas encore abouti : rien à changer
+    if supprime and u['stripe_subscription_id'] not in (None, sub.get('id')):
+        return  # un ancien abonnement qui se termine alors qu'un nouveau est en cours
+    fin = _ts(sub.get('current_period_end') or (items[0].get('current_period_end') if items else None))
+    debut = _ts(sub.get('start_date'))
+    engage_jusque = _ajouter_mois(debut, ENGAGEMENT_MOIS) if (debut and formule in ('engage', 'annuel')) else None
+
+    if statut in _STATUTS_COUPURE:
+        coupe = not _est_admin(u['email']) and u['is_active']
+        cur.execute("""UPDATE users SET billing_status = %s, billing_period_end = %s,
+                           billing_cancel_at_period_end = FALSE,
+                           is_active = CASE WHEN %s THEN FALSE ELSE is_active END,
+                           billing_suspended = billing_suspended OR %s,
+                           token_version = token_version + CASE WHEN %s THEN 1 ELSE 0 END,
+                           extra_seats = 0
+                       WHERE id = %s""", (statut, fin, coupe, coupe, coupe, uid))
+        _journal_stripe(cur, 'abonnement terminé', u['email'], f"{statut}" + (" · accès suspendu" if coupe else ""))
+        if u['stripe_seats_subscription_id'] and _stripe_pret():
+            try:
+                stripe.Subscription.cancel(u['stripe_seats_subscription_id'])
+            except Exception:
+                app.logger.exception("Stripe : résiliation des comptes supplémentaires impossible")
+        return
+
+    nouveau_plan = plan if (statut in _STATUTS_ACCES and plan in PLANS_PAYANTS) else u['plan']
+    cur.execute("""UPDATE users SET plan = %s, billing_status = %s, billing_formula = COALESCE(%s, billing_formula),
+                       billing_period_end = %s, billing_commit_end = COALESCE(%s, billing_commit_end),
+                       billing_cancel_at_period_end = %s, stripe_subscription_id = %s,
+                       stripe_customer_id = COALESCE(stripe_customer_id, %s),
+                       is_active = CASE WHEN billing_suspended THEN TRUE ELSE is_active END,
+                       billing_suspended = FALSE
+                   WHERE id = %s""",
+                (nouveau_plan, statut, formule if formule in FORMULES else None, fin, engage_jusque,
+                 bool(sub.get('cancel_at_period_end')), sub.get('id'), client, uid))
+    if nouveau_plan != u['plan']:
+        _journal_stripe(cur, 'forfait', u['email'], f"{u['plan']} → {nouveau_plan} ({formule})")
+    elif u['billing_suspended']:
+        _journal_stripe(cur, 'compte réactivé', u['email'], 'abonnement de nouveau actif')
+
+
+def _prevenir_paiement_echoue(adresse):
+    texte, html = _gabarit_email(
+        "Votre paiement Zelyro a échoué",
+        ["Nous n'avons pas pu encaisser votre dernier règlement. Votre accès reste ouvert quelques jours : "
+         "mettez à jour votre moyen de paiement pour éviter toute interruption."],
+        ("Gérer mon abonnement", f"{_site_url()}/compte.html"))
+    _envoyer_email(adresse, "Votre paiement Zelyro a échoué", texte, html)
+
+
+def _traiter_evenement_stripe(cur, evenement):
+    type_ = evenement.get('type')
+    objet = (evenement.get('data') or {}).get('object') or {}
+    if type_ == 'checkout.session.completed':
+        if objet.get('mode') != 'subscription' or not objet.get('subscription'):
+            return
+        uid = objet.get('client_reference_id')
+        if str(uid or '').isdigit() and objet.get('customer'):
+            cur.execute("UPDATE users SET stripe_customer_id = COALESCE(stripe_customer_id, %s) WHERE id = %s",
+                        (objet['customer'], int(uid)))
+        sub = stripe.Subscription.retrieve(objet['subscription']).to_dict()
+        # Le moyen de paiement choisi devient celui du client, pour que les
+        # comptes supplémentaires puissent être prélevés sans nouvelle saisie.
+        pm = sub.get('default_payment_method')
+        if pm and objet.get('customer'):
+            try:
+                stripe.Customer.modify(objet['customer'], invoice_settings={"default_payment_method": pm})
+            except Exception:
+                app.logger.exception("Stripe : moyen de paiement par défaut non enregistré")
+        _sync_abonnement(cur, sub)
+    elif type_ in ('customer.subscription.created', 'customer.subscription.updated'):
+        _sync_abonnement(cur, objet)
+    elif type_ == 'customer.subscription.deleted':
+        _sync_abonnement(cur, objet, supprime=True)
+    elif type_ == 'invoice.payment_failed':
+        cur.execute("SELECT email FROM users WHERE stripe_customer_id = %s", (objet.get('customer'),))
+        u = cur.fetchone()
+        if u:
+            _journal_stripe(cur, 'paiement échoué', u['email'], f"facture {objet.get('number') or objet.get('id')}")
+            if _envoi_configure():
+                _lancer_en_arriere_plan(_prevenir_paiement_echoue, u['email'])
+
+
+@app.route('/stripe/webhook', methods=['POST'])
+@limiter.exempt
+def stripe_webhook():
+    """Reçoit les événements de Stripe. Chaque appel est vérifié avec la
+    signature de Stripe (STRIPE_WEBHOOK_SECRET) ; un événement déjà traité est
+    ignoré, et une erreur renvoie 500 pour que Stripe réessaie."""
+    if not _stripe_pret() or not STRIPE_WEBHOOK_SECRET:
+        return jsonify({"message": "Not found"}), 404
+    charge = request.get_data()
+    try:
+        stripe.Webhook.construct_event(charge, request.headers.get('Stripe-Signature', ''), STRIPE_WEBHOOK_SECRET)
+        evenement = _json.loads(charge)
+    except (ValueError, stripe.SignatureVerificationError):
+        return jsonify({"message": "Signature invalide"}), 400
+    try:
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("INSERT INTO stripe_events (event_id, event_type) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                        (evenement.get('id'), evenement.get('type')))
+            if cur.rowcount == 0:
+                return jsonify({"received": True, "duplicate": True}), 200
+            _traiter_evenement_stripe(cur, evenement)
+            conn.commit()
+        return jsonify({"received": True}), 200
+    except Exception:
+        app.logger.exception("Stripe : échec de traitement de l'événement %s", evenement.get('type'))
+        return jsonify({"message": "Erreur de traitement"}), 500
 
 
 if __name__ == '__main__':
