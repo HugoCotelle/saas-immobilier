@@ -55,6 +55,12 @@
             const [inviting, setInviting] = useState(false);
             const [confirmerRetrait, setConfirmerRetrait] = useState(null);
             const [busyTeamId, setBusyTeamId] = useState(null);
+            const [billing, setBilling] = useState(null);
+            const [messageBilling, setMessageBilling] = useState(null);
+            const [busyBilling, setBusyBilling] = useState(false);
+            const [choixPlan, setChoixPlan] = useState('agence');
+            const [choixFormule, setChoixFormule] = useState('mensuel');
+            const [sieges, setSieges] = useState(0);
 
             const appel = async (chemin, options = {}) => {
                 const r = await fetch(`${API_URL}${chemin}`, {
@@ -96,6 +102,28 @@
                 }
                 appel('/api/v1/capture-link').then(setLien).catch((e) => setMessageLien({ type: 'error', text: e.message }));
                 appel('/api/v1/gmail/status').then(setGmailStatus).catch((e) => setMessageGmail({ type: 'error', text: e.message }));
+                chargerFacturation();
+
+                // Stripe renvoie ici après la page de paiement : ?abonnement=ok|annule. Le forfait
+                // change dès que Stripe a prévenu Zelyro (quelques secondes) : on revérifie un instant.
+                const retourPaiement = new URLSearchParams(window.location.search).get('abonnement');
+                if (retourPaiement === 'ok') {
+                    setMessageBilling({ type: 'success', text: 'Merci ! Votre paiement est en cours de confirmation, cette page se met à jour dans un instant.' });
+                    let essais = 0;
+                    const guette = setInterval(() => {
+                        essais += 1;
+                        chargerFacturation().then((b) => {
+                            if ((b && b.subscription) || essais >= 10) {
+                                clearInterval(guette);
+                                appel('/api/v1/plan').then(setForfait).catch(() => {});
+                                if (b && b.subscription) setMessageBilling({ type: 'success', text: 'Votre abonnement est actif. Merci !' });
+                            }
+                        });
+                    }, 2000);
+                } else if (retourPaiement === 'annule') {
+                    setMessageBilling({ type: 'info', text: 'Paiement annulé : rien n\'a été débité.' });
+                }
+                if (retourPaiement) window.history.replaceState({}, '', window.location.pathname);
 
                 // Google renvoie ici le navigateur après le consentement (ou son refus) :
                 // ?gmail=connecte|refuse|erreur. On affiche le message une fois puis on
@@ -113,6 +141,52 @@
                     window.history.replaceState({}, '', window.location.pathname);
                 }
             }, []);
+
+            const PRIX_HT = {
+                essentiel: { mensuel: 79, engage: 75, annuel: 853 },
+                agence: { mensuel: 199, engage: 189, annuel: 2149 },
+                reseau: { mensuel: 449, engage: 427, annuel: 4849 },
+            };
+            const NOMS_PLAN = { essentiel: 'Essentiel', agence: 'Agence', reseau: 'Réseau' };
+            const NOMS_FORMULE = {
+                mensuel: 'Mensuel, sans engagement',
+                engage: 'Mensuel, engagement 12 mois (-5 %)',
+                annuel: 'Annuel prépayé (-10 %)',
+            };
+            const eur = (n) => n.toLocaleString('fr-FR') + ' €';
+            const prixLigne = (plan, formule) => formule === 'annuel'
+                ? `${eur(PRIX_HT[plan][formule])} HT / an` : `${eur(PRIX_HT[plan][formule])} HT / mois`;
+            const dateFr = (iso) => iso ? new Date(iso).toLocaleDateString('fr-FR') : '—';
+            const STATUTS_ABO = { active: 'Actif', trialing: 'Essai', past_due: 'Paiement en échec', unpaid: 'Impayé', canceled: 'Résilié' };
+
+            const chargerFacturation = () => appel('/api/v1/billing').then((b) => {
+                setBilling(b);
+                setSieges(b.extra_seats || 0);
+                return b;
+            }).catch(() => null);
+
+            const actionFacturation = async (fonction) => {
+                setBusyBilling(true);
+                setMessageBilling(null);
+                try { await fonction(); }
+                catch (e) { setMessageBilling({ type: 'error', text: e.message }); }
+                finally { setBusyBilling(false); }
+            };
+            const souscrire = () => actionFacturation(async () => {
+                const d = await appel('/api/v1/billing/checkout', { method: 'POST', body: JSON.stringify({ plan: choixPlan, formule: choixFormule }) });
+                window.location.href = d.url;
+            });
+            const ouvrirPortail = () => actionFacturation(async () => {
+                const d = await appel('/api/v1/billing/portal', { method: 'POST' });
+                window.location.href = d.url;
+            });
+            const majSieges = () => actionFacturation(async () => {
+                const d = await appel('/api/v1/billing/seats', { method: 'POST', body: JSON.stringify({ quantity: Number(sieges) }) });
+                await chargerFacturation();
+                setMessageBilling({ type: 'success', text: d.cancel_at_period_end
+                    ? 'Les comptes supplémentaires s\'arrêteront à la fin de la période en cours.'
+                    : 'Comptes supplémentaires mis à jour.' });
+            });
 
             const changerAlertes = async (valeur) => {
                 setAlertes(valeur);
@@ -436,6 +510,91 @@
                                             </div>
                                         );
                                     })}
+                                </div>
+                            )}
+
+                            {billing && billing.configured && billing.can_manage && (
+                                <div className="panel">
+                                    <div className="panel-header">
+                                        <h2 className="panel-title">Abonnement</h2>
+                                        {billing.subscription && (
+                                            <span className={`pastille ${['active', 'trialing'].includes(billing.subscription.status) ? '' : 'off'}`}>
+                                                {STATUTS_ABO[billing.subscription.status] || billing.subscription.status}
+                                            </span>
+                                        )}
+                                    </div>
+                                    {messageBilling && (
+                                        <div className={messageBilling.type === 'error' ? 'error' : messageBilling.type === 'info' ? 'info-box' : 'success'}>{messageBilling.text}</div>
+                                    )}
+                                    {!billing.subscription ? (
+                                        <>
+                                            <p className="panel-note">
+                                                Choisissez votre forfait et votre formule. Le paiement se fait sur une page sécurisée
+                                                de Stripe, par carte bancaire ou par prélèvement SEPA. Zelyro ne conserve ni numéro
+                                                de carte ni IBAN. Prix hors taxes.
+                                            </p>
+                                            <div className="form-group">
+                                                <label>Forfait</label>
+                                                <select value={choixPlan} onChange={(e) => setChoixPlan(e.target.value)} disabled={busyBilling}>
+                                                    {Object.keys(NOMS_PLAN).map((p) => (
+                                                        <option key={p} value={p}>{NOMS_PLAN[p]} : à partir de {eur(PRIX_HT[p].mensuel)} HT / mois</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div className="form-group">
+                                                <label>Formule</label>
+                                                <select value={choixFormule} onChange={(e) => setChoixFormule(e.target.value)} disabled={busyBilling}>
+                                                    {Object.keys(NOMS_FORMULE).map((f) => (
+                                                        <option key={f} value={f}>{NOMS_FORMULE[f]}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <p className="panel-note">
+                                                {NOMS_PLAN[choixPlan]}, {NOMS_FORMULE[choixFormule].toLowerCase()} : {prixLigne(choixPlan, choixFormule)}.
+                                            </p>
+                                            <button className="btn" onClick={souscrire} disabled={busyBilling}>
+                                                {busyBilling ? 'Ouverture…' : 'Souscrire'}
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <dl className="info-list">
+                                                <dt>Forfait</dt><dd>{NOMS_PLAN[billing.subscription.plan] || billing.subscription.plan}</dd>
+                                                <dt>Formule</dt><dd>{NOMS_FORMULE[billing.subscription.formule] || '—'}</dd>
+                                                <dt>{billing.subscription.cancel_at_period_end ? 'Se termine le' : 'Prochaine échéance'}</dt>
+                                                <dd>{dateFr(billing.subscription.period_end)}</dd>
+                                                {billing.subscription.commit_end && billing.subscription.formule !== 'mensuel' && (
+                                                    <><dt>Engagement jusqu'au</dt><dd>{dateFr(billing.subscription.commit_end)}</dd></>
+                                                )}
+                                            </dl>
+                                            {billing.subscription.status === 'past_due' && (
+                                                <div className="error">Votre dernier paiement a échoué. Mettez à jour votre moyen de paiement pour éviter une interruption.</div>
+                                            )}
+                                            <p className="panel-note" style={{ marginTop: '14px' }}>
+                                                Changer de carte ou de compte bancaire, télécharger vos factures, ou résilier :
+                                                tout se fait dans votre espace de gestion Stripe. Pour changer de forfait,
+                                                écrivez à <a href="mailto:contact@zelyro.fr?subject=Changement%20de%20forfait%20Zelyro" style={{ color: 'var(--sage-700)' }}>contact@zelyro.fr</a>.
+                                            </p>
+                                            <button className="btn" onClick={ouvrirPortail} disabled={busyBilling}>Gérer mon abonnement</button>
+                                            {['active', 'trialing'].includes(billing.subscription.status) && (
+                                                <div style={{ marginTop: '22px' }}>
+                                                    <p className="panel-note">
+                                                        Comptes utilisateurs en plus de ceux inclus dans votre forfait : {billing.seat_price_ht} € HT par mois
+                                                        et par compte, facturés au prorata dès aujourd'hui.
+                                                    </p>
+                                                    <div className="btn-ligne" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                                                        <div className="form-group" style={{ flex: '0 0 140px', marginBottom: 0 }}>
+                                                            <label>Comptes en plus</label>
+                                                            <input type="number" min="0" max="50" value={sieges}
+                                                                onChange={(e) => setSieges(e.target.value)} disabled={busyBilling} />
+                                                        </div>
+                                                        <button className="btn secondary" onClick={majSieges}
+                                                            disabled={busyBilling || Number(sieges) === (billing.extra_seats || 0)}>Mettre à jour</button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
                                 </div>
                             )}
 
