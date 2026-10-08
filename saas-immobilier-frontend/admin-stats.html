@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZELYRO - Statistiques du site</title>
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <script src="carte-donnees.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <meta name="robots" content="noindex">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="zelyro.css">
+    <style>
+        .direct-haut { display: flex; flex-wrap: wrap; align-items: center; gap: 28px; }
+        .direct-nombre { font-family: var(--serif); font-size: 64px; line-height: 1; color: var(--ink); font-variant-numeric: tabular-nums; }
+        .direct-texte { color: var(--ink-2); font-size: 14px; line-height: 1.7; }
+        .point-vivant { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--hot); margin-right: 8px; animation: pouls 1.8s ease-out infinite; }
+        .point-vivant.eteint { background: var(--cold); animation: none; }
+        @keyframes pouls { 0% { box-shadow: 0 0 0 0 rgba(154, 63, 39, .45); } 70% { box-shadow: 0 0 0 10px rgba(154, 63, 39, 0); } 100% { box-shadow: 0 0 0 0 rgba(154, 63, 39, 0); } }
+        .stats-deux { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; }
+        .stats-deux > * { min-width: 0; }
+        .carte-svg { width: 100%; height: auto; display: block; border-radius: var(--radius-sm); background: var(--surface-2); }
+        .carte-bascule { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 999px; overflow: hidden; }
+        .carte-bascule button { background: transparent; border: 0; padding: 7px 16px; font: inherit; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+        .carte-bascule button.actif { background: var(--sage-600); color: #fff; }
+        .carte-legende { display: flex; flex-wrap: wrap; gap: 18px; font-size: 12px; color: var(--ink-3); margin-top: 12px; }
+        .carte-legende i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+        .carte-pulse { animation: carte-pouls 1.8s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+        @keyframes carte-pouls { 0% { opacity: .9; transform: scale(1); } 100% { opacity: 0; transform: scale(2.6); } }
+        .classement-ligne { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+        .classement-ligne:last-child { border-bottom: none; }
+        .classement-nom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .classement-chiffre { color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .classement-barre { grid-column: 1 / -1; height: 4px; background: var(--sage-100); border-radius: 2px; overflow: hidden; }
+        .classement-barre div { height: 100%; background: var(--sage-600); }
+        .graphique { width: 100%; height: auto; display: block; }
+        .graphique text { fill: var(--ink-3); font-size: 11px; font-family: var(--sans); }
+        .periodes { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+        .periodes button { background: transparent; border: 1px solid var(--line-strong); border-radius: 999px; padding: 6px 14px; font: inherit; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+        .periodes button.actif { background: var(--sage-600); border-color: var(--sage-600); color: #fff; }
+        .journal-table td { white-space: nowrap; }
+        .journal-table td.large { white-space: normal; }
+        .tete-page { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 8px; }
+        .alerte-douce { background: var(--warm-bg); color: var(--warm); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13px; line-height: 1.6; margin-top: 16px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+        const fmt = (n) => Number(n || 0).toLocaleString('fr-FR');
+
+        let nomsPays = null;
+        try { nomsPays = new Intl.DisplayNames(['fr'], { type: 'region' }); } catch (e) { nomsPays = null; }
+        const pays = (code) => { if (!code) return ''; try { return (nomsPays && nomsPays.of(code)) || code; } catch (e) { return code; } };
+        const lieu = (ville, code) => (ville ? `${ville}${code ? ' (' + pays(code) + ')' : ''}` : (code ? pays(code) : 'Lieu inconnu'));
+
+        const heureCourte = (iso) => {
+            const d = new Date(iso);
+            return isNaN(d) ? '' : d.toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        };
+        const depuis = (iso) => {
+            const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+            if (s < 60) return 'à l\'instant';
+            const m = Math.round(s / 60);
+            return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`;
+        };
+        const nomPage = (p) => (p === '/' ? 'Accueil' : p);
+        const appareilLibelle = { ordinateur: 'Ordinateur', mobile: 'Mobile', tablette: 'Tablette' };
+
+        // Projections du fond de carte (les mêmes formules que celles du script qui l'a dessiné).
+        function projeter(vue, lon, lat) {
+            const m = vue === 'france' ? window.ZELYRO_CARTE.france : window.ZELYRO_CARTE.monde;
+            if (vue === 'france') {
+                return [m.tx + m.k * lon * Math.PI / 180, m.ty - m.k * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))];
+            }
+            const l = lon * Math.PI / 180, p = lat * Math.PI / 180, p2 = p * p, p4 = p2 * p2;
+            const X = l * (0.8707 - 0.131979 * p2 + p4 * (-0.013791 + p4 * (0.003971 * p2 - 0.001529 * p4)));
+            const Y = p * (1.007226 + p2 * (0.015085 + p4 * (-0.044475 + 0.028874 * p2 - 0.005916 * p4)));
+            return [m.tx + m.k * X, m.ty - m.k * Y];
+        }
+
+        function Carte({ vue, direct, historique }) {
+            const m = vue === 'france' ? window.ZELYRO_CARTE.france : window.ZELYRO_CARTE.monde;
+            const echelle = vue === 'france' ? 1.5 : 1;
+            const place = (liste) => liste.map((v) => ({ ...v, xy: projeter(vue, v.lon, v.lat) }))
+                .filter((v) => v.xy[0] >= 0 && v.xy[0] <= m.w && v.xy[1] >= 0 && v.xy[1] <= m.h);
+            const hist = place(historique);
+            const live = place(direct);
+            const horsCarte = (historique.length - hist.length);
+            const maxVisites = Math.max(1, ...hist.map((v) => v.visites));
+            return (
+                <>
+                    <svg className="carte-svg" viewBox={`0 0 ${m.w} ${m.h}`} role="img"
+                        aria-label="Carte des villes d'où le site est visité">
+                        {vue === 'monde' && <path d={m.contour} fill="var(--surface-2)" />}
+                        <path d={m.d} fill="var(--sage-100)" stroke="#fff" strokeWidth={vue === 'france' ? 1 : 0.5} strokeLinejoin="round" />
+                        {m.d_france && <path d={m.d_france} fill="var(--sage-300)" fillOpacity="0.55" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round" />}
+                        {hist.map((v) => (
+                            <circle key={'h' + v.pays + v.ville} cx={v.xy[0]} cy={v.xy[1]}
+                                r={(3 + 7 * Math.sqrt(v.visites / maxVisites)) * echelle}
+                                fill="var(--sage-600)" fillOpacity="0.32" stroke="var(--sage-700)" strokeWidth="0.8">
+                                <title>{`${lieu(v.ville, v.pays)} : ${fmt(v.visites)} visite${v.visites > 1 ? 's' : ''}`}</title>
+                            </circle>
+                        ))}
+                        {live.map((v) => (
+                            <g key={'l' + v.pays + v.ville}>
+                                <circle className="carte-pulse" cx={v.xy[0]} cy={v.xy[1]} r={5 * echelle} fill="var(--hot)" />
+                                <circle cx={v.xy[0]} cy={v.xy[1]} r={(3.5 + Math.min(v.n, 6) * 0.6) * echelle} fill="var(--hot)" stroke="#fff" strokeWidth="1">
+                                    <title>{`${lieu(v.ville, v.pays)} : ${v.n} en direct`}</title>
+                                </circle>
+                            </g>
+                        ))}
+                    </svg>
+                    <div className="carte-legende">
+                        <span><i style={{ background: 'var(--hot)' }}></i>En direct maintenant</span>
+                        <span><i style={{ background: 'var(--sage-600)', opacity: 0.45 }}></i>Villes visitées sur la période (taille = nombre de visites)</span>
+                        {horsCarte > 0 && <span>{horsCarte} ville{horsCarte > 1 ? 's' : ''} hors de cette carte</span>}
+                    </div>
+                </>
+            );
+        }
+
+        function Classement({ titre, lignes, nom, note }) {
+            const max = Math.max(1, ...lignes.map((l) => l.visites));
+            return (
+                <div className="panel">
+                    <div className="panel-header"><h2 className="panel-title">{titre}</h2></div>
+                    {note && <p className="panel-note" style={{ marginBottom: 12 }}>{note}</p>}
+                    {lignes.length === 0 ? <div className="empty-state" style={{ padding: '20px 0' }}>Rien pour l'instant.</div> : lignes.map((l, i) => (
+                        <div className="classement-ligne" key={i}>
+                            <span className="classement-nom" title={nom(l)}>{nom(l)}</span>
+                            <span className="classement-chiffre">{fmt(l.visites)} visite{l.visites > 1 ? 's' : ''}{l.visiteurs != null ? ` · ${fmt(l.visiteurs)} visiteur${l.visiteurs > 1 ? 's' : ''}` : ''}</span>
+                            <div className="classement-barre"><div style={{ width: (100 * l.visites / max) + '%' }}></div></div>
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+
+        function Barres({ valeurs, etiquettes, unite }) {
+            const W = 600, H = 150, bas = 22, haut = 8;
+            const max = Math.max(1, ...valeurs);
+            const n = valeurs.length;
+            const pas = W / n;
+            const L = Math.max(1, pas * 0.72);
+            const idx = n > 12 ? [0, Math.floor(n / 2), n - 1] : valeurs.map((_, i) => i);
+            return (
+                <svg className="graphique" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Graphique de fréquentation">
+                    <line x1="0" x2={W} y1={H - bas} y2={H - bas} stroke="var(--line-strong)" />
+                    {valeurs.map((v, i) => {
+                        const h = v ? Math.max(2, (H - bas - haut) * v / max) : 0;
+                        return (
+                            <rect key={i} x={i * pas + (pas - L) / 2} y={H - bas - h} width={L} height={h} rx="1.5" fill="var(--sage-600)" fillOpacity="0.85">
+                                <title>{`${etiquettes[i]} : ${fmt(v)} ${unite}`}</title>
+                            </rect>
+                        );
+                    })}
+                    {idx.map((i) => (
+                        <text key={'e' + i} x={Math.min(W - 2, Math.max(2, i * pas + pas / 2))} y={H - 6} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}>{etiquettes[i]}</text>
+                    ))}
+                    <text x={W} y="10" textAnchor="end">max {fmt(max)}</text>
+                </svg>
+            );
+        }
+
+        function StatsApp() {
+            const [user, setUser] = useState(null);
+            const [direct, setDirect] = useState(null);
+            const [resume, setResume] = useState(null);
+            const [jours, setJours] = useState(30);
+            const [vue, setVue] = useState('monde');
+            const [erreur, setErreur] = useState(null);
+            const [refuse, setRefuse] = useState(false);
+            const [, setHorloge] = useState(0);
+
+            const handleLogout = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.replace('/login.html');
+            };
+
+            const appel = async (chemin) => {
+                const r = await fetch(`${API_URL}${chemin}`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } });
+                if (r.status === 401) { handleLogout(); throw new Error('Session expirée'); }
+                if (r.status === 404) { const e = new Error('refus'); e.refus = true; throw e; }
+                const corps = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(corps.message || `Erreur ${r.status}`);
+                return corps;
+            };
+
+            useEffect(() => {
+                if (!localStorage.getItem('token')) { window.location.replace('/login.html'); return; }
+                const u = localStorage.getItem('user');
+                if (u) { try { setUser(JSON.parse(u)); } catch (e) { /* ignoré */ } }
+            }, []);
+
+            // Le direct se rafraîchit toutes les 10 secondes tant que l'onglet est visible.
+            useEffect(() => {
+                if (!localStorage.getItem('token')) return undefined;
+                let arret = false;
+                const tic = async () => {
+                    if (document.visibilityState === 'hidden') return;
+                    try {
+                        const d = await appel('/admin/stats/direct');
+                        if (!arret) { setDirect(d); setErreur(null); }
+                    } catch (e) {
+                        if (arret) return;
+                        if (e.refus) setRefuse(true); else setErreur(e.message);
+                    }
+                };
+                tic();
+                const id = setInterval(tic, 10000);
+                const reveil = () => { if (document.visibilityState === 'visible') tic(); };
+                document.addEventListener('visibilitychange', reveil);
+                return () => { arret = true; clearInterval(id); document.removeEventListener('visibilitychange', reveil); };
+            }, []);
+
+            useEffect(() => {
+                if (!localStorage.getItem('token')) return undefined;
+                let arret = false;
+                const charger = async () => {
+                    try {
+                        const r = await appel(`/admin/stats/resume?jours=${jours}`);
+                        if (!arret) setResume(r);
+                    } catch (e) {
+                        if (!arret && !e.refus) setErreur(e.message);
+                    }
+                };
+                charger();
+                const id = setInterval(charger, 60000);
+                return () => { arret = true; clearInterval(id); };
+            }, [jours]);
+
+            // Fait avancer les « il y a x min » entre deux rafraîchissements.
+            useEffect(() => { const id = setInterval(() => setHorloge((x) => x + 1), 15000); return () => clearInterval(id); }, []);
+
+            const etiquettesJours = useMemo(() => (resume ? resume.serie.map((s) => {
+                const d = new Date(s.jour + 'T12:00:00');
+                return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+            }) : []), [resume]);
+
+            const nbEnDirect = direct ? direct.en_direct : 0;
+
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo">ZELYRO</div>
+                            <nav>
+                                <a href="/prospects.html">Leads</a>
+                                <a href="/biens.html">Biens</a>
+                                <a href="/matching.html">Matching</a>
+                                <a href="/propositions.html">Propositions</a>
+                                <a href="/dashboard.html">Dashboard</a>
+                                <a href="/compte.html">Compte</a>
+                                <a href="/admin.html" className="active">Admin</a>
+                            </nav>
+                            <div className="user-info">
+                                {user && <span className="user-email">{user.email}</span>}
+                                <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="container">
+                        <div className="tete-page">
+                            <div>
+                                <h1 className="page-title">Statistiques du site</h1>
+                                <p className="page-subtitle" style={{ marginBottom: 0 }}>Qui visite zelyro.fr, d'où et quand. Mesure anonyme : aucune adresse IP conservée, aucun cookie, une ville au plus.</p>
+                            </div>
+                            <a className="btn secondary petit" href="/admin.html">Retour à l'administration</a>
+                        </div>
+
+                        {erreur && <div className="error" style={{ marginTop: 16 }}>Erreur: {erreur}</div>}
+
+                        {refuse ? (
+                            <div className="panel" style={{ marginTop: 24 }}>
+                                <div className="empty-state">Cette page est réservée à l'équipe Zelyro.<br /><a href="/prospects.html" style={{ color: 'var(--sage-700)' }}>Retour à mes prospects</a></div>
+                            </div>
+                        ) : !direct ? (
+                            <div className="loading"><div className="loader"></div></div>
+                        ) : (
+                            <div className="admin-pile" style={{ marginTop: 24 }}>
+                                <div className="panel">
+                                    <div className="panel-header">
+                                        <h2 className="panel-title">En direct</h2>
+                                        <span className="panel-count">mis à jour toutes les 10 secondes</span>
+                                    </div>
+                                    <div className="direct-haut">
+                                        <div className="direct-nombre" aria-live="polite">{nbEnDirect}</div>
+                                        <div className="direct-texte">
+                                            <div><span className={`point-vivant ${nbEnDirect ? '' : 'eteint'}`}></span>
+                                                {nbEnDirect === 0 ? 'Personne sur le site en ce moment' : nbEnDirect === 1 ? 'personne sur le site en ce moment' : 'personnes sur le site en ce moment'}</div>
+                                            <div>Aujourd'hui : {fmt(direct.aujourdhui.visites)} visite{direct.aujourdhui.visites > 1 ? 's' : ''} · {fmt(direct.aujourdhui.visiteurs)} visiteur{direct.aujourdhui.visiteurs > 1 ? 's' : ''}</div>
+                                            <div style={{ color: 'var(--ink-3)', fontSize: 12 }}>Est en direct toute personne qui a une page ouverte et visible depuis moins de {direct.fenetre_secondes} secondes.</div>
+                                        </div>
+                                    </div>
+                                    {!direct.actif && <div className="alerte-douce">La mesure est désactivée sur le serveur (STATS_SITE=0) : plus aucune visite n'est enregistrée.</div>}
+                                    {direct.actif && direct.geo !== 'prête' && direct.geo !== 'désactivée' && (
+                                        <div className="alerte-douce">La localisation par ville n'est pas encore disponible ({direct.geo}). Les visites sont comptées dès maintenant, sans lieu, jusqu'à ce que la base de villes soit prête (quelques minutes après le démarrage du serveur).</div>
+                                    )}
+                                    {direct.geo === 'désactivée' && <div className="alerte-douce">La localisation est désactivée sur le serveur (STATS_GEO=0) : les visites sont comptées sans lieu.</div>}
+                                </div>
+
+                                <div className="panel">
+                                    <div className="panel-header">
+                                        <h2 className="panel-title">Carte</h2>
+                                        <div className="carte-bascule" role="group" aria-label="Fond de carte">
+                                            <button className={vue === 'monde' ? 'actif' : ''} onClick={() => setVue('monde')}>Monde</button>
+                                            <button className={vue === 'france' ? 'actif' : ''} onClick={() => setVue('france')}>France</button>
+                                        </div>
+                                    </div>
+                                    <p className="panel-note" style={{ marginBottom: 14 }}>Chaque point est une ville, jamais une personne ni une adresse. La position est celle du centre de la ville.</p>
+                                    <Carte vue={vue} direct={direct.villes} historique={resume ? resume.villes : []} />
+                                </div>
+
+                                <>
+                                    <div className="panel">
+                                        <div className="panel-header">
+                                            <h2 className="panel-title">Sur le site maintenant</h2>
+                                            <span className="panel-count">{nbEnDirect}</span>
+                                        </div>
+                                        {direct.visiteurs.length === 0 ? <div className="empty-state" style={{ padding: '24px 0' }}>Personne pour l'instant.</div> : (
+                                            <div className="table-scroll">
+                                                <table className="admin-table journal-table">
+                                                    <thead><tr><th>Lieu</th><th>Page</th><th>Appareil</th><th>Depuis</th></tr></thead>
+                                                    <tbody>
+                                                        {direct.visiteurs.map((v, i) => (
+                                                            <tr key={i}><td className="large">{lieu(v.ville, v.pays)}</td><td>{nomPage(v.page)}</td><td>{appareilLibelle[v.appareil] || ''}</td><td>{depuis(v.depuis)}</td></tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="panel">
+                                        <div className="panel-header">
+                                            <h2 className="panel-title">Journal des visites</h2>
+                                            <span className="panel-count">les 40 dernières</span>
+                                        </div>
+                                        {direct.journal.length === 0 ? <div className="empty-state" style={{ padding: '24px 0' }}>Aucune visite enregistrée pour l'instant.</div> : (
+                                            <div className="table-scroll" style={{ maxHeight: 420, overflowY: 'auto' }}>
+                                                <table className="admin-table journal-table">
+                                                    <thead><tr><th>Quand</th><th>Lieu</th><th>Page</th><th>Provenance</th><th>Appareil</th></tr></thead>
+                                                    <tbody>
+                                                        {direct.journal.map((j, i) => (
+                                                            <tr key={i}>
+                                                                <td>{heureCourte(j.le)}</td>
+                                                                <td className="large">{lieu(j.ville, j.pays)}</td>
+                                                                <td>{nomPage(j.page)}</td>
+                                                                <td>{j.campagne ? `${j.source} · ${j.campagne}` : (j.source || '')}</td>
+                                                                <td>{appareilLibelle[j.appareil] || ''}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
+
+                                <div className="panel">
+                                    <div className="panel-header">
+                                        <h2 className="panel-title">Fréquentation</h2>
+                                        <div className="periodes" role="group" aria-label="Période">
+                                            {[[7, '7 jours'], [30, '30 jours'], [90, '90 jours'], [365, '1 an']].map(([j, l]) => (
+                                                <button key={j} className={jours === j ? 'actif' : ''} onClick={() => setJours(j)}>{l}</button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    {!resume ? <div className="loading"><div className="loader"></div></div> : (
+                                        <>
+                                            <div className="stats-grid" style={{ marginBottom: 20 }}>
+                                                <div className="stat-card"><div className="stat-value">{fmt(resume.totaux.visites)}</div><div className="stat-label">Visites</div></div>
+                                                <div className="stat-card"><div className="stat-value">{fmt(resume.totaux.visiteurs)}</div><div className="stat-label">Visiteurs</div>
+                                                    <div className="stat-note">Une personne revenue un autre jour compte à nouveau : l'empreinte change chaque jour, volontairement.</div></div>
+                                            </div>
+                                            <Barres valeurs={resume.serie.map((s) => s.visites)} etiquettes={etiquettesJours} unite="visites" />
+                                        </>
+                                    )}
+                                </div>
+
+                                {resume && (
+                                    <>
+                                        <div className="stats-deux">
+                                            <Classement titre="Pages les plus vues" lignes={resume.pages} nom={(l) => nomPage(l.page)} />
+                                            <Classement titre="D'où viennent les visiteurs" lignes={resume.sources} nom={(l) => l.source}
+                                                note="Le site d'où le visiteur est arrivé, ou la source indiquée dans le lien (utm_source). « direct » : adresse tapée, favori, ou message sans origine connue." />
+                                        </div>
+                                        <div className="stats-deux">
+                                            <Classement titre="Pays" lignes={resume.pays} nom={(l) => pays(l.pays)} />
+                                            <Classement titre="Villes" lignes={resume.villes.slice(0, 15)} nom={(l) => lieu(l.ville, l.pays)} />
+                                        </div>
+                                        <div className="stats-deux">
+                                            <Classement titre="Campagnes" lignes={resume.campagnes} nom={(l) => l.campagne}
+                                                note="Les liens qui portent ?utm_campaign=... Exemple : zelyro.fr/?utm_source=linkedin&utm_campaign=lancement" />
+                                            <Classement titre="Appareils" lignes={resume.appareils} nom={(l) => appareilLibelle[l.appareil] || l.appareil} />
+                                        </div>
+                                        <div className="panel">
+                                            <div className="panel-header"><h2 className="panel-title">Heures de fréquentation</h2><span className="panel-count">heure de Paris</span></div>
+                                            <Barres valeurs={resume.heures} etiquettes={resume.heures.map((_, h) => `${h} h`)} unite="visites" />
+                                        </div>
+                                        <p className="field-hint">
+                                            Mesure faite par Zelyro, sans service tiers. Conservation 13 mois puis suppression automatique. Localisation approximative à la ville, d'après la base gratuite{' '}
+                                            <a href="https://db-ip.com" target="_blank" rel="noopener" style={{ color: 'var(--sage-700)' }}>IP Geolocation by DB-IP</a> (licence CC BY 4.0).
+                                            {resume.depuis ? ` Première visite enregistrée le ${new Date(resume.depuis).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}.` : ''}
+                                        </p>
+                                    </>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </>
+            );
+        }
+
+        ReactDOM.render(<StatsApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>

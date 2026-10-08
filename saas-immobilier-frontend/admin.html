@@ -183,6 +183,9 @@
                     <div className="container">
                         <h1 className="page-title">Administration</h1>
                         <p className="page-subtitle">Qui a le droit d'utiliser Zelyro, avec quel forfait, et ce que chaque agence consomme.</p>
+                        <div className="btn-ligne" style={{ margin: '4px 0 24px' }}>
+                            <a className="btn secondary petit" href="/admin-stats.html">Statistiques du site : visiteurs en direct, carte, journal</a>
+                        </div>
 
                         {error && <div className="error">Erreur: {error}</div>}
                         {message && <div className={message.type === 'error' ? 'error' : 'success'}>{message.text}</div>}

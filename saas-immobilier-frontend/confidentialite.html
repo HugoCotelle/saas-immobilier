@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="/public.css">
 <script>document.documentElement.className+=' js';</script>
 <script src="/societe.js" defer></script>
+<script src="/stats.js" defer></script>
 </head>
 <body class="pub">
 <a class="skip-link" href="#contenu">Aller au contenu</a>
@@ -57,7 +58,7 @@
         <div class="wrap">
             <h1>Politique de confidentialité</h1>
             <p>Comment Zelyro traite les données personnelles des utilisateurs et, pour le compte des agences, celles de leurs prospects.</p>
-            <p class="legal-meta">Dernière mise à jour : <span data-societe="date_maj">6 octobre 2026</span></p>
+            <p class="legal-meta">Dernière mise à jour : <span data-societe="date_maj">8 octobre 2026</span></p>
         </div>
     </div>
     <div class="wrap">
@@ -92,6 +93,7 @@
             <tbody>
                 <tr><td data-label="Données">Données de compte des utilisateurs (adresse e-mail, prénom, nom de l’agence, mot de passe haché), préférences de notification, abonnements aux notifications et données techniques de connexion</td><td data-label="Rôle de l’agence">Cliente du service</td><td data-label="Rôle de Zelyro">Responsable de traitement</td></tr>
                 <tr><td data-label="Données">Données des prospects saisies, importées ou reçues par le formulaire de contact de l’agence</td><td data-label="Rôle de l’agence">Responsable de traitement</td><td data-label="Rôle de Zelyro">Sous-traitant, au sens de l’article 28 du RGPD</td></tr>
+                <tr><td data-label="Données">Statistiques d’audience du site zelyro.fr (pages vues, provenance, ville, type d’appareil), sans identification des personnes</td><td data-label="Rôle de l’agence">Non concernée</td><td data-label="Rôle de Zelyro">Responsable de traitement</td></tr>
             </tbody>
         </table>
     </div>
@@ -131,6 +133,9 @@
     <p>Zelyro n’a pas vocation à traiter de données sensibles au sens de l’article 9 du RGPD. Les agences s’engagent à ne pas en saisir dans les champs libres.</p>
     <h3>Données techniques</h3>
     <p>Comme tout service en ligne, l’infrastructure enregistre des journaux techniques (par exemple adresse IP, date et heure des requêtes, erreurs) utilisés pour assurer la sécurité et le bon fonctionnement du service.</p>
+    <h3>Mesure d’audience du site</h3>
+    <p>Zelyro mesure la fréquentation de ses pages publiques (accueil, tarifs, connexion, pages légales, et pages que les agences envoient à leurs prospects) pour savoir combien de personnes visitent le site, d’où elles viennent et quelles pages les intéressent. Pour chaque page affichée, sont enregistrés : le nom de la page (sans la partie de l’adresse qui suit le point d’interrogation, donc sans les identifiants personnels contenus dans les liens envoyés aux prospects), le site ou la campagne d’où vient le lien, le type d’appareil (ordinateur, tablette ou mobile, déduit de la largeur d’écran), la date et l’heure, ainsi que le pays et la ville approximatifs déduits de l’adresse IP.</p>
+    <p>L’adresse IP n’est pas enregistrée : elle sert uniquement, sur le moment, à déterminer la ville, puis elle est écartée. Le visiteur n’est reconnu que par une empreinte technique calculée avec la date du jour et une clé secrète. Cette empreinte change chaque jour, ne permet pas de retrouver l’adresse IP et ne permet pas de suivre une personne d’un jour à l’autre. Aucun cookie ni identifiant stocké dans le navigateur n’est utilisé pour cette mesure ; les données ne sont recoupées avec aucune autre (notamment pas avec les comptes ni avec les prospects des agences) et ne sont transmises à aucun tiers. Vous pouvez vous y opposer à tout moment (voir la section 10).</p>
     <h3>Boîte Gmail connectée (facultatif)</h3>
     <p>Si l’administrateur d’une agence connecte sa boîte Gmail, Zelyro y accède en lecture seule, uniquement pour repérer les messages envoyés par SeLoger et par Leboncoin et en tirer des prospects. Les autres messages ne sont pas lus. Le jeton d’autorisation fourni par Google est conservé chiffré ; il est supprimé et révoqué auprès de Google dès que l’administrateur déconnecte la boîte. Tout ou partie du texte d’un message de portail peut être conservé dans les notes du prospect créé ; les identifiants des messages déjà traités sont conservés pour éviter les doublons.</p>
     <h3>Messages adressés à Zelyro</h3>
@@ -147,6 +152,7 @@
                 <tr><td data-label="Finalité">Envoyer les e-mails liés au service (réinitialisation du mot de passe, notification de changement de mot de passe, alertes de correspondance)</td><td data-label="Base légale">Exécution du contrat (art. 6.1.b)</td><td data-label="Données concernées">Adresse e-mail de l’utilisateur</td></tr>
                 <tr><td data-label="Finalité">Envoyer à chaque utilisateur un e-mail récapitulatif le matin (désactivable à tout moment) et, s’il les a activées, des notifications sur son appareil (nouvelle activité d’un prospect, prospect qui lui est attribué)</td><td data-label="Base légale">Exécution du contrat (art. 6.1.b) pour l’e-mail ; consentement (art. 6.1.a) pour les notifications sur l’appareil, donné en acceptant l’autorisation demandée par le navigateur et retirable à tout moment</td><td data-label="Données concernées">Adresse e-mail, abonnement de l’appareil, contenu du récapitulatif ou de la notification</td></tr>
                 <tr><td data-label="Finalité">Assurer la sécurité du service, prévenir les abus et les accès non autorisés</td><td data-label="Base légale">Intérêt légitime (art. 6.1.f)</td><td data-label="Données concernées">Données techniques, données de compte</td></tr>
+                <tr><td data-label="Finalité">Mesurer la fréquentation du site (nombre de visiteurs, pages consultées, provenance, villes) pour comprendre son audience et l’améliorer</td><td data-label="Base légale">Intérêt légitime (art. 6.1.f) ; mesure limitée à l’audience du site, anonyme, avec possibilité de s’y opposer à tout moment</td><td data-label="Données concernées">Données de mesure d’audience</td></tr>
                 <tr><td data-label="Finalité">Répondre aux demandes reçues (démonstration, questions)</td><td data-label="Base légale">Mesures précontractuelles ou intérêt légitime (art. 6.1.b ou 6.1.f)</td><td data-label="Données concernées">Messages adressés à Zelyro</td></tr>
                 <tr><td data-label="Finalité">Respecter nos obligations légales (comptables, réponse aux autorités)</td><td data-label="Base légale">Obligation légale (art. 6.1.c)</td><td data-label="Données concernées">Selon l’obligation concernée</td></tr>
                 <tr><td data-label="Finalité">Enregistrer, pour le compte de l’agence, l’activité des prospects sur les liens qu’elle leur envoie (ouverture, remplissage du formulaire, demande de visite) et la lui signaler</td><td data-label="Base légale">Instructions de l’agence, responsable de traitement (la base légale relève de l’agence)</td><td data-label="Données concernées">Données des prospects, événements d’activité</td></tr>
@@ -208,6 +214,7 @@
                 <tr><td data-label="Catégorie">Accès à la boîte Gmail</td><td data-label="Durée de conservation">Jusqu’à la déconnexion par l’administrateur (l’accès est alors supprimé et révoqué auprès de Google) ou la suppression du compte</td></tr>
                 <tr><td data-label="Catégorie">Identifiants des e-mails de portail déjà traités</td><td data-label="Durée de conservation">Conservés avec le compte pour ne pas traiter deux fois le même message, et supprimés avec lui</td></tr>
                 <tr><td data-label="Catégorie">Journaux techniques</td><td data-label="Durée de conservation">12 mois</td></tr>
+                <tr><td data-label="Catégorie">Mesure d’audience du site (pages, provenance, ville, appareil)</td><td data-label="Durée de conservation">13 mois, puis suppression automatique. Les données « en direct » (visiteurs présents à l’instant sur le site) sont supprimées au bout de 24 heures</td></tr>
                 <tr><td data-label="Catégorie">Demandes de réinitialisation du mot de passe</td><td data-label="Durée de conservation">Lien valable pendant une durée limitée (30 minutes) ; l’enregistrement de la demande est supprimé dès son utilisation ou, au plus tard, 24 heures après son expiration</td></tr>
                 <tr><td data-label="Catégorie">Messages adressés à Zelyro (démonstration, questions)</td><td data-label="Durée de conservation">3 ans à compter du dernier contact, conformément aux recommandations usuelles en matière de prospection commerciale</td></tr>
                 <tr><td data-label="Catégorie">Données de facturation et pièces comptables</td><td data-label="Durée de conservation">10 ans, conformément à l’obligation légale de conservation des documents comptables (article L123-22 du Code de commerce)</td></tr>
@@ -236,7 +243,10 @@
 
 <section id="cookies" aria-labelledby="h-cookies">
     <h2 id="h-cookies">10. Cookies et traceurs</h2>
-    <p>Zelyro n’utilise aucun cookie publicitaire, aucun outil de mesure d’audience et aucun traceur tiers. Les polices de caractères sont hébergées avec le site.</p>
+    <p>Zelyro n’utilise aucun cookie publicitaire, aucun outil de mesure d’audience fourni par un tiers et aucun traceur tiers. Les polices de caractères sont hébergées avec le site.</p>
+    <p id="audience">Zelyro mesure elle-même, sur ses seuls serveurs, la fréquentation de ses pages publiques, comme décrit à la section 3 : aucun cookie, aucun identifiant conservé dans votre navigateur, aucune adresse IP enregistrée, aucune transmission à un tiers et aucun recoupement avec d’autres données. Cette mesure sert uniquement à connaître l’audience du site. Étant limitée à cet usage et anonyme, elle relève des mesures d’audience que la CNIL dispense de consentement, ce qui explique l’absence de bandeau de cookies. Elle n’est pas appliquée lorsque votre navigateur transmet le signal « Ne pas me suivre » (DNT) ou « Global Privacy Control », ni lorsque vous êtes connecté à votre espace Zelyro. Vous pouvez aussi vous y opposer à tout moment, sans avoir à vous justifier :</p>
+    <p><button type="button" class="btn secondary btn-sm" id="stats-optout" aria-pressed="false">Ne plus me mesurer sur ce navigateur</button> <span id="stats-optout-etat" role="status"></span></p>
+    <p>Ce choix est mémorisé dans le stockage local de votre navigateur, sous la forme d’un simple repère sans identifiant ; il disparaît si vous videz les données du site, vous pouvez alors le renouveler. La ville est déterminée à partir de la base gratuite <a href="https://db-ip.com" rel="noopener">IP Geolocation by DB-IP</a> (licence CC BY 4.0), téléchargée sur nos serveurs : votre adresse IP n’est envoyée à aucun service pour cela.</p>
     <p>Les seuls éléments stockés dans votre navigateur sont techniques : un jeton de session (avec, le cas échéant, quelques informations de compte nécessaires à l’affichage), conservé dans le stockage local du navigateur (localStorage), et, si vous installez l’application ou activez les notifications, un composant technique (service worker) qui reçoit les notifications. Ce composant ne met aucun contenu en cache et ne conserve aucune donnée personnelle. Ces éléments sont indispensables au fonctionnement du service que vous demandez ; ils ne sont pas utilisés à d’autres fins. À ce titre, ils sont exemptés de consentement et aucun bandeau de cookies n’est affiché. L’affichage des notifications nécessite en outre votre autorisation expresse dans le navigateur, que vous pouvez retirer à tout moment. Vous pouvez effacer ces éléments en vous déconnectant ou en vidant les données du site dans votre navigateur.</p>
 </section>
 
@@ -344,6 +354,26 @@
     b.addEventListener('click', function () { set(!n.classList.contains('open')); });
     n.addEventListener('click', function (e) { if (e.target.closest('a')) set(false); });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && n.classList.contains('open')) { set(false); b.focus(); } });
+})();
+</script>
+<script>
+(function () {
+    var b = document.getElementById('stats-optout'), e = document.getElementById('stats-optout-etat');
+    if (!b || !e) return;
+    function lire() { try { return localStorage.getItem('zelyro_no_stats') === '1'; } catch (x) { return false; } }
+    function afficher() {
+        var o = lire();
+        b.textContent = o ? 'Me mesurer de nouveau sur ce navigateur' : 'Ne plus me mesurer sur ce navigateur';
+        b.setAttribute('aria-pressed', o ? 'true' : 'false');
+        e.textContent = o ? 'Vous n’êtes plus mesuré(e) sur ce navigateur.' : '';
+    }
+    b.addEventListener('click', function () {
+        try {
+            if (lire()) localStorage.removeItem('zelyro_no_stats'); else localStorage.setItem('zelyro_no_stats', '1');
+        } catch (x) { e.textContent = 'Votre navigateur ne permet pas de mémoriser ce choix.'; return; }
+        afficher();
+    });
+    afficher();
 })();
 </script>
 </body>

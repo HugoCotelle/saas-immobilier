@@ -16,7 +16,7 @@
         telephone: '',        // ex. '01 23 45 67 89'
         directeur: 'Hugo Cotelle, Président',        // ex. 'Prénom Nom, Président'
         tribunal_ville: 'Paris',   // ville du tribunal de commerce du siège, ex. 'Paris'
-        date_maj: '6 octobre 2026'
+        date_maj: '8 octobre 2026'
     };
 
     // Un SIREN comporte 9 chiffres et respecte la clé de Luhn : on prévient dans la console si une faute de frappe est probable.
