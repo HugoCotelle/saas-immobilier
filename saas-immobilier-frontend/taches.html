@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZELYRO - À faire</title>
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <meta name="robots" content="noindex">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="zelyro.css">
+    <style>
+        .tete-taches { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 16px; }
+        .filtres-taches { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 26px; align-items: center; }
+        .filtres-taches button { background: transparent; border: 1px solid var(--line-strong); border-radius: 999px; padding: 7px 15px; font: inherit; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+        .filtres-taches button.actif { background: var(--sage-600); border-color: var(--sage-600); color: #fff; }
+        .filtres-taches .espace { flex: 1; }
+        .groupe-titre { font-family: var(--serif); font-size: 21px; margin: 34px 0 14px; display: flex; align-items: baseline; gap: 12px; }
+        .groupe-titre .nb { font-family: var(--sans); font-size: 13px; color: var(--ink-3); }
+        .tache { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--line-strong); border-radius: var(--radius); padding: 20px 22px; margin-bottom: 14px; }
+        .tache.urgent { border-left-color: var(--hot); }
+        .tache.important { border-left-color: var(--warm); }
+        .tache.normal { border-left-color: var(--sage-300); }
+        .tache-haut { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; align-items: flex-start; }
+        .tache-titre { font-family: var(--serif); font-size: 20px; line-height: 1.3; color: var(--ink); }
+        .tache-badges { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        .tache-motifs { margin: 12px 0 0; padding: 0; list-style: none; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
+        .tache-motifs li { padding-left: 16px; position: relative; margin-bottom: 4px; }
+        .tache-motifs li::before { content: ""; position: absolute; left: 0; top: 9px; width: 6px; height: 6px; border-radius: 50%; background: var(--sage-300); }
+        .tache-motifs li:first-child { color: var(--ink); }
+        .tache-motifs li:first-child::before { background: var(--sage-600); }
+        .tache-infos { display: flex; flex-wrap: wrap; gap: 6px 8px; margin-top: 12px; }
+        .puce { background: var(--surface-2); color: var(--ink-2); border-radius: 999px; padding: 4px 11px; font-size: 12px; }
+        .tache-contact { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 14px; color: var(--ink-2); }
+        .tache-contact a { color: var(--sage-700); text-decoration: none; border-bottom: 1px solid var(--sage-300); }
+        .tache-proposition { margin-top: 14px; background: var(--sage-50); border: 1px solid var(--sage-100); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 14px; line-height: 1.55; }
+        .tache-relances { margin-top: 12px; font-size: 13px; color: var(--ink-3); }
+        .tache-actions { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+        .tache-fait { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+        .tache-fait .form-row { grid-template-columns: 220px 1fr; }
+        @media (max-width: 800px) { .tache-fait .form-row { grid-template-columns: 1fr; } }
+        .toast-ok { background: var(--sage-50); border: 1px solid var(--sage-100); color: var(--sage-700); border-radius: var(--radius-sm); padding: 12px 16px; font-size: 14px; margin-bottom: 18px; }
+        .resp { font-size: 12px; color: var(--ink-3); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+        const fmt = (n) => Number(n || 0).toLocaleString('fr-FR');
+        const NIVEAUX = { hot: ['Chaud', 'badge-hot'], warm: ['Tiède', 'badge-warm'], cold: ['Froid', 'badge-cold'] };
+        const STATUTS = { nouveau: 'Nouveau', contacte: 'Contacté', visite: 'Visite', offre: 'Offre' };
+        const GROUPES = [
+            ['urgent', 'À faire en premier', 'Visites du jour, demandes de visite, relances en retard, prospects restés sans réponse.'],
+            ['important', 'À faire dans la journée', 'Relances du jour, nouveaux prospects, prospects chauds à rappeler.'],
+            ['normal', 'Si vous avez un moment', 'Biens à proposer, prospects à réveiller.']
+        ];
+        const CANAUX = { telephone: 'Appel passé', email: 'E-mail envoyé', whatsapp: 'Message WhatsApp envoyé', visite: 'Visite effectuée' };
+
+        // Numéro au format international sans « + » (06 12 34 56 78 -> 33612345678), pour tel: et WhatsApp.
+        function numeroInternational(tel) {
+            var d = String(tel || '').replace(/[^\d+]/g, '');
+            if (!d) return '';
+            if (d.charAt(0) === '+') return d.slice(1).replace(/\D/g, '');
+            if (d.slice(0, 2) === '00') return d.slice(2);
+            if (d.charAt(0) === '0' && d.length === 10) return '33' + d.slice(1);
+            return d;
+        }
+        function prenomPourMessage(nom) {
+            var n = String(nom || '').trim();
+            if (!n || /^Contact (LeBonCoin|SeLoger|\()/.test(n)) return '';
+            return n.split(' ')[0];
+        }
+        const depuis = (iso) => {
+            if (!iso) return '';
+            const j = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+            if (j <= 0) return "aujourd'hui";
+            return j === 1 ? 'hier' : `il y a ${j} jours`;
+        };
+
+        // « Reporter à demain » : mémorisé dans ce navigateur, pour la journée seulement.
+        function lireReportees(jour) {
+            try {
+                const brut = JSON.parse(localStorage.getItem('zelyro_taches_reportees') || '{}');
+                return brut.jour === jour && Array.isArray(brut.ids) ? brut.ids : [];
+            } catch (e) { return []; }
+        }
+        function ecrireReportees(jour, ids) {
+            try { localStorage.setItem('zelyro_taches_reportees', JSON.stringify({ jour, ids })); } catch (e) { /* ignoré */ }
+        }
+
+        function Carte({ t, user, onFait, onReporter, enCours }) {
+            const [ouvert, setOuvert] = useState(false);
+            const [canal, setCanal] = useState(t.action === 'email' ? 'email' : t.action === 'visite' ? 'visite' : 'telephone');
+            const [note, setNote] = useState('');
+            const [erreur, setErreur] = useState(null);
+            const l = t.lead;
+            const tel = numeroInternational(l.phone);
+            const peutAppeler = tel.length >= 9;
+            const prenom = prenomPourMessage(l.name);
+            const niveau = NIVEAUX[l.quality] || NIVEAUX.cold;
+            const texteWhatsApp = `Bonjour${prenom ? ' ' + prenom : ''}, je vous contacte suite à votre demande${user && user.company_name ? ' auprès de ' + user.company_name : ''}. Quand seriez-vous disponible pour en parler ?`;
+            const principal = t.action;
+
+            const valider = async () => {
+                setErreur(null);
+                const ok = await onFait(t, canal, note.trim());
+                if (!ok) setErreur("L'enregistrement a échoué. Réessayez.");
+            };
+
+            return (
+                <div className={`tache ${t.priorite}`}>
+                    <div className="tache-haut">
+                        <div>
+                            <div className="tache-titre">{t.titre}</div>
+                            {t.responsable && <div className="resp">Responsable : {t.responsable}</div>}
+                        </div>
+                        <div className="tache-badges">
+                            <span className={`badge ${niveau[1]}`}>{niveau[0]} · {l.score}/100</span>
+                            <span className={`statut-badge statut-${l.status}`}>{STATUTS[l.status] || l.status}</span>
+                        </div>
+                    </div>
+
+                    <ul className="tache-motifs">
+                        {t.motifs.map((m, i) => <li key={i}>{m.texte}</li>)}
+                    </ul>
+
+                    {t.proposition && (principal === 'email' || t.motifs.some((m) => m.genre === 'proposer' || m.genre === 'dormant')) && (
+                        <div className="tache-proposition">
+                            Bien à lui proposer : {t.proposition.title}
+                            {t.proposition.price ? `, ${fmt(t.proposition.price)} €${t.proposition.transaction === 'location' ? ' par mois' : ''}` : ''}
+                            {' '}(compatibilité {t.proposition.score} %).
+                        </div>
+                    )}
+
+                    {t.relances.length > 0 && (
+                        <div className="tache-relances">
+                            Relance{t.relances.length > 1 ? 's' : ''} prévue{t.relances.length > 1 ? 's' : ''} : {t.relances.map((r) => r.label).join(' ; ')}
+                        </div>
+                    )}
+
+                    {t.contexte.length > 0 && (
+                        <div className="tache-infos">
+                            {t.contexte.map((c, i) => <span className="puce" key={i}>{c}</span>)}
+                        </div>
+                    )}
+
+                    <div className="tache-contact">
+                        {l.phone ? <span>Téléphone : <a href={peutAppeler ? `tel:+${tel}` : undefined}>{l.phone}</a></span> : <span>Pas de numéro de téléphone</span>}
+                        {l.email ? <span>E-mail : <a href={`mailto:${l.email}`}>{l.email}</a></span> : <span>Pas d'adresse e-mail</span>}
+                        {t.derniere_action && <span>Dernière action de votre part : {depuis(t.derniere_action)}</span>}
+                    </div>
+
+                    <div className="tache-actions">
+                        {peutAppeler && <a className={principal === 'appeler' || principal === 'visite' ? 'btn petit' : 'btn petit secondary'} href={`tel:+${tel}`}>Appeler</a>}
+                        {peutAppeler && <a className="btn petit secondary" target="_blank" rel="noopener noreferrer"
+                            href={`https://wa.me/${tel}?text=${encodeURIComponent(texteWhatsApp)}`}>WhatsApp</a>}
+                        {t.proposition
+                            ? <a className={principal === 'email' ? 'btn petit' : 'btn petit secondary'} href={`/propositions.html?id=${l.id}`}>Préparer l'e-mail avec les biens</a>
+                            : (l.email && <a className={principal === 'email' ? 'btn petit' : 'btn petit secondary'} href={`mailto:${l.email}`}>Écrire un e-mail</a>)}
+                        <a className="btn petit secondary" href={`/leads-profile.html?id=${l.id}`}>Voir la fiche</a>
+                        <span style={{ flex: 1 }}></span>
+                        <button className="btn petit secondary" onClick={() => onReporter(t)}>Reporter à demain</button>
+                        <button className="btn petit" onClick={() => setOuvert(!ouvert)} aria-expanded={ouvert}>C'est fait</button>
+                    </div>
+
+                    {ouvert && (
+                        <div className="tache-fait">
+                            <div className="form-row">
+                                <div className="form-group">
+                                    <label>Ce que vous avez fait</label>
+                                    <select value={canal} onChange={(e) => setCanal(e.target.value)}>
+                                        {Object.keys(CANAUX).map((k) => <option key={k} value={k}>{CANAUX[k]}</option>)}
+                                    </select>
+                                </div>
+                                <div className="form-group">
+                                    <label>Note pour la fiche (facultatif)</label>
+                                    <input type="text" maxLength={500} value={note} onChange={(e) => setNote(e.target.value)}
+                                        placeholder="Ce qui s'est dit, la suite à donner..." />
+                                </div>
+                            </div>
+                            {erreur && <div className="error" style={{ marginBottom: 10 }}>{erreur}</div>}
+                            <div className="btn-ligne">
+                                <button className="btn petit" disabled={enCours} onClick={valider}>{enCours ? 'Enregistrement...' : 'Enregistrer dans la fiche'}</button>
+                                <button className="btn petit secondary" onClick={() => setOuvert(false)}>Annuler</button>
+                            </div>
+                            <p className="field-hint">Inscrit dans l'historique du prospect{l.status === 'nouveau' ? ", le passe en « Contacté »" : ''} et clôt ses relances échues.</p>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function TachesApp() {
+            const [data, setData] = useState(null);
+            const [user, setUser] = useState(null);
+            const [erreur, setErreur] = useState(null);
+            const [message, setMessage] = useState(null);
+            const [filtre, setFiltre] = useState('tout');
+            const [reportees, setReportees] = useState([]);
+            const [voirReportees, setVoirReportees] = useState(false);
+            const [enCours, setEnCours] = useState(false);
+
+            const handleLogout = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.replace('/login.html');
+            };
+
+            const appel = async (chemin, options = {}) => {
+                const r = await fetch(`${API_URL}${chemin}`, {
+                    ...options,
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                });
+                if (r.status === 401) { handleLogout(); throw new Error('Session expirée'); }
+                const corps = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(corps.message || `Erreur ${r.status}`);
+                return corps;
+            };
+
+            const charger = async () => {
+                try {
+                    const d = await appel('/api/v1/taches');
+                    setData(d);
+                    setReportees(lireReportees(d.date));
+                    setErreur(null);
+                } catch (e) {
+                    setErreur(e.message);
+                }
+            };
+
+            useEffect(() => {
+                if (!localStorage.getItem('token')) { window.location.replace('/login.html'); return undefined; }
+                try { const u = localStorage.getItem('user'); if (u) setUser(JSON.parse(u)); } catch (e) { /* ignoré */ }
+                charger();
+                const id = setInterval(() => { if (document.visibilityState === 'visible') charger(); }, 120000);
+                return () => clearInterval(id);
+            }, []);
+
+            const faire = async (t, canal, note) => {
+                setEnCours(true);
+                try {
+                    await appel(`/api/v1/leads/${t.lead.id}/contact-fait`, { method: 'POST', body: JSON.stringify({ canal, note }) });
+                    setMessage(`C'est noté dans la fiche de ${t.lead.name}.`);
+                    await charger();
+                    return true;
+                } catch (e) {
+                    return false;
+                } finally {
+                    setEnCours(false);
+                }
+            };
+
+            const reporter = (t) => {
+                const ids = [...reportees, t.lead.id];
+                setReportees(ids);
+                ecrireReportees(data.date, ids);
+                setMessage(`${t.lead.name} reviendra demain dans votre liste.`);
+            };
+            const ramener = () => { setReportees([]); ecrireReportees(data.date, []); setVoirReportees(false); };
+
+            const taches = data ? data.taches : [];
+            const visibles = useMemo(() => taches.filter((t) => {
+                if (!voirReportees && reportees.includes(t.lead.id)) return false;
+                if (voirReportees && !reportees.includes(t.lead.id)) return false;
+                if (filtre === 'appels') return t.action === 'appeler';
+                if (filtre === 'emails') return t.action === 'email';
+                if (filtre === 'visites') return t.action === 'visite';
+                return true;
+            }), [taches, reportees, voirReportees, filtre]);
+            const nbReportees = taches.filter((t) => reportees.includes(t.lead.id)).length;
+
+            const dateLongue = data ? new Date(data.date + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) : '';
+            const c = data ? data.compteurs : null;
+            const prenom = data && data.prenom ? data.prenom : (user && user.first_name) || '';
+
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo"><a href="/taches.html" style={{ color: 'inherit', textDecoration: 'none' }}>ZELYRO</a></div>
+                            <nav>
+                                <a href="/taches.html" className="active">À faire</a>
+                                <a href="/prospects.html">Leads</a>
+                                <a href="/biens.html">Biens</a>
+                                <a href="/matching.html">Matching</a>
+                                <a href="/propositions.html">Propositions</a>
+                                <a href="/dashboard.html">Dashboard</a>
+                                <a href="/compte.html">Compte</a>
+                            </nav>
+                            <div className="user-info">
+                                {user && <span className="user-email">{user.email}</span>}
+                                <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="container">
+                        <div className="tete-taches">
+                            <div>
+                                <h1 className="page-title">À faire</h1>
+                                <p className="page-subtitle" style={{ marginBottom: 0 }}>
+                                    {data ? `${dateLongue.charAt(0).toUpperCase()}${dateLongue.slice(1)}. ` : ''}
+                                    {prenom ? `Bonjour ${prenom}. ` : ''}
+                                    {c ? (c.total === 0 ? "Rien à traiter pour l'instant." : `${c.total} prospect${c.total > 1 ? 's' : ''} à traiter${c.urgentes ? `, dont ${c.urgentes} en priorité` : ''}.`) : ''}
+                                </p>
+                            </div>
+                            <button className="btn petit secondary" onClick={charger}>Actualiser</button>
+                        </div>
+
+                        {erreur && <div className="error" style={{ marginTop: 16 }}>Erreur: {erreur}</div>}
+                        {message && <div className="toast-ok" style={{ marginTop: 16 }} role="status">{message}</div>}
+
+                        {!data ? (
+                            !erreur && <div className="loading"><div className="loader"></div></div>
+                        ) : (
+                            <>
+                                <div className="stats-grid" style={{ marginTop: 24, marginBottom: 18 }}>
+                                    <div className="stat-card"><div className="stat-value">{c.total}</div><div className="stat-label">À traiter</div></div>
+                                    <div className="stat-card"><div className="stat-value">{c.appels}</div><div className="stat-label">Appels</div></div>
+                                    <div className="stat-card"><div className="stat-value">{c.emails}</div><div className="stat-label">E-mails</div></div>
+                                    <div className="stat-card"><div className="stat-value">{c.visites}</div><div className="stat-label">Visites</div></div>
+                                </div>
+
+                                <div className="filtres-taches" role="group" aria-label="Filtrer les tâches">
+                                    {[['tout', 'Tout'], ['appels', 'Appels'], ['emails', 'E-mails'], ['visites', 'Visites']].map(([k, l]) => (
+                                        <button key={k} className={filtre === k ? 'actif' : ''} onClick={() => setFiltre(k)}>{l}</button>
+                                    ))}
+                                    <span className="espace"></span>
+                                    {nbReportees > 0 && (
+                                        <button className={voirReportees ? 'actif' : ''} onClick={() => setVoirReportees(!voirReportees)}>
+                                            {voirReportees ? 'Revenir à la liste' : `Reportées à demain (${nbReportees})`}
+                                        </button>
+                                    )}
+                                    {voirReportees && <button onClick={ramener}>Tout remettre dans la liste</button>}
+                                </div>
+
+                                {visibles.length === 0 ? (
+                                    <div className="panel">
+                                        <div className="empty-state">
+                                            {taches.length === 0
+                                                ? <>Rien à faire en priorité aujourd'hui.<br />Les nouveaux prospects, relances et demandes de visite apparaîtront ici dès qu'il y en aura.</>
+                                                : <>Aucune tâche dans cette vue.</>}
+                                            <br /><a href="/dashboard.html" style={{ color: 'var(--sage-700)' }}>Ouvrir le tableau de bord</a>
+                                        </div>
+                                    </div>
+                                ) : voirReportees ? (
+                                    visibles.map((t) => <Carte key={t.lead.id} t={t} user={user} onFait={faire} onReporter={reporter} enCours={enCours} />)
+                                ) : (
+                                    GROUPES.map(([code, titre, aide]) => {
+                                        const liste = visibles.filter((t) => t.priorite === code);
+                                        if (liste.length === 0) return null;
+                                        return (
+                                            <section key={code}>
+                                                <h2 className="groupe-titre">{titre} <span className="nb">{liste.length}</span></h2>
+                                                <p className="field-hint" style={{ marginTop: -8, marginBottom: 14 }}>{aide}</p>
+                                                {liste.map((t) => <Carte key={t.lead.id} t={t} user={user} onFait={faire} onReporter={reporter} enCours={enCours} />)}
+                                            </section>
+                                        );
+                                    })
+                                )}
+                                {data.reste > 0 && <p className="field-hint">… et {data.reste} autre{data.reste > 1 ? 's' : ''} prospect{data.reste > 1 ? 's' : ''} moins prioritaire{data.reste > 1 ? 's' : ''}, qui apparaîtront quand cette liste aura avancé.</p>}
+                            </>
+                        )}
+                    </div>
+                </>
+            );
+        }
+
+        ReactDOM.render(<TachesApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>

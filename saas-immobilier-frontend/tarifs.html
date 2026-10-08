@@ -265,7 +265,9 @@
     try {
         if (localStorage.getItem('token')) {
             var a = document.getElementById('nav-login');
-            if (a) { a.textContent = 'Accéder à mon espace'; a.setAttribute('href', '/dashboard.html'); }
+            if (a) { a.textContent = 'Accéder à mon espace'; a.setAttribute('href', '/taches.html'); }
+            var logos = document.querySelectorAll('a.logo');
+            for (var i = 0; i < logos.length; i++) { logos[i].setAttribute('href', '/taches.html'); logos[i].setAttribute('aria-label', 'Zelyro, mes tâches du jour'); }
         }
     } catch (e) { /* stockage indisponible : on garde « Connexion » */ }
     var b = document.querySelector('.menu-toggle'), n = document.getElementById('site-nav');

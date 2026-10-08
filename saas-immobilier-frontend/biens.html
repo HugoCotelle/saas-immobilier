@@ -48,10 +48,20 @@
         const API_URL = 'https://saas-immobilier-921a.onrender.com';
 
         const VIDE = {
-            reference: '', title: '', address: '', price: '', size: '', rooms: '',
+            reference: '', title: '', address: '', zip: '', city: '', price: '', size: '', rooms: '',
             property_type: '', description: '', activites_autorisees: [], extraction_air: '',
             transaction: 'vente', meuble: ''
         };
+
+        // Le rapprochement avec les prospects compare l'adresse enregistrée au secteur recherché
+        // (« Paris 15 », « Lille »...) : elle doit donc contenir le code postal et la ville.
+        const CP_RE = /\b\d{5}\b/;
+        // « 12 rue Nationale, 59000 Lille » -> { rue, zip, city } (sert à remplir le formulaire de modification).
+        function separerAdresse(adresse) {
+            const a = (adresse || '').trim();
+            const m = a.match(/^(.*?)[,\s]*\b(\d{5})\b[,\s]*(.*)$/);
+            return m ? { rue: m[1].trim(), zip: m[2], city: m[3].trim() } : { rue: a, zip: '', city: '' };
+        }
 
         // Pour un local commercial ou un bureau : activités autorisées et extraction d'air.
         const TYPES_PRO = ['Local commercial', 'Bureau'];
@@ -207,6 +217,7 @@
                 ignorees: lignes[0].map((e) => String(e).trim()).filter((e, i) => e && !utilisees.includes(i)),
                 avecTransaction: !!colonnes.transaction,
                 sansAdresse: biens.filter((b) => !b.address).length,
+                sansCP: biens.filter((b) => b.address && !CP_RE.test(b.address)).length,
                 sansType: biens.filter((b) => !b.property_type).length
             };
         }
@@ -310,6 +321,16 @@
                     setError('Le titre du bien est obligatoire.');
                     return;
                 }
+                const zip = form.zip.trim(), city = form.city.trim();
+                if (!/^\d{5}$/.test(zip)) {
+                    setError('Le code postal est obligatoire (5 chiffres) : sans lui, le bien ne peut pas être rapproché des bons prospects.');
+                    return;
+                }
+                if (!city) {
+                    setError('La ville est obligatoire : sans elle, le bien ne peut pas être rapproché des bons prospects.');
+                    return;
+                }
+                const adresseComplete = [form.address.trim(), `${zip} ${city}`].filter(Boolean).join(', ');
                 const token = localStorage.getItem('token');
                 setSaving(true);
                 try {
@@ -320,7 +341,7 @@
                         body: JSON.stringify({
                             reference: form.reference.trim() || null,
                             title: form.title.trim(),
-                            address: form.address.trim() || null,
+                            address: adresseComplete,
                             price: form.price === '' ? null : parseInt(form.price, 10),
                             size: form.size === '' ? null : parseInt(form.size, 10),
                             rooms: form.rooms === '' ? null : parseInt(form.rooms, 10),
@@ -459,8 +480,9 @@
             };
             const fermerFormulaire = () => { setFormOuvert(false); setEditionId(null); setForm(VIDE); setError(null); };
             const modifierBien = (b) => {
+                const adr = separerAdresse(b.address);
                 setForm({
-                    reference: b.reference ?? '', title: b.title ?? '', address: b.address ?? '',
+                    reference: b.reference ?? '', title: b.title ?? '', address: adr.rue, zip: adr.zip, city: adr.city,
                     price: b.price ?? '', size: b.size ?? '', rooms: b.rooms ?? '',
                     property_type: b.property_type ?? '', description: b.description ?? '',
                     activites_autorisees: b.activites_autorisees ?? [],
@@ -489,8 +511,9 @@
                 <>
                     <header>
                         <div className="header-content">
-                            <div className="logo">ZELYRO</div>
+                            <div className="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style={{ color: 'inherit', textDecoration: 'none' }}>ZELYRO</a></div>
                             <nav>
+                                <a href="/taches.html">À faire</a>
                                 <a href="/prospects.html">Leads</a>
                                 <a href="/biens.html" className="active">Biens</a>
                                 <a href="/matching.html">Matching</a>
@@ -597,9 +620,10 @@
                                                     <option value="location">Des biens à louer</option>
                                                 </select>
                                             </div>
-                                            {(analyse.sansAdresse > 0 || analyse.sansType > 0) && (
+                                            {(analyse.sansAdresse > 0 || analyse.sansCP > 0 || analyse.sansType > 0) && (
                                                 <div className="import-avertissement">
                                                     {analyse.sansAdresse > 0 && <div>{analyse.sansAdresse} bien{analyse.sansAdresse > 1 ? 's' : ''} sans adresse.</div>}
+                                                    {analyse.sansCP > 0 && <div>{analyse.sansCP} bien{analyse.sansCP > 1 ? 's' : ''} sans code postal (ajoutez une colonne « code postal » au fichier).</div>}
                                                     {analyse.sansType > 0 && <div>{analyse.sansType} bien{analyse.sansType > 1 ? 's' : ''} sans type de bien.</div>}
                                                     Ils seront importés, mais ne seront proposés à aucun prospect tant qu'il manque ces informations.
                                                 </div>
@@ -704,10 +728,10 @@
                                     </div>
                                 )}
                                 <div className="panel-note">
-                                    Seul le titre est obligatoire. Mais l'adresse et le type
-                                    déterminent à quels prospects le bien sera proposé : sans eux,
-                                    il n'apparaîtra dans aucune correspondance. La référence (numéro
-                                    de mandat ou d'annonce) permet de retrouver ce bien quand vous
+                                    Le titre, le code postal et la ville sont obligatoires. Le code postal,
+                                    la ville et le type déterminent à quels prospects le bien sera proposé :
+                                    sans eux, il n'apparaîtrait dans aucune correspondance. La référence
+                                    (numéro de mandat ou d'annonce) permet de retrouver ce bien quand vous
                                     importerez un fichier.
                                 </div>
 
@@ -735,16 +759,31 @@
                                             placeholder="T3 lumineux centre-ville" />
                                     </div>
                                     <div className="form-group">
-                                        <label>Adresse</label>
-                                        <input type="text" value={form.address}
-                                            onChange={(e) => set('address', e.target.value)}
-                                            placeholder="12 rue Nationale 59000 Lille" />
-                                    </div>
-                                    <div className="form-group">
                                         <label>{form.transaction === 'location' ? 'Loyer mensuel (€ par mois)' : 'Prix (€)'}</label>
                                         <input type="number" value={form.price}
                                             onChange={(e) => set('price', e.target.value)}
                                             placeholder={form.transaction === 'location' ? '850' : '249000'} />
+                                    </div>
+                                </div>
+
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>Adresse (numéro et rue)</label>
+                                        <input type="text" value={form.address}
+                                            onChange={(e) => set('address', e.target.value)}
+                                            placeholder="12 rue Nationale" />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Code postal <span className="obligatoire">*</span></label>
+                                        <input type="text" inputMode="numeric" autoComplete="postal-code" maxLength={5} value={form.zip}
+                                            onChange={(e) => set('zip', e.target.value.replace(/\D/g, '').slice(0, 5))}
+                                            placeholder="59000" />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Ville <span className="obligatoire">*</span></label>
+                                        <input type="text" autoComplete="address-level2" value={form.city}
+                                            onChange={(e) => set('city', e.target.value)}
+                                            placeholder="Lille" />
                                     </div>
                                 </div>
 
@@ -888,6 +927,12 @@
                                         <div className="bien-adresse">
                                             {b.address || 'Adresse non renseignée'}
                                         </div>
+                                        {b.address && !CP_RE.test(b.address) && (
+                                            <div className="field-hint" style={{ color: 'var(--warm)', marginTop: 0, marginBottom: 8 }}>
+                                                Code postal manquant : ce bien risque de ne pas apparaître dans les correspondances.{' '}
+                                                <button type="button" className="lien-bouton" onClick={() => modifierBien(b)}>Compléter</button>
+                                            </div>
+                                        )}
                                         {b.reference && <div className="ref-bien">Réf. {b.reference}</div>}
                                         <div className="bien-field">
                                             <span className="bien-label">Surface :</span>
