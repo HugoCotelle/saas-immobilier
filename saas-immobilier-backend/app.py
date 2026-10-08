@@ -6114,6 +6114,309 @@ def set_commission_rate():
         return erreur_interne()
 
 
+# --- Tâches du jour ----------------------------------------------------------
+#
+# La page « À faire » : pour chaque prospect qui demande une action aujourd'hui,
+# une seule carte, avec ce qu'il faut faire en premier (appeler, écrire, préparer
+# une visite), pourquoi, et tout ce qu'il faut sous la main pour le faire.
+
+TACHES_MAX = 60
+TACHES_CHAUD_JOURS = 3          # un prospect chaud sans action de l'agence depuis ce délai est à rappeler
+TACHES_RECENT_PROPOSITION_JOURS = 7
+TACHES_ENDORMI_JOURS = 30
+_FINANCEMENT_TEXTE = {'approved': "financement accepté", 'in_progress': "financement en cours",
+                      'pending': "financement en attente", 'rejected': "financement refusé"}
+_ECHEANCE_TEXTE = {'immediate': "projet immédiat", '1-3_months': "projet sous 1 à 3 mois",
+                   '3-6_months': "projet sous 3 à 6 mois", '6plus_months': "projet dans plus de 6 mois"}
+_SOURCE_TEXTE = {'leboncoin': "LeBonCoin", 'seloger': "SeLoger", 'formulaire': "formulaire de contact"}
+
+
+def _prix_texte(montant):
+    return f"{int(montant):,}".replace(",", " ") + " €"
+
+
+def _il_y_a(maintenant, instant):
+    secondes = max(0, int((maintenant - instant).total_seconds()))
+    if secondes < 3600:
+        return f"il y a {max(1, secondes // 60)} min"
+    if secondes < 48 * 3600:
+        return f"il y a {secondes // 3600} h"
+    return f"il y a {secondes // 86400} jours"
+
+
+def _construire_taches(cur, agence_id, user_id, role):
+    """Les tâches du jour d'un utilisateur : le directeur voit toute l'agence,
+    un collaborateur ses prospects et ceux sans responsable."""
+    cur.execute("SELECT NOW()::timestamp AS maintenant")
+    maintenant = cur.fetchone()['maintenant']
+    aujourdhui = _aujourdhui()
+    cur.execute("""
+        SELECT l.id, l.name, l.email, l.phone, l.budget, l.location, l.property_type, l.surface_min, l.activite,
+               l.status, l.financing_status, l.purchase_urgency, l.transaction, l.revenus, l.garants,
+               l.situation_pro, l.meuble_souhaite, l.source, l.created_at, l.assigned_to,
+               u.first_name AS resp_prenom, u.email AS resp_email,
+               GREATEST(COALESCE(l.status_changed_at, l.created_at),
+                        COALESCE((SELECT MAX(n.created_at) FROM lead_notes n WHERE n.lead_id = l.id), l.created_at),
+                        COALESCE((SELECT MAX(m.sent_at) FROM lead_mails m WHERE m.lead_id = l.id), l.created_at)
+               ) AS derniere_action,
+               (SELECT MAX(e.created_at) FROM lead_events e WHERE e.lead_id = l.id) AS dernier_evenement
+        FROM leads l LEFT JOIN users u ON u.id = l.assigned_to
+        WHERE l.user_id = %s AND COALESCE(l.status, 'nouveau') NOT IN ('signe', 'perdu')
+    """, (agence_id,))
+    leads = [l for l in cur.fetchall() if role == 'admin' or l['assigned_to'] in (None, user_id)]
+    vide = {"date": aujourdhui.isoformat(), "taches": [], "reste": 0,
+            "compteurs": {"total": 0, "urgentes": 0, "appels": 0, "emails": 0, "visites": 0}}
+    if not leads:
+        return vide
+    _charger_engagement(cur, agence_id, leads)
+    ids = [l['id'] for l in leads]
+    par_id = {l['id']: l for l in leads}
+    for l in leads:
+        l['_points'] = points_qualite(l)
+        l['_niveau'] = _niveau_qualite(l['_points'])
+    motifs = {}
+
+    def ajouter(lead_id, poids, genre, texte, action, **extra):
+        motifs.setdefault(lead_id, []).append(dict({"poids": poids, "genre": genre, "texte": texte, "action": action}, **extra))
+
+    # 1. Visites confirmées : aujourd'hui, demain, ou terminées depuis peu.
+    cur.execute("""SELECT r.lead_id, r.debut, r.bien FROM lead_rdv r JOIN leads l ON l.id = r.lead_id
+                   WHERE l.user_id = %s AND r.statut = 'confirme' AND r.debut IS NOT NULL
+                     AND r.debut BETWEEN %s AND %s ORDER BY r.debut""",
+                (agence_id, maintenant - timedelta(hours=3), maintenant + timedelta(hours=48)))
+    rdv_par_lead = {}
+    for r in cur.fetchall():
+        if r['lead_id'] not in par_id or r['lead_id'] in rdv_par_lead:
+            continue
+        local = _en_local(r['debut'])
+        heure = f"{local.hour}h{local.minute:02d}"
+        bien = f" pour « {r['bien']} »" if r['bien'] else ""
+        if r['debut'] < maintenant:
+            ajouter(r['lead_id'], 66, 'visite', f"Visite faite à {heure}{bien} : notez le retour du prospect", 'visite')
+        elif local.date() == aujourdhui:
+            ajouter(r['lead_id'], 100, 'visite', f"Visite aujourd’hui à {heure}{bien}", 'visite')
+        else:
+            ajouter(r['lead_id'], 74, 'visite', f"Visite demain à {heure}{bien} : confirmez-la au prospect", 'visite')
+        rdv_par_lead[r['lead_id']] = {"debut": _iso(r['debut']), "libelle": _libelle_rdv(r['debut']),
+                                      "bien": r['bien'], "passe": r['debut'] < maintenant}
+
+    # 2. Ce que le prospect a fait depuis la dernière action de l'agence.
+    cur.execute("""SELECT lead_id, kind, detail, created_at FROM lead_events
+                   WHERE user_id = %s AND lead_id = ANY(%s) AND created_at > %s
+                   ORDER BY created_at DESC, id DESC""", (agence_id, ids, maintenant - timedelta(hours=48)))
+    poids_evenement = {'interet_bien': 95, 'formulaire_rempli': 82, 'rdv_annule': 88, 'annonces_ouvertes': 55}
+    vus = set()
+    for e in cur.fetchall():
+        l = par_id.get(e['lead_id'])
+        if not l or e['kind'] not in poids_evenement or (e['lead_id'], e['kind']) in vus:
+            continue
+        if e['created_at'] <= l['derniere_action']:
+            continue                       # l'agence a déjà réagi depuis
+        vus.add((e['lead_id'], e['kind']))
+        suite = {'interet_bien': " : à appeler pour fixer la visite", 'rdv_annule': " : à reprogrammer",
+                 'formulaire_rempli': " : à rappeler rapidement",
+                 'annonces_ouvertes': " : bon moment pour le relancer"}[e['kind']]
+        ajouter(e['lead_id'], poids_evenement[e['kind']], 'evenement',
+                f"{l['name']} {_libelle_evenement(e['kind'], e['detail'])} ({_il_y_a(maintenant, e['created_at'])}){suite}",
+                'appeler')
+
+    # 3. Relances échues.
+    cur.execute("""SELECT r.id, r.lead_id, r.due_date, r.label FROM lead_reminders r
+                   WHERE r.lead_id = ANY(%s) AND r.done_at IS NULL AND r.due_date <= %s
+                   ORDER BY r.due_date, r.id""", (ids, aujourdhui))
+    relances = {}
+    for r in cur.fetchall():
+        retard = (aujourdhui - r['due_date']).days
+        relances.setdefault(r['lead_id'], []).append(
+            {"id": r['id'], "label": r['label'], "due_date": r['due_date'].isoformat(), "en_retard": retard > 0})
+        etiquette = r['label'] or ''
+        mail = (bool(re.search(r"mail|mél|écrire|ecrire|envoyer|envoi", etiquette, re.I))
+                and not re.search(r"rappel|appel|téléphon|telephon", etiquette, re.I))
+        if retard > 0:
+            ajouter(r['lead_id'], 90 + min(retard, 9), 'relance',
+                    f"Relance en retard de {retard} jour{'s' if retard > 1 else ''} : {r['label']}", 'email' if mail else 'appeler')
+        else:
+            ajouter(r['lead_id'], 78, 'relance', f"Relance prévue aujourd’hui : {r['label']}", 'email' if mail else 'appeler')
+
+    # 4. Nouveaux prospects et prospects chauds laissés sans nouvelles.
+    for l in leads:
+        statut = l['status'] or 'nouveau'
+        if statut == 'nouveau' and l['created_at']:
+            age = maintenant - l['created_at']
+            origine = _SOURCE_TEXTE.get((l['source'] or '').lower())
+            origine = f" via {origine}" if origine else ""
+            if age > timedelta(hours=UNTREATED_HEURES):
+                ajouter(l['id'], 88 if l['_niveau'] == 'hot' else 76, 'nouveau',
+                        f"Reçu{origine} {_il_y_a(maintenant, l['created_at'])} et jamais contacté : chaque heure compte", 'appeler')
+            else:
+                ajouter(l['id'], 80 if l['_niveau'] == 'hot' else 64, 'nouveau',
+                        f"Nouveau prospect{origine}, reçu {_il_y_a(maintenant, l['created_at'])} : à contacter rapidement", 'appeler')
+        elif l['_niveau'] == 'hot' and l['derniere_action'] <= maintenant - timedelta(days=TACHES_CHAUD_JOURS):
+            jours = (maintenant - l['derniere_action']).days
+            ajouter(l['id'], 72, 'chaud', f"Prospect chaud ({l['_points']}/100) sans action de votre part depuis {jours} jours", 'appeler')
+
+    # 5. Un bien du catalogue correspond et n'a pas encore été proposé.
+    cur.execute("""SELECT id, title, address, price, rooms, size, property_type,
+                          activites_autorisees, extraction_air, transaction, meuble
+                   FROM properties WHERE user_id = %s""", (agence_id,))
+    biens = cur.fetchall()
+    cur.execute("""SELECT m.lead_id, m.property_ids, m.sent_at FROM lead_mails m JOIN leads l ON l.id = m.lead_id
+                   WHERE l.user_id = %s""", (agence_id,))
+    deja, dernier_mail = {}, {}
+    for m in cur.fetchall():
+        deja.setdefault(m['lead_id'], set()).update(m['property_ids'] or [])
+        if m['sent_at'] and (m['lead_id'] not in dernier_mail or m['sent_at'] > dernier_mail[m['lead_id']]):
+            dernier_mail[m['lead_id']] = m['sent_at']
+    propositions = {}
+    if biens:
+        for l in leads:
+            if l['_niveau'] == 'cold' or not _prospect_complet(l):
+                continue
+            if dernier_mail.get(l['id']) and dernier_mail[l['id']] > maintenant - timedelta(days=TACHES_RECENT_PROPOSITION_JOURS):
+                continue
+            meilleur = None
+            for b in biens:
+                if b['id'] in deja.get(l['id'], ()):
+                    continue
+                score, raisons = _detail_score(l, b)
+                if score >= PROPOSITION_SCORE_MIN and (meilleur is None or score > meilleur[0]):
+                    meilleur = (score, b)
+            if not meilleur:
+                continue
+            score, b = meilleur
+            propositions[l['id']] = {"property_id": b['id'], "title": b['title'], "price": b['price'],
+                                     "transaction": b['transaction'], "score": score}
+            derniere = max([x for x in (l['derniere_action'], l['dernier_evenement']) if x])
+            if derniere <= maintenant - timedelta(days=TACHES_ENDORMI_JOURS):
+                ajouter(l['id'], 45, 'dormant',
+                        f"Sans nouvelles depuis {(maintenant - derniere).days} jours, mais « {b['title']} » lui correspond maintenant "
+                        f"(compatibilité {score} %)", 'email')
+            else:
+                ajouter(l['id'], min(62, 50 + (score - PROPOSITION_SCORE_MIN) // 4) + (8 if l['_niveau'] == 'hot' else 0), 'proposer',
+                        f"« {b['title']} » correspond à sa recherche à {score} % et ne lui a pas encore été proposé", 'email')
+
+    # Une carte par prospect : le motif le plus fort décide de l'action.
+    taches = []
+    for lead_id, liste in motifs.items():
+        l = par_id[lead_id]
+        liste.sort(key=lambda m: -m['poids'])
+        poids = liste[0]['poids']
+        action = liste[0]['action']
+        a_tel, a_mail = bool((l['phone'] or '').strip()), bool((l['email'] or '').strip())
+        if action == 'appeler' and not a_tel:
+            action = 'email' if a_mail else 'completer'
+        elif action == 'email' and not a_mail:
+            action = 'appeler' if a_tel else 'completer'
+        elif action == 'visite' and not a_tel and not a_mail:
+            action = 'completer'
+        proposition = propositions.get(lead_id)
+        if action == 'visite':
+            rdv = rdv_par_lead.get(lead_id)
+            titre = f"Visite avec {l['name']} — {rdv['libelle']}" if rdv else f"Visite avec {l['name']}"
+        elif action == 'appeler':
+            titre = f"Appeler {l['name']}"
+        elif action == 'email':
+            titre = (f"Envoyer « {proposition['title']} » à {l['name']}" if proposition and liste[0]['genre'] in ('proposer', 'dormant')
+                     else f"Écrire à {l['name']}")
+        else:
+            titre = f"Compléter la fiche de {l['name']} (aucun moyen de le joindre)"
+        contexte = []
+        if l['budget']:
+            contexte.append(("Loyer maximum " if _est_location(l) else "Budget ") + _prix_texte(l['budget']))
+        if l['location']:
+            contexte.append(f"Cherche : {l['location']}")
+        if l['property_type']:
+            contexte.append(l['property_type'])
+        if _FINANCEMENT_TEXTE.get(l['financing_status']):
+            contexte.append(_FINANCEMENT_TEXTE[l['financing_status']].capitalize())
+        if _ECHEANCE_TEXTE.get(l['purchase_urgency']):
+            contexte.append(_ECHEANCE_TEXTE[l['purchase_urgency']].capitalize())
+        taches.append({
+            "lead": {"id": l['id'], "name": l['name'], "phone": l['phone'], "email": l['email'], "budget": l['budget'],
+                     "location": l['location'], "transaction": l['transaction'], "status": l['status'] or 'nouveau',
+                     "quality": l['_niveau'], "score": l['_points']},
+            "priorite": 'urgent' if poids >= 85 else ('important' if poids >= 65 else 'normal'),
+            "poids": poids, "action": action, "titre": titre,
+            "motifs": [{"genre": m['genre'], "texte": m['texte']} for m in liste],
+            "contexte": contexte,
+            "proposition": proposition,
+            "rdv": rdv_par_lead.get(lead_id),
+            "relances": relances.get(lead_id, []),
+            "responsable": ((_nom_membre(l['resp_prenom'], l['resp_email']) if l['assigned_to'] else "Sans responsable")
+                            if role == 'admin' else None),
+            "derniere_action": _iso(l['derniere_action']),
+        })
+    taches.sort(key=lambda t: (-t['poids'], -t['lead']['score'], t['lead']['name'].lower()))
+    total = len(taches)
+    visibles = taches[:TACHES_MAX]
+    return {
+        "date": aujourdhui.isoformat(), "taches": visibles, "reste": total - len(visibles),
+        "compteurs": {"total": total,
+                      "urgentes": sum(1 for t in taches if t['priorite'] == 'urgent'),
+                      "appels": sum(1 for t in taches if t['action'] == 'appeler'),
+                      "emails": sum(1 for t in taches if t['action'] == 'email'),
+                      "visites": sum(1 for t in taches if t['action'] == 'visite')},
+    }
+
+
+@app.route('/api/v1/taches', methods=['GET'])
+@limiter.limit("600 per hour", key_func=_cle_utilisateur)
+@token_required
+def get_taches():
+    """La liste « À faire » du jour, dans l'ordre : ce qui est le plus urgent d'abord."""
+    try:
+        with _base() as (conn, cur):
+            cur.execute("SELECT first_name FROM users WHERE id = %s", (request.user_id,))
+            moi = cur.fetchone() or {}
+            resultat = _construire_taches(cur, request.agency_id, request.user_id, request.role)
+        resultat['prenom'] = (moi.get('first_name') or '').strip()
+        return jsonify(resultat), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/leads/<int:lead_id>/contact-fait', methods=['POST'])
+@token_required
+def lead_contact_fait(lead_id):
+    """« C'est fait » depuis la page À faire : inscrit le contact dans l'historique
+    du prospect, le passe de « Nouveau » à « Contacté » et clôt ses relances échues."""
+    try:
+        data = request.get_json(silent=True) or {}
+        libelle = {'telephone': "Appel passé", 'email': "E-mail envoyé", 'whatsapp': "Message WhatsApp envoyé",
+                   'visite': "Visite effectuée"}.get(data.get('canal'))
+        if not libelle:
+            return jsonify({"message": "Canal inconnu"}), 400
+        detail = _texte_court(data.get('note'), 1500)
+        texte = libelle + (f" : {detail}" if detail else "")
+        with _base() as (conn, cur):
+            cur.execute("SELECT status FROM leads WHERE id = %s AND user_id = %s FOR UPDATE",
+                        (lead_id, request.agency_id))
+            ligne = cur.fetchone()
+            if not ligne:
+                return jsonify({"message": "Lead not found"}), 404
+            maintenant = _maintenant()
+            cur.execute("""INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
+                           VALUES (%s, %s, 'note', %s, %s)""", (lead_id, request.user_id, texte, maintenant))
+            statut = ligne['status'] if ligne['status'] in STATUTS else 'nouveau'
+            if statut == 'nouveau':
+                cur.execute("""UPDATE leads SET status = 'contacte', status_changed_at = NOW(),
+                                   first_contact_at = COALESCE(first_contact_at, NOW())
+                               WHERE id = %s AND user_id = %s""", (lead_id, request.agency_id))
+                cur.execute("""INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
+                               VALUES (%s, %s, 'statut', %s, %s)""",
+                            (lead_id, request.user_id,
+                             f"{STATUTS_LIBELLES['nouveau']} → {STATUTS_LIBELLES['contacte']}", maintenant))
+                statut = 'contacte'
+            cur.execute("""UPDATE lead_reminders SET done_at = %s
+                           WHERE lead_id = %s AND done_at IS NULL AND due_date <= %s""",
+                        (maintenant, lead_id, _aujourdhui()))
+            relances = cur.rowcount
+            conn.commit()
+        return jsonify({"status": statut, "relances_terminees": relances}), 200
+    except Exception:
+        return erreur_interne()
+
+
 # --- E-mail du matin ---------------------------------------------------------
 
 DIGEST_LIGNES_MAX = 6
