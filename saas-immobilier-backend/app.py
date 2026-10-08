@@ -652,6 +652,41 @@ _DDL_RDV = (
 _schema_pret = False
 _schema_verrou = threading.Lock()
 
+# Statistiques d'audience du site, réservées au compte administrateur de
+# Zelyro. Aucune adresse IP n'est conservée : le visiteur n'existe que sous
+# la forme d'une empreinte qui change chaque jour (voir _empreinte_visiteur),
+# et le lieu est une ville, jamais une position précise.
+_DDL_STATS = (
+    """CREATE TABLE IF NOT EXISTS site_visites (
+        id BIGSERIAL PRIMARY KEY,
+        visiteur CHAR(16) NOT NULL,
+        page VARCHAR(120) NOT NULL,
+        source VARCHAR(80),
+        campagne VARCHAR(80),
+        appareil VARCHAR(10),
+        pays CHAR(2),
+        region VARCHAR(80),
+        ville VARCHAR(80),
+        lat REAL,
+        lon REAL,
+        cree_le TIMESTAMP NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS site_visites_cree_le_idx ON site_visites (cree_le)",
+    "CREATE INDEX IF NOT EXISTS site_visites_visiteur_idx ON site_visites (visiteur, cree_le)",
+    """CREATE TABLE IF NOT EXISTS site_direct (
+        visiteur CHAR(16) PRIMARY KEY,
+        page VARCHAR(120) NOT NULL,
+        appareil VARCHAR(10),
+        pays CHAR(2),
+        ville VARCHAR(80),
+        lat REAL,
+        lon REAL,
+        debut TIMESTAMP NOT NULL,
+        vu_le TIMESTAMP NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS site_direct_vu_le_idx ON site_direct (vu_le)",
+)
+
 
 def _assurer_schema():
     global _schema_pret
@@ -713,12 +748,13 @@ def _assurer_schema():
                        EXISTS (SELECT 1 FROM information_schema.columns
                                WHERE table_name = 'users' AND column_name = 'commission_rate'),
                        to_regclass('push_subscriptions') IS NOT NULL,
-                       to_regclass('lead_rdv') IS NOT NULL
+                       to_regclass('lead_rdv') IS NOT NULL,
+                       to_regclass('site_visites') IS NOT NULL
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
                 for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
-                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV):
+                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS):
                     cur.execute(ddl)
             conn.commit()
             _schema_pret = True
@@ -892,7 +928,7 @@ def init_database(demo=False):
         ):
             cursor.execute(ddl)
         for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
-                    + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV):
+                    + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS):
             cursor.execute(ddl)
 
         # Vérifier si vide
@@ -7269,6 +7305,493 @@ def email_inbound():
         except Exception:
             app.logger.exception("E-mail entrant : échec de traitement")
     return jsonify({"received": len(items), "processed": traites}), 200
+
+
+# ===== STATISTIQUES DU SITE (réservées aux administrateurs) =====
+#
+# Mesure d'audience maison, sans service externe : le navigateur envoie la
+# page vue, le serveur en déduit une ville (base DB-IP Lite) puis oublie
+# l'adresse IP. Rien n'est lié à un compte, aucun cookie n'est déposé.
+import hmac as _hmac
+import gzip as _gzip
+import random as _random
+import shutil as _shutil
+import tempfile as _tempfile
+import time as _time
+from urllib.parse import urlparse as _urlparse
+
+# Pages publiques mesurées (nom sans « .html »). Les pages de l'application
+# (tableau de bord, fiches, administration...) ne sont jamais mesurées.
+STATS_PAGES = {
+    'tarifs', 'login', 'forgot-password', 'cgu', 'mentions-legales', 'confidentialite',
+    'accord-sous-traitance', 'annonces', 'rdv', 'formulaire', 'completer', 'rejoindre-agence',
+}
+STATS_DIRECT_SECONDES = 90        # un visiteur est « en direct » s'il a donné signe de vie il y a moins que ça
+STATS_DOUBLON_MINUTES = 30        # recharger la même page n'ajoute pas de visite
+STATS_CONSERVATION_JOURS = 395    # 13 mois, puis suppression automatique
+
+_SOURCES_CONNUES = (
+    (('mail.google.com', 'outlook.live.com', 'outlook.office.com', 'outlook.office365.com'), 'e-mail'),
+    (('linkedin.com', 'lnkd.in'), 'linkedin'),
+    (('instagram.com',), 'instagram'),
+    (('facebook.com', 'fb.com', 'fb.me'), 'facebook'),
+    (('google.',), 'google'),
+    (('bing.com',), 'bing'),
+    (('duckduckgo.com',), 'duckduckgo'),
+    (('ecosia.org',), 'ecosia'),
+    (('qwant.com',), 'qwant'),
+    (('yahoo.',), 'yahoo'),
+    (('t.co', 'twitter.com', 'x.com'), 'x'),
+    (('youtube.com', 'youtu.be'), 'youtube'),
+    (('tiktok.com',), 'tiktok'),
+    (('whatsapp.com', 'wa.me'), 'whatsapp'),
+)
+
+
+def _stats_actives():
+    return (os.getenv('STATS_SITE') or '1').strip() != '0'
+
+
+def _empreinte_visiteur(ip, agent):
+    """Empreinte de 16 caractères qui change chaque jour : elle permet de
+    compter les visiteurs d'une journée sans pouvoir ni les suivre d'un jour
+    à l'autre, ni retrouver l'adresse IP (qui n'est jamais enregistrée)."""
+    jour = _maintenant().strftime('%Y-%m-%d')
+    sel = _hmac.new(str(SECRET_KEY).encode(), ('zelyro-stats|' + jour).encode(), hashlib.sha256).digest()
+    return hashlib.sha256(sel + ('|%s|%s' % (ip, (agent or '')[:300])).encode()).hexdigest()[:16]
+
+
+# --- Géolocalisation à la ville (DB-IP Lite, licence CC BY 4.0) ---
+# La base (un fichier d'une centaine de Mo) est téléchargée une fois par mois
+# en arrière-plan, puis lue sur le disque du serveur : aucune adresse IP ne
+# part vers un service tiers. Tant qu'elle n'est pas prête, les visites sont
+# comptées sans lieu.
+
+_GEO = {"lecteur": None, "chemin": None, "essai": 0.0, "telechargement": False,
+        "echec": 0.0, "erreur": None}
+_GEO_VERROU = threading.Lock()
+
+
+def _geo_dossier():
+    return os.getenv('GEO_DB_DIR') or os.path.join(_tempfile.gettempdir(), 'zelyro-geo')
+
+
+def _geo_mois(retour=0):
+    jour = _maintenant().replace(day=1)
+    for _ in range(retour):
+        jour = (jour - timedelta(days=1)).replace(day=1)
+    return jour.strftime('%Y-%m')
+
+
+def _geo_fichier(mois):
+    return os.path.join(_geo_dossier(), 'dbip-city-lite-%s.mmdb' % mois)
+
+
+def _geo_telecharger(mois):
+    """Télécharge et décompresse la base du mois. Un seul processus à la
+    fois s'en charge (verrou de fichier). Renvoie True si le fichier existe."""
+    cible = _geo_fichier(mois)
+    if os.path.exists(cible):
+        return True
+    url = os.getenv('GEO_DB_URL') or 'https://download.db-ip.com/free/dbip-city-lite-%s.mmdb.gz' % mois
+    os.makedirs(_geo_dossier(), exist_ok=True)
+    verrou = open(cible + '.lock', 'w')
+    try:
+        try:
+            import fcntl
+            fcntl.flock(verrou, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except ImportError:
+            pass
+        except OSError:
+            return False          # un autre processus est déjà en train de la télécharger
+        if os.path.exists(cible):
+            return True
+        partiel = cible + '.part'
+        with requests.get(url, stream=True, timeout=(10, 60)) as rep:
+            if rep.status_code != 200:
+                _GEO['erreur'] = "téléchargement refusé (code %s)" % rep.status_code
+                return False
+            rep.raw.decode_content = False
+            with open(partiel, 'wb') as sortie:
+                if url.endswith('.gz'):
+                    with _gzip.GzipFile(fileobj=rep.raw) as entree:
+                        _shutil.copyfileobj(entree, sortie, 1024 * 1024)
+                else:
+                    _shutil.copyfileobj(rep.raw, sortie, 1024 * 1024)
+        import maxminddb
+        maxminddb.open_database(partiel).close()      # fichier valide ?
+        os.replace(partiel, cible)
+        _GEO['erreur'] = None
+        return True
+    finally:
+        verrou.close()
+
+
+def _geo_tache(mois_liste):
+    try:
+        for mois in mois_liste:
+            if _geo_telecharger(mois):
+                break
+    except Exception as e:
+        _GEO['erreur'] = "téléchargement impossible (%s)" % type(e).__name__
+        app.logger.warning("Statistiques : base de géolocalisation indisponible (%s)", type(e).__name__)
+    finally:
+        _GEO['echec'] = _time.time()
+        _GEO['telechargement'] = False
+
+
+def _geo_lecteur():
+    """Le lecteur de la base de villes, ou None tant qu'elle n'est pas prête.
+    Ne bloque jamais la requête : le téléchargement se fait en arrière-plan."""
+    if (os.getenv('STATS_GEO') or '1').strip() == '0':
+        return None
+    lecteur = _GEO['lecteur']
+    maintenant = _time.time()
+    if maintenant - _GEO['essai'] < (6 * 3600 if lecteur is not None else 30):
+        return lecteur
+    with _GEO_VERROU:
+        _GEO['essai'] = maintenant
+        try:
+            import maxminddb
+        except ImportError:
+            _GEO['erreur'] = "bibliothèque maxminddb absente"
+            return None
+        chemin_fixe = os.getenv('GEO_DB_PATH')
+        mois_courant, mois_precedent = _geo_mois(0), _geo_mois(1)
+        candidats = [chemin_fixe] if chemin_fixe else [_geo_fichier(mois_courant), _geo_fichier(mois_precedent)]
+        for chemin in candidats:
+            if chemin and os.path.exists(chemin):
+                if _GEO['chemin'] != chemin:
+                    try:
+                        _GEO['lecteur'] = maxminddb.open_database(chemin)
+                        _GEO['chemin'] = chemin
+                    except Exception:
+                        continue
+                break
+        a_jour = bool(chemin_fixe) or _GEO['chemin'] == _geo_fichier(mois_courant)
+        if (not a_jour and not _GEO['telechargement']
+                and maintenant - _GEO['echec'] > (3600 if _GEO['lecteur'] is None else 6 * 3600)):
+            _GEO['telechargement'] = True
+            _lancer_en_arriere_plan(_geo_tache, [mois_courant, mois_precedent])
+        return _GEO['lecteur']
+
+
+def _geo_etat():
+    if (os.getenv('STATS_GEO') or '1').strip() == '0':
+        return "désactivée"
+    if _geo_lecteur() is not None:
+        return "prête"
+    if _GEO['telechargement']:
+        return "téléchargement de la base en cours"
+    return _GEO['erreur'] or "en attente"
+
+
+def _geo_chercher(ip):
+    """Pays, région, ville et position approximative (à 1 km près) d'une
+    adresse IP, ou un dictionnaire vide. L'adresse n'est pas conservée."""
+    lecteur = _geo_lecteur()
+    if lecteur is None or not ip:
+        return {}
+    try:
+        enr = lecteur.get(ip)
+    except Exception:
+        return {}
+    if not isinstance(enr, dict):
+        return {}
+
+    def nom(bloc):
+        noms = (bloc or {}).get('names') or {}
+        return (noms.get('fr') or noms.get('en') or next(iter(noms.values()), None) or None)
+
+    pays = str((enr.get('country') or {}).get('iso_code') or '')[:2].upper() or None
+    ville = nom(enr.get('city'))
+    sous = enr.get('subdivisions') or []
+    region = nom(sous[0]) if sous and isinstance(sous[0], dict) else None
+    lieu = enr.get('location') or {}
+    lat, lon = lieu.get('latitude'), lieu.get('longitude')
+    ok = ville and isinstance(lat, (int, float)) and isinstance(lon, (int, float))
+    return {"pays": pays, "region": (region or None) and region[:80], "ville": (ville or None) and ville[:80],
+            "lat": round(float(lat), 2) if ok else None, "lon": round(float(lon), 2) if ok else None}
+
+
+# --- Lecture de ce que le navigateur envoie ---
+
+def _page_stats(brut):
+    if not brut:
+        return None
+    page = str(brut)[:200].split('?')[0].split('#')[0].strip().lower()
+    if len(page) > 1:
+        page = page.rstrip('/')
+    if page in ('', '/', '/index.html', '/index'):
+        return '/'
+    nom = page.lstrip('/')
+    if nom.endswith('.html'):
+        nom = nom[:-5]
+    return '/' + nom if nom in STATS_PAGES else None
+
+
+def _source_stats(donnees):
+    """D'où vient le visiteur : la campagne (utm_source) si le lien en porte
+    une, sinon le site d'où il vient, sinon « direct »."""
+    utm = re.sub(r'[^a-z0-9._-]', '', str(donnees.get('s') or '').lower())[:80]
+    if utm:
+        return utm
+    try:
+        hote = (_urlparse(str(donnees.get('r') or '')[:300]).hostname or '').lower()
+    except ValueError:
+        hote = ''
+    if hote.startswith('www.'):
+        hote = hote[4:]
+    if not hote:
+        return 'direct'
+    site = (_urlparse(_site_url() or '').hostname or '').lower()
+    if hote.endswith('zelyro.fr') or (site and hote == site.replace('www.', '', 1)):
+        return 'interne'
+    for domaines, nom in _SOURCES_CONNUES:
+        for d in domaines:
+            if d.endswith('.'):
+                if re.search(r'(^|\.)' + re.escape(d), hote):
+                    return nom
+            elif hote == d or hote.endswith('.' + d):
+                return nom
+    return hote[:80]
+
+
+def _campagne_stats(donnees):
+    return re.sub(r'[^a-z0-9._-]', '', str(donnees.get('c') or '').lower())[:80] or None
+
+
+def _appareil_stats(largeur, agent):
+    try:
+        w = int(largeur)
+    except (TypeError, ValueError):
+        w = 0
+    if w <= 0:
+        a = (agent or '').lower()
+        return 'tablette' if ('ipad' in a or 'tablet' in a) else ('mobile' if 'mobi' in a else 'ordinateur')
+    return 'mobile' if w < 768 else ('tablette' if w < 1100 else 'ordinateur')
+
+
+def _lire_passage():
+    """(données, page) d'une requête de mesure valide, sinon None. Les
+    visiteurs qui ont activé « Ne pas me suivre » (DNT ou GPC) et les robots
+    ne sont jamais mesurés."""
+    if not _stats_actives() or _est_robot():
+        return None
+    if request.headers.get('DNT') == '1' or request.headers.get('Sec-GPC') == '1':
+        return None
+    donnees = request.get_json(silent=True, force=True)
+    if not isinstance(donnees, dict):
+        return None
+    page = _page_stats(donnees.get('p'))
+    if not page:
+        return None
+    return donnees, page
+
+
+def _marquer_presence(cur, visiteur, page, appareil, geo, maintenant):
+    cur.execute("""
+        INSERT INTO site_direct (visiteur, page, appareil, pays, ville, lat, lon, debut, vu_le)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (visiteur) DO UPDATE SET
+            page = EXCLUDED.page, appareil = EXCLUDED.appareil, pays = EXCLUDED.pays,
+            ville = EXCLUDED.ville, lat = EXCLUDED.lat, lon = EXCLUDED.lon, vu_le = EXCLUDED.vu_le,
+            debut = CASE WHEN site_direct.vu_le < %s THEN EXCLUDED.debut ELSE site_direct.debut END
+    """, (visiteur, page, appareil, geo.get('pays'), geo.get('ville'), geo.get('lat'), geo.get('lon'),
+          maintenant, maintenant, maintenant - timedelta(minutes=STATS_DOUBLON_MINUTES)))
+
+
+def _purger_stats():
+    try:
+        maintenant = _maintenant()
+        with _base() as (conn, cur):
+            cur.execute("DELETE FROM site_visites WHERE cree_le < %s",
+                        (maintenant - timedelta(days=STATS_CONSERVATION_JOURS),))
+            cur.execute("DELETE FROM site_direct WHERE vu_le < %s", (maintenant - timedelta(days=1),))
+            conn.commit()
+    except Exception:
+        app.logger.exception("Statistiques : purge impossible")
+
+
+@app.route('/public/stats/vue', methods=['POST'])
+@limiter.limit("120 per hour")
+def stats_vue():
+    """Une page publique vient de s'afficher. Répond toujours 204 : la
+    mesure ne doit jamais gêner la page, ni dire ce qu'elle a retenu."""
+    try:
+        lu = _lire_passage()
+        if lu is None:
+            return '', 204
+        donnees, page = lu
+        agent = request.headers.get('User-Agent', '')
+        ip = get_remote_address()
+        visiteur = _empreinte_visiteur(ip, agent)
+        geo = _geo_chercher(ip)
+        appareil = _appareil_stats(donnees.get('w'), agent)
+        maintenant = _maintenant()
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("""SELECT 1 FROM site_visites WHERE visiteur = %s AND page = %s AND cree_le > %s LIMIT 1""",
+                        (visiteur, page, maintenant - timedelta(minutes=STATS_DOUBLON_MINUTES)))
+            if not cur.fetchone():
+                cur.execute("""
+                    INSERT INTO site_visites (visiteur, page, source, campagne, appareil, pays, region, ville, lat, lon, cree_le)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (visiteur, page, _source_stats(donnees), _campagne_stats(donnees), appareil,
+                      geo.get('pays'), geo.get('region'), geo.get('ville'), geo.get('lat'), geo.get('lon'), maintenant))
+            _marquer_presence(cur, visiteur, page, appareil, geo, maintenant)
+            conn.commit()
+        if _random.random() < 0.01:
+            _purger_stats()
+    except Exception:
+        app.logger.exception("Statistiques : visite non enregistrée")
+    return '', 204
+
+
+@app.route('/public/stats/presence', methods=['POST'])
+@limiter.limit("600 per hour")
+def stats_presence():
+    """Signe de vie envoyé toutes les 30 secondes par une page visible."""
+    try:
+        lu = _lire_passage()
+        if lu is None:
+            return '', 204
+        donnees, page = lu
+        agent = request.headers.get('User-Agent', '')
+        ip = get_remote_address()
+        _assurer_schema()
+        with _base() as (conn, cur):
+            _marquer_presence(cur, _empreinte_visiteur(ip, agent), page,
+                              _appareil_stats(donnees.get('w'), agent), _geo_chercher(ip), _maintenant())
+            conn.commit()
+    except Exception:
+        app.logger.exception("Statistiques : présence non enregistrée")
+    return '', 204
+
+
+def _debut_jour_paris(retour=0):
+    """Minuit à Paris, il y a `retour` jours, en UTC sans fuseau (comme la base)."""
+    local = datetime.now(_fuseau_rdv()).replace(hour=0, minute=0, second=0, microsecond=0)
+    local = local - timedelta(days=retour)
+    return local.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _nombre(valeur):
+    return float(valeur) if valeur is not None else None
+
+
+@app.route('/admin/stats/direct', methods=['GET'])
+@limiter.limit("1500 per hour", key_func=_cle_utilisateur)
+@admin_required
+def admin_stats_direct():
+    """Qui est sur le site à l'instant, d'où, et le journal des dernières visites."""
+    try:
+        _assurer_schema()
+        maintenant = _maintenant()
+        with _base() as (conn, cur):
+            cur.execute("""SELECT page, appareil, pays, ville, lat, lon, debut FROM site_direct
+                           WHERE vu_le >= %s ORDER BY debut""",
+                        (maintenant - timedelta(seconds=STATS_DIRECT_SECONDES),))
+            actifs = cur.fetchall()
+            cur.execute("""SELECT cree_le, page, source, campagne, appareil, pays, ville
+                           FROM site_visites ORDER BY id DESC LIMIT 40""")
+            journal = cur.fetchall()
+            cur.execute("""SELECT count(*) AS visites, count(DISTINCT visiteur) AS visiteurs
+                           FROM site_visites WHERE cree_le >= %s""", (_debut_jour_paris(),))
+            jour = cur.fetchone()
+        villes = {}
+        for a in actifs:
+            if a['ville'] and a['lat'] is not None:
+                cle = (a['pays'], a['ville'])
+                v = villes.setdefault(cle, {"pays": a['pays'], "ville": a['ville'],
+                                            "lat": _nombre(a['lat']), "lon": _nombre(a['lon']), "n": 0})
+                v["n"] += 1
+        return jsonify({
+            "en_direct": len(actifs),
+            "fenetre_secondes": STATS_DIRECT_SECONDES,
+            "aujourdhui": {"visites": jour['visites'], "visiteurs": jour['visiteurs']},
+            "villes": sorted(villes.values(), key=lambda v: -v["n"]),
+            "visiteurs": [{"page": a['page'], "appareil": a['appareil'], "pays": a['pays'],
+                           "ville": a['ville'], "depuis": _iso(a['debut'])} for a in actifs],
+            "journal": [{"le": _iso(j['cree_le']), "page": j['page'], "source": j['source'],
+                         "campagne": j['campagne'], "appareil": j['appareil'],
+                         "pays": j['pays'], "ville": j['ville']} for j in journal],
+            "geo": _geo_etat(),
+            "actif": _stats_actives(),
+        }), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/admin/stats/resume', methods=['GET'])
+@limiter.limit("600 per hour", key_func=_cle_utilisateur)
+@admin_required
+def admin_stats_resume():
+    """Bilan sur une période : courbe par jour, pages, provenances, pays,
+    villes (pour la carte), appareils et heures de fréquentation."""
+    try:
+        try:
+            jours = int(request.args.get('jours', 30))
+        except ValueError:
+            jours = 30
+        jours = max(1, min(jours, STATS_CONSERVATION_JOURS))
+        debut = _debut_jour_paris(jours - 1)
+        _assurer_schema()
+        paris = "(cree_le AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris'"
+        with _base() as (conn, cur):
+            cur.execute("""SELECT (%s)::date AS jour, count(*) AS visites, count(DISTINCT visiteur) AS visiteurs
+                           FROM site_visites WHERE cree_le >= %%s GROUP BY 1 ORDER BY 1""" % paris, (debut,))
+            par_jour = {r['jour']: r for r in cur.fetchall()}
+            cur.execute("""SELECT extract(hour FROM %s)::int AS heure, count(*) AS visites
+                           FROM site_visites WHERE cree_le >= %%s GROUP BY 1""" % paris, (debut,))
+            par_heure = {r['heure']: r['visites'] for r in cur.fetchall()}
+            cur.execute("""SELECT page, count(*) AS visites, count(DISTINCT visiteur) AS visiteurs
+                           FROM site_visites WHERE cree_le >= %s GROUP BY page ORDER BY visites DESC LIMIT 15""", (debut,))
+            pages = cur.fetchall()
+            cur.execute("""SELECT COALESCE(source, 'direct') AS source, count(*) AS visites, count(DISTINCT visiteur) AS visiteurs
+                           FROM site_visites WHERE cree_le >= %s AND COALESCE(source, '') <> 'interne'
+                           GROUP BY 1 ORDER BY visites DESC LIMIT 12""", (debut,))
+            sources = cur.fetchall()
+            cur.execute("""SELECT campagne, count(*) AS visites, count(DISTINCT visiteur) AS visiteurs
+                           FROM site_visites WHERE cree_le >= %s AND campagne IS NOT NULL
+                           GROUP BY campagne ORDER BY visites DESC LIMIT 10""", (debut,))
+            campagnes = cur.fetchall()
+            cur.execute("""SELECT pays, count(*) AS visites, count(DISTINCT visiteur) AS visiteurs
+                           FROM site_visites WHERE cree_le >= %s AND pays IS NOT NULL
+                           GROUP BY pays ORDER BY visites DESC LIMIT 20""", (debut,))
+            pays = cur.fetchall()
+            cur.execute("""SELECT pays, ville, avg(lat)::float AS lat, avg(lon)::float AS lon,
+                                  count(*) AS visites, count(DISTINCT visiteur) AS visiteurs
+                           FROM site_visites WHERE cree_le >= %s AND ville IS NOT NULL AND lat IS NOT NULL
+                           GROUP BY pays, ville ORDER BY visites DESC LIMIT 300""", (debut,))
+            villes = cur.fetchall()
+            cur.execute("""SELECT COALESCE(appareil, 'ordinateur') AS appareil, count(*) AS visites
+                           FROM site_visites WHERE cree_le >= %s GROUP BY 1 ORDER BY visites DESC""", (debut,))
+            appareils = cur.fetchall()
+            cur.execute("SELECT count(*) AS n, min(cree_le) AS premier FROM site_visites")
+            total = cur.fetchone()
+        serie = []
+        jour0 = (datetime.now(_fuseau_rdv()) - timedelta(days=jours - 1)).date()
+        for i in range(jours):
+            d = jour0 + timedelta(days=i)
+            r = par_jour.get(d)
+            serie.append({"jour": d.isoformat(), "visites": r['visites'] if r else 0,
+                          "visiteurs": r['visiteurs'] if r else 0})
+        return jsonify({
+            "jours": jours,
+            "totaux": {"visites": sum(s['visites'] for s in serie), "visiteurs": sum(s['visiteurs'] for s in serie)},
+            "serie": serie,
+            "heures": [par_heure.get(h, 0) for h in range(24)],
+            "pages": pages, "sources": sources, "campagnes": campagnes, "pays": pays,
+            "villes": [{"pays": v['pays'], "ville": v['ville'], "lat": v['lat'], "lon": v['lon'],
+                        "visites": v['visites'], "visiteurs": v['visiteurs']} for v in villes],
+            "appareils": appareils,
+            "depuis": _iso(total['premier']),
+            "geo": _geo_etat(),
+        }), 200
+    except Exception:
+        return erreur_interne()
+
 
 
 if __name__ == '__main__':
