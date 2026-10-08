@@ -20,7 +20,7 @@ import unicodedata
 from functools import wraps
 import psycopg2
 import psycopg2.errors
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, Json
 from urllib.parse import urlencode
 from cryptography.fernet import Fernet
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -614,6 +614,41 @@ _DDL_EQUIPE = (
     "CREATE INDEX IF NOT EXISTS team_invitations_owner_idx ON team_invitations (agency_owner_id)",
     "CREATE INDEX IF NOT EXISTS team_invitations_email_idx ON team_invitations (lower(email))",
 )
+# Planning de rendez-vous : les plages de disponibilité de chaque utilisateur,
+# et les rendez-vous de visite pris par les prospects. Un rendez-vous naît
+# « propose » (le prospect a reçu son lien, aucun créneau choisi), devient
+# « confirme » quand il choisit un créneau, et redevient « propose » s'il
+# l'annule. L'index unique empêche deux prospects de prendre le même créneau
+# chez le même agent.
+_DDL_RDV = (
+    """CREATE TABLE IF NOT EXISTS rdv_reglages (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        duree_min INTEGER NOT NULL DEFAULT 30,
+        delai_heures INTEGER NOT NULL DEFAULT 4,
+        horizon_jours INTEGER NOT NULL DEFAULT 14,
+        auto_envoi BOOLEAN NOT NULL DEFAULT TRUE,
+        lieu VARCHAR(255),
+        plages JSONB NOT NULL DEFAULT '[]'::jsonb,
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )""",
+    """CREATE TABLE IF NOT EXISTS lead_rdv (
+        id SERIAL PRIMARY KEY,
+        lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+        agent_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        jeton VARCHAR(64) NOT NULL,
+        statut VARCHAR(10) NOT NULL DEFAULT 'propose',
+        bien VARCHAR(120),
+        debut TIMESTAMP,
+        fin TIMESTAMP,
+        rappel_id INTEGER,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        confirme_at TIMESTAMP
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS lead_rdv_jeton_idx ON lead_rdv (jeton)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS lead_rdv_creneau_idx ON lead_rdv (agent_id, debut) WHERE statut = 'confirme'",
+    "CREATE INDEX IF NOT EXISTS lead_rdv_lead_idx ON lead_rdv (lead_id, id DESC)",
+)
+
 _schema_pret = False
 _schema_verrou = threading.Lock()
 
@@ -677,12 +712,13 @@ def _assurer_schema():
                                WHERE table_name = 'leads' AND column_name = 'assigned_to'),
                        EXISTS (SELECT 1 FROM information_schema.columns
                                WHERE table_name = 'users' AND column_name = 'commission_rate'),
-                       to_regclass('push_subscriptions') IS NOT NULL
+                       to_regclass('push_subscriptions') IS NOT NULL,
+                       to_regclass('lead_rdv') IS NOT NULL
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
                 for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
-                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH):
+                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV):
                     cur.execute(ddl)
             conn.commit()
             _schema_pret = True
@@ -856,7 +892,7 @@ def init_database(demo=False):
         ):
             cursor.execute(ddl)
         for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
-                    + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH):
+                    + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV):
             cursor.execute(ddl)
 
         # Vérifier si vide
@@ -3523,6 +3559,9 @@ LIBELLES_EVENEMENTS = {
     'formulaire_rempli': "a rempli son formulaire",
     'annonces_ouvertes': "a ouvert les annonces reçues",
     'interet_bien': "souhaite visiter un bien",
+    'rdv_pris': "a choisi un créneau de visite",
+    'rdv_modifie': "a déplacé son rendez-vous de visite",
+    'rdv_annule': "a annulé son rendez-vous de visite",
 }
 EVENEMENT_FENETRE_MINUTES = 30      # une ouverture répétée dans la fenêtre ne compte qu'une fois
 ACTIVITE_JOURS = 14                 # durée d'affichage sur le tableau de bord
@@ -4751,8 +4790,17 @@ def annonces_publiques(token):
                 _noter_evenement(cur, mail['user_id'], mail['lead_id'], 'annonces_ouvertes',
                                  f"envoyées le {mail['sent_at']:%d/%m}, {len(biens)} bien{pluriel}")
                 conn.commit()
+            # Le lien du planning de rendez-vous, s'il existe déjà : le prospect le retrouve ici.
+            maintenant = _maintenant()
+            cur.execute("""SELECT jeton FROM lead_rdv
+                           WHERE lead_id = %s
+                             AND ((statut = 'propose' AND created_at > %s) OR (statut = 'confirme' AND debut > %s))
+                           ORDER BY id DESC LIMIT 1""",
+                        (mail['lead_id'], maintenant - timedelta(days=RDV_VALIDITE_JOURS), maintenant - timedelta(days=1)))
+            invitation = cur.fetchone()
         return jsonify({"agence": mail['company_name'] or "", "prenom": _prenom_prospect(mail['name']),
-                        "envoye_le": _iso(mail['sent_at']), "biens": biens}), 200
+                        "envoye_le": _iso(mail['sent_at']), "biens": biens,
+                        "rdv_url": _lien_rdv(invitation['jeton']) if invitation and _site_url() else None}), 200
     except Exception:
         return erreur_interne()
 
@@ -4798,7 +4846,16 @@ def annonce_interet(token):
                 return jsonify({"message": "Ce bien n'est plus disponible."}), 404
             titre = (bien['title'] or '')[:120]
             nouveau = _noter_evenement(cur, mail['user_id'], mail['lead_id'], 'interet_bien', titre, fenetre=1440)
+            # Planning de rendez-vous : si l'agent a réglé ses disponibilités, le prospect peut choisir
+            # son créneau tout de suite (lien renvoyé à la page) et le reçoit aussi par e-mail.
+            rdv_url = None
+            if _site_url():
+                agent_id, reglages = _agent_du_planning(cur, mail['user_id'], mail['assigned_to'])
+                if reglages['plages'] and reglages['auto_envoi']:
+                    rdv_url = _lien_rdv(_invitation_rdv(cur, mail['lead_id'], agent_id, titre)['jeton'])
             conn.commit()
+        if nouveau and rdv_url:
+            _lancer_en_arriere_plan(_envoyer_planning_auto, mail['lead_id'])
         if nouveau:
             _lancer_en_arriere_plan(
                 _prevenir_agent, mail['user_id'], mail['lead_id'],
@@ -4811,7 +4868,644 @@ def annonce_interet(token):
                     f"{mail['name'][:60]} souhaite visiter un bien", "Demande de visite",
                     [f"{mail['name']}, dont vous êtes le responsable, souhaite visiter « {titre} ».",
                      "Un prospect qui demande une visite est au plus chaud : le rappeler rapidement fait la différence."])
-        return jsonify({"message": "Merci ! Votre agence est prévenue et vous recontacte pour organiser la visite."}), 200
+        return jsonify({"message": "Merci ! Votre agence est prévenue et vous recontacte pour organiser la visite.",
+                        "rdv_url": rdv_url}), 200
+    except Exception:
+        return erreur_interne()
+
+
+# ===== PLANNING DE RENDEZ-VOUS =====
+# Quand un prospect demande une visite, il reçoit le lien du planning de son
+# agent (par e-mail, et tout de suite sur la page des annonces). Il choisit un
+# créneau libre ; le rendez-vous apparaît alors sur sa fiche, une relance est
+# posée le jour même, l'agent est prévenu, et le prospect reçoit une
+# confirmation avec une invitation de calendrier. Il peut modifier ou annuler
+# depuis le même lien. Les heures sont stockées en UTC, comme partout ailleurs,
+# et les plages de l'agent se lisent à l'heure de Paris.
+
+RDV_FUSEAU = "Europe/Paris"
+RDV_DUREES = (30, 45, 60)           # durées de rendez-vous proposées (minutes)
+RDV_VALIDITE_JOURS = 30             # un lien sans créneau choisi expire au bout de ce délai
+RDV_MAX_PLAGES = 40
+RDV_MAX_CRENEAUX = 400
+RDV_PAR_DEFAUT = {"duree_min": 30, "delai_heures": 4, "horizon_jours": 14,
+                  "auto_envoi": True, "lieu": "", "plages": []}
+_RDV_HEURE_RE = re.compile(r'^([01]\d|2[0-3]):[0-5]\d$')
+_JOURS_FR = ('lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche')
+_MOIS_FR = ('janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août',
+            'septembre', 'octobre', 'novembre', 'décembre')
+
+
+def _fuseau_rdv():
+    from zoneinfo import ZoneInfo
+    return ZoneInfo(RDV_FUSEAU)
+
+
+def _en_local(instant_utc):
+    """Un instant UTC (sans fuseau) à l'heure de Paris."""
+    return instant_utc.replace(tzinfo=timezone.utc).astimezone(_fuseau_rdv())
+
+
+def _libelle_rdv(debut_utc):
+    d = _en_local(debut_utc)
+    return f"{_JOURS_FR[d.weekday()]} {d.day} {_MOIS_FR[d.month - 1]} à {d.hour}h{d.minute:02d}"
+
+
+def _lire_debut_rdv(valeur):
+    """Instant UTC (sans fuseau) d'un texte ISO envoyé par la page, ou None."""
+    if not isinstance(valeur, str) or not 10 <= len(valeur) <= 40:
+        return None
+    try:
+        d = datetime.fromisoformat(valeur.replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    if d.tzinfo is None:
+        return None
+    return d.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _normaliser_plages(valeur):
+    """Les plages hebdomadaires reçues, nettoyées et triées, ou (None, erreur)."""
+    if not isinstance(valeur, list) or len(valeur) > RDV_MAX_PLAGES:
+        return None, f"Au plus {RDV_MAX_PLAGES} plages horaires"
+    plages = set()
+    for p in valeur:
+        if not isinstance(p, dict):
+            return None, "Plage horaire invalide"
+        jour, debut, fin = p.get('jour'), p.get('debut'), p.get('fin')
+        if not isinstance(jour, int) or isinstance(jour, bool) or not 0 <= jour <= 6:
+            return None, "Jour invalide"
+        if (not isinstance(debut, str) or not isinstance(fin, str)
+                or not _RDV_HEURE_RE.match(debut) or not _RDV_HEURE_RE.match(fin) or debut >= fin):
+            return None, "Chaque plage doit aller d'une heure de début à une heure de fin plus tardive"
+        plages.add((jour, debut, fin))
+    return [{"jour": j, "debut": d, "fin": f} for j, d, f in sorted(plages)], None
+
+
+def _lire_reglages(cur, user_id):
+    cur.execute("""SELECT duree_min, delai_heures, horizon_jours, auto_envoi, lieu, plages
+                   FROM rdv_reglages WHERE user_id = %s""", (user_id,))
+    ligne = cur.fetchone()
+    reglages = dict(RDV_PAR_DEFAUT, plages=[])
+    if ligne:
+        for cle in ('duree_min', 'delai_heures', 'horizon_jours', 'auto_envoi'):
+            reglages[cle] = ligne[cle]
+        reglages['lieu'] = ligne['lieu'] or ''
+        reglages['plages'] = ligne['plages'] if isinstance(ligne['plages'], list) else []
+    return reglages
+
+
+def _agent_du_planning(cur, agence_id, responsable_id):
+    """Quel planning sert à un prospect : celui de son responsable s'il a réglé
+    des plages, sinon celui du directeur de l'agence. Renvoie (id, réglages)."""
+    candidats = [responsable_id, agence_id] if responsable_id and responsable_id != agence_id else [agence_id]
+    for uid in candidats:
+        reglages = _lire_reglages(cur, uid)
+        if reglages['plages']:
+            return uid, reglages
+    return agence_id, _lire_reglages(cur, agence_id)
+
+
+def _calculer_creneaux(reglages, maintenant, pris):
+    """Les créneaux libres des prochains jours : chaque plage est découpée en
+    rendez-vous de la durée choisie, on garde ceux qui commencent après le délai
+    minimum et ne chevauchent aucun rendez-vous déjà pris ((début, fin) en UTC)."""
+    tz = _fuseau_rdv()
+    duree = timedelta(minutes=reglages['duree_min'])
+    plus_tot = maintenant + timedelta(hours=reglages['delai_heures'])
+    aujourdhui = maintenant.replace(tzinfo=timezone.utc).astimezone(tz).date()
+    vus, creneaux = set(), []
+    for n in range(reglages['horizon_jours'] + 1):
+        jour = aujourdhui + timedelta(days=n)
+        for p in reglages['plages']:
+            if p['jour'] != jour.weekday():
+                continue
+            h, m = (int(x) for x in p['debut'].split(':'))
+            hf, mf = (int(x) for x in p['fin'].split(':'))
+            courant = datetime(jour.year, jour.month, jour.day, h, m, tzinfo=tz)
+            fin_plage = datetime(jour.year, jour.month, jour.day, hf, mf, tzinfo=tz)
+            while courant + duree <= fin_plage:
+                debut = courant.astimezone(timezone.utc).replace(tzinfo=None)
+                fin = debut + duree
+                if (debut >= plus_tot and debut not in vus
+                        and not any(debut < pf and fin > pd for pd, pf in pris)):
+                    vus.add(debut)
+                    creneaux.append({"debut": debut, "fin": fin, "jour": jour.isoformat(),
+                                     "heure": f"{courant.hour:02d}:{courant.minute:02d}"})
+                courant += duree
+    creneaux.sort(key=lambda c: c["debut"])
+    return creneaux[:RDV_MAX_CRENEAUX]
+
+
+def _creneaux_libres(cur, agent_id, reglages, exclure_id=None):
+    maintenant = _maintenant()
+    cur.execute("""SELECT debut, fin FROM lead_rdv
+                   WHERE agent_id = %s AND statut = 'confirme' AND fin > %s AND debut < %s
+                     AND id <> COALESCE(%s, 0)""",
+                (agent_id, maintenant, maintenant + timedelta(days=reglages['horizon_jours'] + 2), exclure_id))
+    return _calculer_creneaux(reglages, maintenant, [(r['debut'], r['fin']) for r in cur.fetchall()])
+
+
+def _jours_json(creneaux):
+    """Les créneaux regroupés par jour, prêts pour la page du prospect."""
+    jours = []
+    for c in creneaux:
+        if not jours or jours[-1]['jour'] != c['jour']:
+            d = date.fromisoformat(c['jour'])
+            jours.append({"jour": c['jour'], "libelle": f"{_JOURS_FR[d.weekday()]} {d.day} {_MOIS_FR[d.month - 1]}",
+                          "creneaux": []})
+        jours[-1]['creneaux'].append({"debut": _iso(c['debut']), "heure": c['heure']})
+    return jours
+
+
+def _lien_rdv(jeton):
+    return f"{_site_url()}/rdv.html?t={jeton}"
+
+
+def _invitation_rdv(cur, lead_id, agent_id, bien=None):
+    """Le lien de planning de ce prospect : le même tant qu'il est valable
+    (rendez-vous à choisir depuis moins de RDV_VALIDITE_JOURS jours, ou
+    rendez-vous confirmé à venir), sinon un nouveau. À appeler dans une
+    transaction ; l'appelant valide."""
+    maintenant = _maintenant()
+    bien = (bien or '')[:120] or None
+    cur.execute("""SELECT id, jeton, statut, debut FROM lead_rdv
+                   WHERE lead_id = %s
+                     AND ((statut = 'propose' AND created_at > %s) OR (statut = 'confirme' AND debut > %s))
+                   ORDER BY id DESC LIMIT 1 FOR UPDATE""",
+                (lead_id, maintenant - timedelta(days=RDV_VALIDITE_JOURS), maintenant))
+    ligne = cur.fetchone()
+    if ligne:
+        if ligne['statut'] == 'propose':
+            cur.execute("UPDATE lead_rdv SET agent_id = %s, created_at = %s, bien = COALESCE(%s, bien) WHERE id = %s",
+                        (agent_id, maintenant, bien, ligne['id']))
+        return ligne
+    cur.execute("""INSERT INTO lead_rdv (lead_id, agent_id, jeton, bien, created_at)
+                   VALUES (%s, %s, %s, %s, %s) RETURNING id, jeton, statut, debut""",
+                (lead_id, agent_id, secrets.token_urlsafe(24), bien, maintenant))
+    return cur.fetchone()
+
+
+def _rdv_par_jeton(cur, jeton, verrou=False):
+    cur.execute("""SELECT r.id, r.lead_id, r.agent_id, r.statut, r.bien, r.debut, r.fin, r.rappel_id, r.created_at,
+                          l.name, l.email, l.status AS lead_status, l.user_id AS agence_id, l.assigned_to,
+                          u.company_name
+                   FROM lead_rdv r
+                   JOIN leads l ON l.id = r.lead_id
+                   JOIN users u ON u.id = l.user_id AND u.is_active
+                   WHERE r.jeton = %s""" + (" FOR UPDATE OF r" if verrou else ""), (jeton,))
+    return cur.fetchone()
+
+
+def _rdv_expire(rdv, maintenant):
+    if rdv['statut'] == 'confirme':
+        return rdv['debut'] < maintenant - timedelta(days=1)
+    return rdv['created_at'] < maintenant - timedelta(days=RDV_VALIDITE_JOURS)
+
+
+def _texte_ics(valeur):
+    return (str(valeur).replace('\\', '\\\\').replace(';', '\\;').replace(',', '\\,')
+            .replace('\r', '').replace('\n', '\\n'))
+
+
+def _ics_rdv(uid, debut, fin, titre, lieu=None, description=None):
+    """Invitation de calendrier (.ics) que le prospect ajoute d'un clic."""
+    def horodatage(d):
+        return d.strftime('%Y%m%dT%H%M%SZ')
+    lignes = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Zelyro//Planning//FR", "METHOD:PUBLISH",
+              "BEGIN:VEVENT", f"UID:{uid}@zelyro.fr", f"DTSTAMP:{horodatage(_maintenant())}",
+              f"DTSTART:{horodatage(debut)}", f"DTEND:{horodatage(fin)}", f"SUMMARY:{_texte_ics(titre)}"]
+    if lieu:
+        lignes.append(f"LOCATION:{_texte_ics(lieu)}")
+    if description:
+        lignes.append(f"DESCRIPTION:{_texte_ics(description)}")
+    lignes += ["END:VEVENT", "END:VCALENDAR"]
+    return ("\r\n".join(lignes) + "\r\n").encode('utf-8')
+
+
+def _mail_planning(destinataire, nom, agence, bien, lien, agent_email=None, agent_nom=None):
+    """Le lien du planning, envoyé au prospect. Renvoie True si l'envoi est accepté."""
+    prenom = _prenom_prospect(nom)
+    salutation = f"Bonjour {prenom}," if prenom else "Bonjour,"
+    texte, html = _gabarit_email(
+        "Choisissez votre créneau de visite",
+        [salutation,
+         f"{agence} a bien reçu votre demande de visite" + (f" pour « {bien} »" if bien else "")
+         + ". Choisissez en quelques secondes le jour et l'heure qui vous conviennent parmi les "
+           "disponibilités de votre conseiller.",
+         "Vous pourrez modifier ou annuler votre rendez-vous depuis le même lien."],
+        bouton=("Choisir mon créneau", lien))
+    return _envoyer_email(destinataire, f"Votre visite : choisissez un créneau ({agence})", texte, html,
+                          nom_expediteur=agence,
+                          repondre_a=(agent_email, agent_nom or agence) if agent_email else None)
+
+
+def _envoyer_planning_auto(lead_id):
+    """Après une demande de visite : envoie le lien du planning au prospect s'il a une adresse
+    e-mail. Appelée en tâche de fond ; ne fait rien si l'envoi n'est pas configuré."""
+    try:
+        if not _mail_configure() or not _site_url():
+            return
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("""SELECT l.name, l.email, u.company_name FROM leads l JOIN users u ON u.id = l.user_id
+                           WHERE l.id = %s""", (lead_id,))
+            lead = cur.fetchone()
+            cur.execute("""SELECT r.jeton, r.bien, r.agent_id, a.email AS agent_email, a.first_name AS agent_prenom
+                           FROM lead_rdv r JOIN users a ON a.id = r.agent_id
+                           WHERE r.lead_id = %s AND r.statut = 'propose' ORDER BY r.id DESC LIMIT 1""", (lead_id,))
+            rdv = cur.fetchone()
+        if not lead or not rdv or not _MAIL_RE.match((lead['email'] or '').strip()):
+            return
+        _mail_planning(lead['email'].strip(), lead['name'], _nom_affiche(lead['company_name'], "Votre agence"),
+                       rdv['bien'], _lien_rdv(rdv['jeton']), rdv['agent_email'],
+                       _nom_affiche(rdv['agent_prenom'], ''))
+    except Exception:
+        app.logger.exception("E-mail du planning : échec d'envoi")
+
+
+def _confirmer_rdv_prospect(rdv_id):
+    """Confirmation envoyée au prospect quand il choisit (ou change) son créneau, avec l'invitation
+    de calendrier. Appelée en tâche de fond."""
+    try:
+        if not _mail_configure() or not _site_url():
+            return
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("""SELECT r.jeton, r.bien, r.debut, r.fin, r.agent_id, l.name, l.email, u.company_name,
+                                  a.email AS agent_email, a.first_name AS agent_prenom
+                           FROM lead_rdv r
+                           JOIN leads l ON l.id = r.lead_id
+                           JOIN users u ON u.id = l.user_id
+                           JOIN users a ON a.id = r.agent_id
+                           WHERE r.id = %s AND r.statut = 'confirme'""", (rdv_id,))
+            r = cur.fetchone()
+            if not r or not _MAIL_RE.match((r['email'] or '').strip()):
+                return
+            cur.execute("SELECT lieu FROM rdv_reglages WHERE user_id = %s", (r['agent_id'],))
+            lieu = (cur.fetchone() or {}).get('lieu') or ''
+        agence = _nom_affiche(r['company_name'], "Votre agence")
+        quand = _libelle_rdv(r['debut'])
+        paragraphes = [f"Bonjour{(' ' + _prenom_prospect(r['name'])) if _prenom_prospect(r['name']) else ''},",
+                       f"Votre visite est confirmée : {quand}" + (f", {lieu}" if lieu else "") + "."]
+        if r['bien']:
+            paragraphes.append(f"Bien concerné : {r['bien']}.")
+        paragraphes.append("Une invitation de calendrier est jointe à ce message. Un empêchement ? Vous pouvez "
+                           "changer de créneau ou annuler depuis le lien ci-dessous.")
+        texte, html = _gabarit_email("Votre visite est confirmée", paragraphes,
+                                     bouton=("Modifier ou annuler", _lien_rdv(r['jeton'])))
+        ics = _ics_rdv(r['jeton'][:24], r['debut'], r['fin'], f"Visite : {r['bien'] or agence}", lieu or None,
+                       f"Rendez-vous avec {agence}")
+        _envoyer_email(r['email'].strip(), f"Visite confirmée : {quand}", texte, html, nom_expediteur=agence,
+                       repondre_a=(r['agent_email'], _nom_affiche(r['agent_prenom'] or agence, agence)),
+                       pieces_jointes=[("visite.ics", ics)])
+    except Exception:
+        app.logger.exception("Confirmation de rendez-vous : échec d'envoi")
+
+
+def _prevenir_annulation_prospect(lead_id, ancien_libelle):
+    """Quand l'agence annule un rendez-vous : le prospect est prévenu et peut en choisir un autre."""
+    try:
+        if not _mail_configure() or not _site_url():
+            return
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("""SELECT l.name, l.email, u.company_name FROM leads l JOIN users u ON u.id = l.user_id
+                           WHERE l.id = %s""", (lead_id,))
+            lead = cur.fetchone()
+            cur.execute("""SELECT r.jeton, a.email AS agent_email, a.first_name AS agent_prenom
+                           FROM lead_rdv r JOIN users a ON a.id = r.agent_id
+                           WHERE r.lead_id = %s AND r.statut = 'propose' ORDER BY r.id DESC LIMIT 1""", (lead_id,))
+            rdv = cur.fetchone()
+        if not lead or not rdv or not _MAIL_RE.match((lead['email'] or '').strip()):
+            return
+        agence = _nom_affiche(lead['company_name'], "Votre agence")
+        prenom = _prenom_prospect(lead['name'])
+        texte, html = _gabarit_email(
+            "Votre rendez-vous doit être déplacé",
+            [f"Bonjour{(' ' + prenom) if prenom else ''},",
+             f"{agence} ne peut malheureusement plus vous recevoir le {ancien_libelle}. "
+             "Toutes nos excuses : vous pouvez choisir un autre créneau en quelques secondes."],
+            bouton=("Choisir un autre créneau", _lien_rdv(rdv['jeton'])))
+        _envoyer_email(lead['email'].strip(), f"Votre visite : choisissez un nouveau créneau ({agence})", texte, html,
+                       nom_expediteur=agence,
+                       repondre_a=(rdv['agent_email'], _nom_affiche(rdv['agent_prenom'] or agence, agence)))
+    except Exception:
+        app.logger.exception("Annulation de rendez-vous : échec d'envoi")
+
+
+def _alerter_rdv(agence_id, responsable_id, lead_id, nom, sujet, titre, phrase):
+    """Prévient le directeur, et le responsable du prospect s'il y en a un."""
+    _lancer_en_arriere_plan(_prevenir_agent, agence_id, lead_id, sujet, titre, [phrase])
+    if responsable_id and responsable_id != agence_id:
+        _lancer_en_arriere_plan(_prevenir_collaborateur, responsable_id, lead_id, sujet, titre, [phrase])
+
+
+def _liberer_rdv(cur, rdv):
+    """Remet un rendez-vous confirmé à l'état « à choisir » : le créneau redevient libre et la
+    relance posée pour ce jour disparaît. Le lien du prospect reste valable."""
+    if rdv['rappel_id']:
+        cur.execute("DELETE FROM lead_reminders WHERE id = %s AND lead_id = %s AND done_at IS NULL",
+                    (rdv['rappel_id'], rdv['lead_id']))
+    cur.execute("""UPDATE lead_rdv SET statut = 'propose', debut = NULL, fin = NULL, rappel_id = NULL,
+                       confirme_at = NULL, created_at = %s WHERE id = %s""", (_maintenant(), rdv['id']))
+
+
+@app.route('/public/rdv/<token>', methods=['GET'])
+def rdv_public(token):
+    """La page de planning du prospect : les créneaux libres de son agent, et son
+    rendez-vous s'il en a déjà pris un. Le lien est propre à un prospect."""
+    try:
+        if not COMPLETION_JETON_RE.match(token):
+            return jsonify({"message": "Not found"}), 404
+        _assurer_schema()
+        with _base() as (conn, cur):
+            rdv = _rdv_par_jeton(cur, token)
+            if not rdv:
+                return jsonify({"message": "Not found"}), 404
+            if _rdv_expire(rdv, _maintenant()):
+                return jsonify({"message": "Ce lien a expiré. Contactez votre agence pour fixer un rendez-vous."}), 410
+            agent_id, reglages = _agent_du_planning(cur, rdv['agence_id'], rdv['assigned_to'])
+            creneaux = _creneaux_libres(cur, agent_id, reglages, exclure_id=rdv['id'])
+            cur.execute("SELECT first_name FROM users WHERE id = %s", (agent_id,))
+            agent = cur.fetchone() or {}
+        confirme = rdv['statut'] == 'confirme'
+        return jsonify({
+            "agence": rdv['company_name'] or "",
+            "prenom": _prenom_prospect(rdv['name']),
+            "agent": _nom_affiche(agent.get('first_name'), ''),
+            "bien": rdv['bien'] or "",
+            "duree_min": reglages['duree_min'],
+            "lieu": reglages['lieu'],
+            "rdv": {"debut": _iso(rdv['debut']), "libelle": _libelle_rdv(rdv['debut'])} if confirme else None,
+            "jours": _jours_json(creneaux),
+        }), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/public/rdv/<token>/reserver', methods=['POST'])
+@limiter.limit("30 per hour")
+@limiter.limit("20 per hour", key_func=_cle_jeton_public)
+def rdv_reserver(token):
+    """Le prospect choisit un créneau (ou en change). Le créneau est revérifié côté serveur :
+    il doit faire partie des créneaux libres à cet instant, jamais une heure quelconque."""
+    try:
+        if not COMPLETION_JETON_RE.match(token):
+            return jsonify({"message": "Not found"}), 404
+        data = request.get_json(silent=True) or {}
+        debut = _lire_debut_rdv(data.get('debut'))
+        if debut is None:
+            return jsonify({"message": "Créneau invalide."}), 400
+        _assurer_schema()
+        with _base() as (conn, cur):
+            rdv = _rdv_par_jeton(cur, token, verrou=True)
+            if not rdv:
+                return jsonify({"message": "Not found"}), 404
+            if _rdv_expire(rdv, _maintenant()):
+                return jsonify({"message": "Ce lien a expiré. Contactez votre agence pour fixer un rendez-vous."}), 410
+            agent_id, reglages = _agent_du_planning(cur, rdv['agence_id'], rdv['assigned_to'])
+            # Un seul prospect à la fois réserve chez un même agent.
+            cur.execute("SELECT pg_advisory_xact_lock(727302, %s)", (agent_id,))
+            if rdv['statut'] == 'confirme' and rdv['debut'] == debut:
+                return jsonify({"message": "Votre rendez-vous est déjà fixé à ce créneau.",
+                                "libelle": _libelle_rdv(debut)}), 200
+            libres = _creneaux_libres(cur, agent_id, reglages, exclure_id=rdv['id'])
+            choisi = next((c for c in libres if c['debut'] == debut), None)
+            if choisi is None:
+                return jsonify({"message": "Ce créneau n'est plus disponible. Choisissez-en un autre."}), 409
+            maintenant = _maintenant()
+            ancien = rdv['debut'] if rdv['statut'] == 'confirme' else None
+            libelle = _libelle_rdv(debut)
+            local = _en_local(debut)
+            if rdv['rappel_id']:
+                cur.execute("DELETE FROM lead_reminders WHERE id = %s AND lead_id = %s AND done_at IS NULL",
+                            (rdv['rappel_id'], rdv['lead_id']))
+            cur.execute("""INSERT INTO lead_reminders (lead_id, user_id, due_date, label, created_at)
+                           VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                        (rdv['lead_id'], agent_id, local.date(),
+                         (f"Visite à {local.hour}h{local.minute:02d}" + (f" : {rdv['bien']}" if rdv['bien'] else ""))[:255],
+                         maintenant))
+            rappel_id = cur.fetchone()['id']
+            try:
+                cur.execute("""UPDATE lead_rdv SET agent_id = %s, debut = %s, fin = %s, statut = 'confirme',
+                                   confirme_at = %s, rappel_id = %s WHERE id = %s""",
+                            (agent_id, choisi['debut'], choisi['fin'], maintenant, rappel_id, rdv['id']))
+            except psycopg2.errors.UniqueViolation:
+                conn.rollback()
+                return jsonify({"message": "Ce créneau vient d'être pris. Choisissez-en un autre."}), 409
+            statut_lead = rdv['lead_status'] if rdv['lead_status'] in STATUTS else 'nouveau'
+            if statut_lead in ('nouveau', 'contacte'):
+                # La visite est fixée : la fiche passe à « Visite », comme si l'agent l'avait fait.
+                cur.execute("""UPDATE leads SET status = 'visite', status_changed_at = NOW(),
+                                   first_contact_at = COALESCE(first_contact_at, NOW())
+                               WHERE id = %s AND user_id = %s""", (rdv['lead_id'], rdv['agence_id']))
+                cur.execute("""INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
+                               VALUES (%s, %s, 'statut', %s, %s)""",
+                            (rdv['lead_id'], rdv['agence_id'],
+                             f"{STATUTS_LIBELLES[statut_lead]} → {STATUTS_LIBELLES['visite']}", maintenant))
+            _noter_evenement(cur, rdv['agence_id'], rdv['lead_id'], 'rdv_modifie' if ancien else 'rdv_pris',
+                             libelle, fenetre=0)
+            conn.commit()
+        _lancer_en_arriere_plan(_confirmer_rdv_prospect, rdv['id'])
+        _alerter_rdv(rdv['agence_id'], rdv['assigned_to'], rdv['lead_id'], rdv['name'],
+                     f"{rdv['name'][:60]} a fixé une visite", "Rendez-vous de visite",
+                     f"{rdv['name']} " + ("a déplacé son rendez-vous au " if ancien else "a choisi le créneau du ")
+                     + f"{libelle}" + (f" pour « {rdv['bien']} »." if rdv['bien'] else "."))
+        return jsonify({"message": "C'est noté : votre visite est fixée.", "libelle": libelle}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/public/rdv/<token>/annuler', methods=['POST'])
+@limiter.limit("30 per hour")
+@limiter.limit("20 per hour", key_func=_cle_jeton_public)
+def rdv_annuler_public(token):
+    """Le prospect annule son rendez-vous : le créneau redevient libre et l'agent est prévenu."""
+    try:
+        if not COMPLETION_JETON_RE.match(token):
+            return jsonify({"message": "Not found"}), 404
+        _assurer_schema()
+        with _base() as (conn, cur):
+            rdv = _rdv_par_jeton(cur, token, verrou=True)
+            if not rdv:
+                return jsonify({"message": "Not found"}), 404
+            if rdv['statut'] != 'confirme':
+                return jsonify({"message": "Aucun rendez-vous à annuler."}), 409
+            libelle = _libelle_rdv(rdv['debut'])
+            _liberer_rdv(cur, rdv)
+            _noter_evenement(cur, rdv['agence_id'], rdv['lead_id'], 'rdv_annule', libelle, fenetre=0)
+            conn.commit()
+        _alerter_rdv(rdv['agence_id'], rdv['assigned_to'], rdv['lead_id'], rdv['name'],
+                     f"{rdv['name'][:60]} a annulé sa visite", "Rendez-vous annulé",
+                     f"{rdv['name']} a annulé le rendez-vous du {libelle}.")
+        return jsonify({"message": "Votre rendez-vous est annulé."}), 200
+    except Exception:
+        return erreur_interne()
+
+
+# --- côté agent : réglages, fiche du prospect ---
+
+@app.route('/api/v1/rdv/reglages', methods=['GET'])
+@token_required
+def rdv_reglages_lire():
+    """Les disponibilités de l'utilisateur connecté (chacun règle son propre planning)."""
+    try:
+        with _base() as (conn, cur):
+            return jsonify(_lire_reglages(cur, request.user_id)), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/rdv/reglages', methods=['PUT'])
+@limiter.limit("60 per hour", key_func=_cle_utilisateur)
+@token_required
+def rdv_reglages_ecrire():
+    try:
+        data = request.get_json(silent=True) or {}
+        duree, delai, horizon = data.get('duree_min'), data.get('delai_heures'), data.get('horizon_jours')
+        entier = lambda v: isinstance(v, int) and not isinstance(v, bool)
+        if not entier(duree) or duree not in RDV_DUREES:
+            return jsonify({"message": "Durée de rendez-vous inconnue"}), 400
+        if not entier(delai) or not 0 <= delai <= 168:
+            return jsonify({"message": "Le délai minimum doit être compris entre 0 et 168 heures"}), 400
+        if not entier(horizon) or not 1 <= horizon <= 60:
+            return jsonify({"message": "Le planning s'ouvre de 1 à 60 jours à l'avance"}), 400
+        if not isinstance(data.get('auto_envoi'), bool):
+            return jsonify({"message": "Valeur « auto_envoi » attendue (true ou false)"}), 400
+        plages, erreur = _normaliser_plages(data.get('plages'))
+        if erreur:
+            return jsonify({"message": erreur}), 400
+        lieu = _texte_court(data.get('lieu'), 255)
+        with _base() as (conn, cur):
+            cur.execute("""
+                INSERT INTO rdv_reglages (user_id, duree_min, delai_heures, horizon_jours, auto_envoi, lieu, plages, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET duree_min = EXCLUDED.duree_min,
+                    delai_heures = EXCLUDED.delai_heures, horizon_jours = EXCLUDED.horizon_jours,
+                    auto_envoi = EXCLUDED.auto_envoi, lieu = EXCLUDED.lieu, plages = EXCLUDED.plages,
+                    updated_at = EXCLUDED.updated_at
+            """, (request.user_id, duree, delai, horizon, data['auto_envoi'], lieu, Json(plages), _maintenant()))
+            conn.commit()
+            return jsonify(_lire_reglages(cur, request.user_id)), 200
+    except Exception:
+        return erreur_interne()
+
+
+def _rdv_agent_json(rdv):
+    return {"id": rdv['id'], "statut": rdv['statut'], "bien": rdv['bien'] or "",
+            "debut": _iso(rdv['debut']), "libelle": _libelle_rdv(rdv['debut']) if rdv['debut'] else None,
+            "lien": _lien_rdv(rdv['jeton']) if _site_url() else None}
+
+
+@app.route('/api/v1/leads/<int:lead_id>/rdv', methods=['GET'])
+@token_required
+def rdv_du_prospect(lead_id):
+    """Où en est le rendez-vous de ce prospect, pour sa fiche."""
+    try:
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("SELECT assigned_to, email FROM leads WHERE id = %s AND user_id = %s",
+                        (lead_id, request.agency_id))
+            lead = cur.fetchone()
+            if not lead:
+                return jsonify({"message": "Lead not found"}), 404
+            agent_id, reglages = _agent_du_planning(cur, request.agency_id, lead['assigned_to'])
+            maintenant = _maintenant()
+            cur.execute("""SELECT id, jeton, statut, bien, debut FROM lead_rdv
+                           WHERE lead_id = %s
+                             AND ((statut = 'propose' AND created_at > %s) OR (statut = 'confirme' AND debut > %s))
+                           ORDER BY id DESC LIMIT 1""",
+                        (lead_id, maintenant - timedelta(days=RDV_VALIDITE_JOURS), maintenant - timedelta(days=1)))
+            rdv = cur.fetchone()
+        return jsonify({
+            "planning_pret": bool(reglages['plages']) and bool(_site_url()),
+            "email_ok": bool(_MAIL_RE.match((lead['email'] or '').strip())) and _mail_configure(),
+            "rdv": _rdv_agent_json(rdv) if rdv else None,
+        }), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/leads/<int:lead_id>/rdv/envoyer', methods=['POST'])
+@limiter.limit("30 per hour;150 per day", key_func=_cle_utilisateur)
+@token_required
+def rdv_envoyer_planning(lead_id):
+    """Envoie le planning au prospect (canal « email »), ou renvoie son lien et un message prêt à
+    coller (canal « lien »), pour un prospect sans e-mail joint par SMS, WhatsApp ou la messagerie du portail."""
+    try:
+        data = request.get_json(silent=True) or {}
+        canal = data.get('canal')
+        if canal not in ('email', 'lien'):
+            return jsonify({"message": "Canal inconnu"}), 400
+        if not _site_url():
+            return jsonify({"message": "L'adresse du site n'est pas configurée sur ce serveur"}), 503
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("""SELECT id, name, email, assigned_to FROM leads
+                           WHERE id = %s AND user_id = %s FOR UPDATE""", (lead_id, request.agency_id))
+            lead = cur.fetchone()
+            if not lead:
+                return jsonify({"message": "Lead not found"}), 404
+            agent_id, reglages = _agent_du_planning(cur, request.agency_id, lead['assigned_to'])
+            if not reglages['plages']:
+                return jsonify({"message": "Réglez d'abord vos disponibilités dans « Mon compte »."}), 409
+            destinataire = (lead['email'] or '').strip()
+            if canal == 'email':
+                if not _mail_configure():
+                    return jsonify({"message": "L'envoi d'e-mails n'est pas encore configuré sur ce serveur"}), 503
+                if not _MAIL_RE.match(destinataire):
+                    return jsonify({"message": "Ce prospect n'a pas d'adresse e-mail valide"}), 400
+            rdv = _invitation_rdv(cur, lead_id, agent_id)
+            cur.execute("SELECT company_name, first_name FROM users WHERE id = %s", (request.agency_id,))
+            agence_row = cur.fetchone() or {}
+            cur.execute("SELECT email, first_name FROM users WHERE id = %s", (request.user_id,))
+            expediteur = cur.fetchone() or {}
+            conn.commit()
+            agence = _nom_affiche(agence_row.get('company_name') or agence_row.get('first_name'), "Votre agence")
+            lien = _lien_rdv(rdv['jeton'])
+            prenom = _prenom_prospect(lead['name'])
+            if canal == 'email':
+                if not _mail_planning(destinataire, lead['name'], agence, None, lien, expediteur.get('email'),
+                                      _nom_affiche(expediteur.get('first_name') or agence, agence)):
+                    return jsonify({"message": "L'envoi a échoué. Réessayez dans un instant."}), 502
+                cur.execute("""INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
+                               VALUES (%s, %s, 'note', %s, %s)""",
+                            (lead_id, request.user_id,
+                             f"Planning de rendez-vous envoyé par e-mail à {destinataire}.", _maintenant()))
+                conn.commit()
+        message = (f"Bonjour{(' ' + prenom) if prenom else ''}, voici le lien pour choisir le créneau de votre "
+                   f"visite avec {agence} : {lien}")
+        return jsonify({"lien": lien, "envoye": canal == 'email', "message": message}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/leads/<int:lead_id>/rdv', methods=['DELETE'])
+@limiter.limit("60 per hour", key_func=_cle_utilisateur)
+@token_required
+def rdv_annuler_agent(lead_id):
+    """L'agent annule le rendez-vous : le créneau est libéré, la relance du jour retirée, et le prospect
+    reçoit un e-mail pour en choisir un autre."""
+    try:
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("SELECT 1 FROM leads WHERE id = %s AND user_id = %s FOR UPDATE", (lead_id, request.agency_id))
+            if not cur.fetchone():
+                return jsonify({"message": "Lead not found"}), 404
+            cur.execute("""SELECT id, lead_id, rappel_id, debut FROM lead_rdv
+                           WHERE lead_id = %s AND statut = 'confirme' ORDER BY id DESC LIMIT 1 FOR UPDATE""", (lead_id,))
+            rdv = cur.fetchone()
+            if not rdv:
+                return jsonify({"message": "Aucun rendez-vous à annuler"}), 404
+            libelle = _libelle_rdv(rdv['debut'])
+            _liberer_rdv(cur, rdv)
+            cur.execute("""INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
+                           VALUES (%s, %s, 'note', %s, %s)""",
+                        (lead_id, request.user_id, f"Rendez-vous du {libelle} annulé par l'agence.", _maintenant()))
+            conn.commit()
+        _lancer_en_arriere_plan(_prevenir_annulation_prospect, lead_id, libelle)
+        return jsonify({"message": "Rendez-vous annulé"}), 200
     except Exception:
         return erreur_interne()
 
