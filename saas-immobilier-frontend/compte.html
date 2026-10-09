@@ -61,6 +61,14 @@
             const [choixPlan, setChoixPlan] = useState('agence');
             const [choixFormule, setChoixFormule] = useState('mensuel');
             const [sieges, setSieges] = useState(0);
+            const [journal, setJournal] = useState(null);           // journal de réception : null tant que non chargé
+            const [messageJournal, setMessageJournal] = useState(null);
+            const [cles, setCles] = useState(null);                 // clés d'API (administrateur seulement)
+            const [messageCles, setMessageCles] = useState(null);
+            const [nomCle, setNomCle] = useState('');
+            const [nouvelleCle, setNouvelleCle] = useState(null);   // la clé qui vient d'être créée, montrée une seule fois
+            const [confirmerCle, setConfirmerCle] = useState(null);
+            const [occupeCles, setOccupeCles] = useState(false);
 
             const appel = async (chemin, options = {}) => {
                 const r = await fetch(`${API_URL}${chemin}`, {
@@ -89,7 +97,7 @@
                         const maj = { ...u, plan: p.plan, role: p.role, is_admin: p.is_admin === true };
                         localStorage.setItem('user', JSON.stringify(maj));
                         setUser(maj);
-                        if (p.role === 'admin') chargerEquipe();
+                        if (p.role === 'admin') { chargerEquipe(); chargerCles(); }
                     } catch (e) { /* sans importance */ }
                 }).catch(() => {});
                 appel('/api/v1/plan').then(setForfait).catch(() => {});
@@ -102,6 +110,7 @@
                 }
                 appel('/api/v1/capture-link').then(setLien).catch((e) => setMessageLien({ type: 'error', text: e.message }));
                 appel('/api/v1/gmail/status').then(setGmailStatus).catch((e) => setMessageGmail({ type: 'error', text: e.message }));
+                chargerJournal();
                 chargerFacturation();
 
                 // Stripe renvoie ici après la page de paiement : ?abonnement=ok|annule. Le forfait
@@ -298,6 +307,61 @@
                     setMessageLien({ type: 'success', text: 'Nouvelle adresse créée. L\'ancienne ne fonctionne plus.' });
                 } catch (e) {
                     setMessageLien({ type: 'error', text: e.message });
+                }
+            };
+
+            const chargerJournal = async () => {
+                try {
+                    setJournal(await appel('/api/v1/reception/journal'));
+                    setMessageJournal(null);
+                } catch (e) {
+                    setMessageJournal({ type: 'error', text: e.message });
+                }
+            };
+
+            const copierTexte = async (texte, definirMessage, confirmation, idChamp) => {
+                try {
+                    await navigator.clipboard.writeText(texte);
+                    definirMessage({ type: 'success', text: confirmation });
+                } catch (e) {
+                    const champ = document.getElementById(idChamp);
+                    if (champ) champ.select();
+                    definirMessage({ type: 'error', text: 'Copie automatique impossible : le texte est sélectionné, copiez-le avec Ctrl+C.' });
+                }
+            };
+
+            const chargerCles = async () => {
+                try {
+                    setCles(await appel('/api/v1/api-keys'));
+                } catch (e) {
+                    setMessageCles({ type: 'error', text: e.message });
+                }
+            };
+
+            const creerCle = async () => {
+                setOccupeCles(true);
+                setMessageCles(null);
+                try {
+                    const r = await appel('/api/v1/api-keys', { method: 'POST', body: JSON.stringify({ name: nomCle }) });
+                    setNouvelleCle(r);
+                    setNomCle('');
+                    await chargerCles();
+                } catch (e) {
+                    setMessageCles({ type: 'error', text: e.message });
+                } finally {
+                    setOccupeCles(false);
+                }
+            };
+
+            const supprimerCle = async (id) => {
+                setConfirmerCle(null);
+                try {
+                    await appel(`/api/v1/api-keys/${id}`, { method: 'DELETE' });
+                    setMessageCles({ type: 'success', text: 'Clé supprimée : elle ne fonctionne plus.' });
+                    setNouvelleCle(null);
+                    await chargerCles();
+                } catch (e) {
+                    setMessageCles({ type: 'error', text: e.message });
                 }
             };
 
@@ -955,6 +1019,154 @@
                                             )}
                                         </>
                                     ) : !messageTeam && <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}
+                                </div>
+                            )}
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Réception des prospects LeBonCoin et SeLoger</h2>
+                                    {journal && (
+                                        <span className="panel-count">{journal.last_30_days.created} prospect{journal.last_30_days.created > 1 ? 's' : ''} en 30 jours</span>
+                                    )}
+                                </div>
+                                <p className="panel-note">
+                                    Zelyro crée vos prospects à partir des e-mails de contact des portails : redirigez-les vers votre adresse
+                                    de réception ci-dessous (ou connectez Gmail plus bas). Chaque message reçu apparaît dans le journal,
+                                    avec ce qu'on en a fait.
+                                </p>
+                                {messageJournal && (
+                                    <div className={messageJournal.type === 'error' ? 'error' : 'success'}>{messageJournal.text}</div>
+                                )}
+                                {journal ? (
+                                    <>
+                                        {!journal.services.mail_forwarding && (
+                                            <div className="error">La réception par e-mail n'est pas encore activée sur le serveur : les messages envoyés à cette adresse ne sont pas encore traités. Contactez Zelyro.</div>
+                                        )}
+                                        {journal.services.mail_forwarding && !journal.services.analysis && (
+                                            <div className="info-box">L'analyse automatique est désactivée : les prospects sont créés avec le texte du message, sans tri ni champs remplis.</div>
+                                        )}
+                                        <label htmlFor="champ-adresse-mail" style={{ display: 'block', marginTop: '8px' }}>Votre adresse de réception</label>
+                                        <div className="btn-ligne" style={{ alignItems: 'stretch', flexWrap: 'wrap' }}>
+                                            <input id="champ-adresse-mail" type="text" readOnly value={journal.address}
+                                                onFocus={(e) => e.target.select()} aria-label="Adresse de réception des e-mails de portails"
+                                                style={{ flex: '1 1 260px', minWidth: 0 }} />
+                                            <button className="btn" onClick={() => copierTexte(journal.address, setMessageJournal, 'Adresse copiée.', 'champ-adresse-mail')}>Copier</button>
+                                        </div>
+                                        <p className="field-hint">
+                                            Dans Gmail : Paramètres, onglet « Transfert et POP/IMAP », « Ajouter une adresse de transfert », puis créez un
+                                            filtre sur les expéditeurs seloger.com et leboncoin.fr avec « Transférer le message à » cette adresse.
+                                            Gmail envoie d'abord un message de confirmation : il arrive ici sous la forme d'un prospect « Contact
+                                            (e-mail transféré) », dont la note contient le lien à ouvrir. Supprimez ensuite ce prospect.
+                                        </p>
+
+                                        <div className="btn-ligne" style={{ marginTop: '18px', justifyContent: 'space-between' }}>
+                                            <h3 style={{ margin: 0, fontSize: '15px' }}>Derniers messages reçus</h3>
+                                            <button className="btn secondary petit" onClick={chargerJournal}>Actualiser</button>
+                                        </div>
+                                        {journal.messages.length === 0 ? (
+                                            <p className="field-hint">Rien reçu pour l'instant. Transférez une notification de test pour vérifier que tout fonctionne.</p>
+                                        ) : (
+                                            <div style={{ overflowX: 'auto' }}>
+                                                <table className="admin-table">
+                                                    <thead>
+                                                        <tr><th>Reçu</th><th>Origine</th><th>Objet</th><th>Résultat</th></tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {journal.messages.map((m, i) => (
+                                                            <tr key={i}>
+                                                                <td>{new Date(m.received_at).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+                                                                <td>{m.origin || '—'}</td>
+                                                                <td>{m.subject || '—'}</td>
+                                                                <td>
+                                                                    {m.created && m.lead_id ? (
+                                                                        <a href={`/leads-profile.html?id=${m.lead_id}`}>{m.lead_name || 'Prospect créé'}</a>
+                                                                    ) : m.result}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </>
+                                ) : !messageJournal && <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}
+                            </div>
+
+                            {user && user.role === 'admin' && (
+                                <div className="panel">
+                                    <div className="panel-header">
+                                        <h2 className="panel-title">Connexion par API (partenaires)</h2>
+                                    </div>
+                                    <p className="panel-note">
+                                        Une passerelle de diffusion, un CRM ou un outil comme Zapier peut envoyer directement des prospects à votre
+                                        agence. Créez une clé par partenaire et donnez-la lui : elle ne sert qu'à envoyer des prospects dans votre
+                                        compte, jamais à les lire.
+                                    </p>
+                                    {messageCles && (
+                                        <div className={messageCles.type === 'error' ? 'error' : 'success'}>{messageCles.text}</div>
+                                    )}
+                                    {nouvelleCle && (
+                                        <div className="info-box">
+                                            <p style={{ margin: '0 0 8px' }}>Clé « {nouvelleCle.name} » créée. Copiez-la maintenant : elle ne sera plus jamais affichée.</p>
+                                            <div className="btn-ligne" style={{ alignItems: 'stretch', flexWrap: 'wrap' }}>
+                                                <input id="champ-cle-api" type="text" readOnly value={nouvelleCle.key}
+                                                    onFocus={(e) => e.target.select()} aria-label="Clé d'API" style={{ flex: '1 1 260px', minWidth: 0 }} />
+                                                <button className="btn" onClick={() => copierTexte(nouvelleCle.key, setMessageCles, 'Clé copiée.', 'champ-cle-api')}>Copier</button>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {cles ? (
+                                        <>
+                                            {cles.keys.length > 0 && (
+                                                <div style={{ overflowX: 'auto' }}>
+                                                    <table className="admin-table">
+                                                        <thead>
+                                                            <tr><th>Nom</th><th>Clé</th><th>Dernier envoi</th><th></th></tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {cles.keys.map((k) => (
+                                                                <tr key={k.id}>
+                                                                    <td>{k.name}</td>
+                                                                    <td>{k.prefix}…</td>
+                                                                    <td>{k.last_used_at ? new Date(k.last_used_at).toLocaleString('fr-FR') : 'Jamais utilisée'}</td>
+                                                                    <td>
+                                                                        {confirmerCle === k.id ? (
+                                                                            <>
+                                                                                <button className="btn danger plein petit" onClick={() => supprimerCle(k.id)}>Confirmer la suppression</button>{' '}
+                                                                                <button className="btn secondary petit" onClick={() => setConfirmerCle(null)}>Annuler</button>
+                                                                            </>
+                                                                        ) : (
+                                                                            <button className="btn secondary petit" onClick={() => setConfirmerCle(k.id)}>Supprimer</button>
+                                                                        )}
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            )}
+                                            {cles.keys.length < cles.max ? (
+                                                <div className="btn-ligne" style={{ alignItems: 'flex-end', flexWrap: 'wrap', marginTop: '14px' }}>
+                                                    <div style={{ flex: '1 1 220px' }}>
+                                                        <label htmlFor="champ-nom-cle">Nom de la nouvelle clé</label>
+                                                        <input id="champ-nom-cle" type="text" maxLength={80} value={nomCle} placeholder="Ex. Ubiflow"
+                                                            onChange={(e) => setNomCle(e.target.value)} />
+                                                    </div>
+                                                    <button className="btn plein" onClick={creerCle} disabled={occupeCles || !nomCle.trim()}>
+                                                        {occupeCles ? 'Création…' : 'Créer une clé'}
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <p className="field-hint">Vous avez atteint le maximum de {cles.max} clés : supprimez-en une pour en créer une autre.</p>
+                                            )}
+                                            <p className="field-hint" style={{ marginTop: '14px' }}>
+                                                Pour le partenaire : envoyer un POST JSON à {API_URL}/api/v1/inbound/leads avec l'en-tête
+                                                « Authorization: Bearer » suivi de la clé. Champs : phone ou email (obligatoire), name, message, source,
+                                                listing_title, listing_ref, transaction, budget, location, property_type, external_id (pour ne pas créer
+                                                deux fois le même prospect). Un GET sur {API_URL}/api/v1/inbound/ping permet de tester la clé.
+                                            </p>
+                                        </>
+                                    ) : !messageCles && <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}
                                 </div>
                             )}
 
