@@ -980,7 +980,8 @@ class TestEmailInbound(BaseInbound):
     def test_lead_cree_avec_extraction(self):
         adresse, t = self.adresse("inb2@x.fr")
         with mock.patch.object(backend.requests, "post", return_value=self.reponse_anthropic()):
-            r = self.poster([self.item(adresse)])
+            r = self.poster([self.item(adresse, texte="Bonjour, je suis intéressé par le T3. "
+                                                        "Mon numéro : 06 12 34 56 78.")])
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.get_json()["processed"], 1)
         leads = self.c.get("/api/v1/leads", headers=self.h(t)).get_json()
