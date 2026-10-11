@@ -117,6 +117,66 @@ ok(c.get('/api/v1/reception/journal', headers=H(emp)).get_json()['messages'] == 
 ok(c.get('/api/v1/reception/journal', headers=H(autre)).get_json()['messages'] == [], "journal : isolé par agence")
 ok(c.get('/api/v1/reception/journal').status_code == 401, "journal : connexion obligatoire")
 
+# ------------------------------------------------------------------ nom du contact (règles)
+nm = appz._nom_dans_texte
+ok(nm("Nom : Julien Test Téléphone : 06 00 00 00 09 Email : j@example.com") == "Julien Test", "nom : ligne « Nom : » avant Téléphone")
+ok(nm("Prénom : Claire Nom : Moreau Email : c@example.com") == "Claire Moreau", "nom : prénom et nom séparés")
+ok(nm("Nom et prénom : Moreau Claire\nTél : 06 98 76 54 32") == "Moreau Claire", "nom : « Nom et prénom »")
+ok(nm("Bonjour, je souhaite visiter ce bien. Merci.") is None, "nom : rien de net = aucun nom")
+ok(nm("Contact : 06 98 76 54 32") is None, "nom : un numéro n'est pas un nom")
+
+# ------------------------------------------------------------------ journal : IA en panne, nom, confirmation Gmail
+with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "cle-de-test"}), \
+        mock.patch.object(appz, "_lancer_en_arriere_plan", side_effect=lambda f, *a: None):
+    with mock.patch.object(appz, "_appeler_extraction_ia", return_value=(None, ("Service d'extraction indisponible (code 401)", 502))):
+        poster(mail("Nouveau contact", "Nom : Julien Test\nTéléphone : 06 00 00 00 09\nEmail : julien.test@example.com\nMessage : visite samedi ?",
+                    de="tb@gmail.com"))
+        poster(mail("Message", "Bonjour, ce bien est-il disponible ? Rappelez-moi au 06 11 22 33 44", de="tb@gmail.com"))
+leads = {l['name']: l for l in c.get('/api/v1/leads', headers=H(agence)).get_json()}
+ok("Julien Test" in leads and leads["Julien Test"]['phone'] == "0600000009", "IA en panne : nom et téléphone lus par les règles")
+ok("Tb" not in leads, "nom : l'adresse de l'expéditeur n'est jamais prise pour un nom")
+ok(any(l['name'] == 'Contact SeLoger' or l['name'].startswith('Contact') for l in leads.values()), "nom : à défaut, un nom neutre")
+j = c.get('/api/v1/reception/journal', headers=H(agence)).get_json()
+notes = [m['analysis_note'] for m in j['messages'] if m['analysis'] == 'erreur']
+ok(len(notes) >= 2 and "règles simples" in notes[0], "journal : l'IA qui n'a pas répondu est signalée")
+
+with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "cle-de-test"}), \
+        mock.patch.object(appz, "_lancer_en_arriere_plan", side_effect=lambda f, *a: None):
+    with mock.patch.object(appz, "_appeler_extraction_ia", return_value=({"est_demande_contact": True, "nom": "Paul Durand", "notes": "visite"}, None)), \
+            mock.patch.object(appz, "_compter_extraction"):
+        poster(mail("Contact", "Paul Durand, 06 77 88 99 00"))
+j = c.get('/api/v1/reception/journal', headers=H(agence)).get_json()
+ok(j['messages'][0]['analysis'] is None and j['messages'][0]['analysis_note'] is None, "journal : IA qui répond = rien à signaler")
+
+avant = len(c.get('/api/v1/leads', headers=H(agence)).get_json())
+conf = ("Confirmation de transfert Gmail - Recevoir les messages de agent@gmail.com",
+        "agent@gmail.com a demandé à transférer automatiquement les messages vers votre adresse. Pour confirmer, cliquez sur le lien "
+        "(https://mail-settings.google.com/mail/vf-%5BANGjdJabc%5D-xyz) ou saisissez le code de confirmation : 123456789")
+poster(mail(conf[0], conf[1], de="forwarding-noreply@google.com"))
+ok(len(c.get('/api/v1/leads', headers=H(agence)).get_json()) == avant, "Gmail : la confirmation ne crée pas de prospect")
+j = c.get('/api/v1/reception/journal', headers=H(agence)).get_json()
+g = j['gmail_confirmation']
+ok(g and g['code'] == "123456789" and g['url'].startswith("https://mail-settings.google.com/mail/vf-"), "Gmail : code et lien affichés")
+ok(not g['url'].endswith(')'), "Gmail : la parenthèse du lien n'en fait pas partie")
+poster(mail(conf[0], "Cliquez : https://evil.example/mail/vf-abc pour confirmer. Code de confirmation : 999999999", de="pirate@evil.example"))
+j = c.get('/api/v1/reception/journal', headers=H(agence)).get_json()
+ok(j['gmail_confirmation']['code'] == "123456789", "Gmail : un faux message d'un autre expéditeur n'est pas pris pour une confirmation")
+ok(c.get('/api/v1/reception/journal', headers=H(autre)).get_json()['gmail_confirmation'] is None, "Gmail : la confirmation reste à son agence")
+
+# ------------------------------------------------------------------ test de l'analyse
+with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": ""}):
+    r = c.post('/api/v1/reception/test-analyse', headers=H(agence)).get_json()
+    ok(r['ok'] is False and "pas configurée" in r['message'], "test IA : clé absente expliquée")
+with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "cle-de-test"}):
+    with mock.patch.object(appz, "_appeler_extraction_ia", return_value=({"nom": "Julien Test", "budget": 310000}, None)):
+        r = c.post('/api/v1/reception/test-analyse', headers=H(agence)).get_json()
+        ok(r['ok'] and r['read']['name'] == "Julien Test" and r['read']['phone'] == "0600000009"
+           and r['read']['email'] == "julien.test@example.com", "test IA : ce que l'IA a lu s'affiche")
+    with mock.patch.object(appz, "_appeler_extraction_ia", return_value=(None, ("Service d'extraction indisponible (code 401)", 502))):
+        r = c.post('/api/v1/reception/test-analyse', headers=H(agence)).get_json()
+        ok(r['ok'] is False and "clé" in r['message'], "test IA : une clé refusée est expliquée")
+ok(c.post('/api/v1/reception/test-analyse').status_code == 401, "test IA : connexion obligatoire")
+
 # ------------------------------------------------------------------ clés d'API
 ok(c.post('/api/v1/api-keys', json={"name": "Ubiflow"}, headers=H(emp)).status_code == 403, "clés : refusées à un employé")
 ok(c.post('/api/v1/api-keys', json={}, headers=H(agence)).status_code == 400, "clés : nom obligatoire")

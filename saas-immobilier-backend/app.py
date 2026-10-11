@@ -433,6 +433,10 @@ _DDL_RECEPTION = (
         revoked_at TIMESTAMP
     )""",
     "CREATE INDEX IF NOT EXISTS api_keys_user_idx ON api_keys (user_id)",
+    # Comment le message a été lu (IA ou règles seules) et, pour une
+    # confirmation de transfert Gmail, le code et le lien à afficher.
+    "ALTER TABLE inbound_emails ADD COLUMN IF NOT EXISTS analysis VARCHAR(24)",
+    "ALTER TABLE inbound_emails ADD COLUMN IF NOT EXISTS detail VARCHAR(600)",
 )
 
 # Lien personnel envoyé au prospect après un contact LeBonCoin/SeLoger, pour
@@ -778,7 +782,7 @@ def _assurer_schema():
                        to_regclass('stripe_events') IS NOT NULL,
                        to_regclass('api_keys') IS NOT NULL,
                        EXISTS (SELECT 1 FROM information_schema.columns
-                               WHERE table_name = 'inbound_emails' AND column_name = 'subject')
+                               WHERE table_name = 'inbound_emails' AND column_name = 'detail')
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
@@ -7057,6 +7061,69 @@ def _emails_dans(texte, exclure=()):
     return vus
 
 
+_MOTS_ETIQUETTES = {'téléphone', 'telephone', 'tél', 'tel', 'email', 'e-mail', 'mail', 'message', 'adresse',
+                    'mobile', 'portable', 'date', 'budget', 'ville', 'nom', 'prénom', 'prenom', 'bonjour',
+                    'objet', 'référence', 'reference', 'annonce', 'contact', 'civilité', 'civilite'}
+_MOT_NOM = r"[A-ZÀ-ÝŸ][A-Za-zÀ-ÿ'’\-]{1,30}"
+_NOM_ETIQUETTE_RE = re.compile(
+    r"(?:^|[\s>|;,])(?i:nom(?:\s+et\s+pr[ée]nom|\s+complet)?|name|contact|demandeur|de la part de)\s*:?\s*"
+    r"(" + _MOT_NOM + r"(?:\s+" + _MOT_NOM + r"){0,2})")
+_PRENOM_RE = re.compile(r"(?:^|[\s>|;,])(?i:pr[ée]nom)\s*:\s*(" + _MOT_NOM + r")")
+_NOM_SEUL_RE = re.compile(r"(?:^|[\s>|;,])(?i:nom)\s*:\s*(" + _MOT_NOM + r"(?:\s+" + _MOT_NOM + r"){0,1})")
+
+
+def _mots_nom(chaine):
+    """Les premiers mots qui ressemblent à un nom, avant la prochaine étiquette (Téléphone, E-mail...)."""
+    mots = []
+    for mot in chaine.split():
+        if mot.lower().strip(':') in _MOTS_ETIQUETTES:
+            break
+        mots.append(mot)
+    return ' '.join(mots)
+
+
+def _nom_dans_texte(corps):
+    """Nom du contact repéré par des règles quand l'IA n'en a pas donné : une
+    ligne « Nom : Julien Test », « Prénom : Julien » et « Nom : Test », ou
+    « Nom et prénom : ... ». None si rien de net : mieux vaut « Contact » qu'un
+    nom faux."""
+    texte = _sans_urls(corps)[:3000]
+    prenom = _PRENOM_RE.search(texte)
+    nom = _NOM_SEUL_RE.search(texte)
+    if prenom and nom:
+        p, n = _mots_nom(prenom.group(1)), _mots_nom(nom.group(1))
+        if p and n and p.lower() != n.lower():
+            return f"{p} {n}"[:80]
+    m = _NOM_ETIQUETTE_RE.search(texte)
+    if m:
+        trouve = _mots_nom(m.group(1))
+        if trouve:
+            return trouve[:80]
+    return None
+
+
+# Confirmation de transfert envoyée par Gmail quand un agent ajoute l'adresse
+# de réception : on en tire le code et le lien pour les montrer dans Compte,
+# au lieu d'en faire un faux prospect. Le lien n'est gardé que s'il mène bien
+# à Google : un message falsifié ne peut pas y mettre autre chose.
+_LIEN_GMAIL_RE = re.compile(r"https://mail-settings\.google\.com/mail/[^\s)>\"']+")
+_CODE_GMAIL_RE = re.compile(r"(?i)(?:code de confirmation|confirmation code)\D{0,40}(\d{6,12})")
+
+
+def _confirmation_gmail(expediteur, sujet, corps):
+    """(code, lien) d'une confirmation de transfert Gmail, ou None."""
+    domaine = (expediteur or '').rsplit('@', 1)[-1].lower()
+    if not (domaine == 'google.com' or domaine.endswith('.google.com') or domaine == 'gmail.com'):
+        return None
+    if not re.search(r"(?i)transfert|forwarding", sujet or ''):
+        return None
+    lien = _LIEN_GMAIL_RE.search(corps or '')
+    code = _CODE_GMAIL_RE.search(corps or '')
+    if not (lien or code):
+        return None
+    return (code.group(1) if code else None, lien.group(0) if lien else None)
+
+
 _LIGNE_ENTETE_RE = re.compile(r"(?i)^\s*(?:de|from|exp[ée]diteur|reply-to|r[ée]pondre [àa])\s*:")
 
 
@@ -7095,14 +7162,18 @@ def _coordonnees_fiables(champs, corps, exclure=()):
     return email, telephone
 
 
-def _noter_message(cur, message_id, user_id, source, lead_id=None, sujet=None):
+def _noter_message(cur, message_id, user_id, source, lead_id=None, sujet=None, analyse=None, detail=None):
     """Retient un message traité (anti-doublon) et son issue, pour le journal
-    de réception. L'objet, tronqué, n'est gardé que 90 jours."""
+    de réception. L'objet, tronqué, n'est gardé que 90 jours. `analyse` dit
+    comment le message a été lu (voir _ANALYSES_RECEPTION) ; `detail` porte le
+    code et le lien d'une confirmation de transfert Gmail."""
     if not message_id:
         return
-    cur.execute("""INSERT INTO inbound_emails (message_id, user_id, source, lead_id, subject, received_at)
-                   VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING""",
-                (message_id, user_id, source, lead_id, _texte_court(sujet, 160), _maintenant()))
+    cur.execute("""INSERT INTO inbound_emails (message_id, user_id, source, lead_id, subject, received_at,
+                                               analysis, detail)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING""",
+                (message_id, user_id, source, lead_id, _texte_court(sujet, 160), _maintenant(),
+                 analyse, _texte_court(detail, 600)))
     if _random.random() < 0.02:
         cur.execute("UPDATE inbound_emails SET subject = NULL WHERE subject IS NOT NULL AND received_at < %s",
                     (_maintenant() - timedelta(days=90),))
@@ -7192,6 +7263,14 @@ def _traiter_email_entrant(item):
     portail = _source_portail(expediteur)
     sujet = _texte_court(item.get('Subject'), 255) or ''
     corps = _corps_texte_email(item)[:6000]
+    confirmation = _confirmation_gmail(expediteur, sujet, corps)
+    if confirmation:
+        code, lien = confirmation
+        with _base() as (conn, cur):
+            _noter_message(cur, message_id, user_id, 'gmail-confirmation', sujet=sujet,
+                           detail=_json.dumps({"code": code, "url": lien}))
+            conn.commit()
+        return
     _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, message_id)
 
 
@@ -7231,9 +7310,12 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
             return None
 
         champs = None
+        analyse = 'absente'
         if corps and len(corps) >= 10 and (os.getenv('ANTHROPIC_API_KEY') or '').strip():
             reste_extr, _ = _reste(cur, user_id, 'extractions', verrouiller=False)
-            if reste_extr != 0:
+            if reste_extr == 0:
+                analyse = 'quota'
+            else:
                 consigne = CONSIGNE_PORTAIL.format(
                     portail=_PORTAIL_LIBELLE.get(portail, "un portail d'annonces"),
                     date=datetime.utcnow().strftime('%Y-%m-%d'),
@@ -7243,9 +7325,11 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
                 valides, erreur = _appeler_extraction_ia(consigne)
                 if erreur:
                     app.logger.warning("Extraction e-mail entrant : %s", erreur[0])
+                    analyse = 'erreur'
                 else:
                     champs = valides
                     extraction_effectuee = True
+                    analyse = 'ok'
 
         if champs and champs.get('est_demande_contact') is False:
             # Deuxième filtre, après les mots-clés : l'IA confirme que ce
@@ -7253,7 +7337,7 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
             # Pas de prospect créé, mais le message est retenu pour ne pas
             # être réexaminé à chaque cycle. On ne facture pas l'extraction
             # utilisée pour ce filtrage : elle n'a pas produit de prospect.
-            _noter_message(cur, message_id, user_id, 'ia-non-contact', sujet=sujet)
+            _noter_message(cur, message_id, user_id, 'ia-non-contact', sujet=sujet, analyse=analyse)
             conn.commit()
             return None
 
@@ -7292,13 +7376,14 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
             # (_envoyer_email_completion). On ne le crée pas, mais le message
             # est retenu pour ne pas être réexaminé à chaque cycle — comme
             # pour une alerte.
-            _noter_message(cur, message_id, user_id, 'portail-vide', sujet=sujet)
+            _noter_message(cur, message_id, user_id, 'portail-vide', sujet=sujet, analyse=analyse)
             conn.commit()
             return None
 
-        nom = (champs or {}).get('nom')
-        if not nom and expediteur and EMAIL_RE.match(expediteur):
-            nom = expediteur.split('@', 1)[0].replace('.', ' ').replace('_', ' ').title()
+        # Le nom : celui de l'IA, sinon celui qu'une ligne « Nom : ... » donne
+        # clairement. Jamais l'adresse de l'expéditeur : c'est le portail, ou
+        # l'agent qui a transféré le message, pas le contact.
+        nom = (champs or {}).get('nom') or _nom_dans_texte(corps)
         nom = nom or _PORTAIL_NOM_DEFAUT.get(portail, 'Contact')
 
         notes = (champs or {}).get('notes')
@@ -7337,7 +7422,7 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
             cur.execute("""INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
                            VALUES (%s, %s, 'note', %s, %s)""",
                         (lead_id, user_id, notes[:3000], _maintenant()))
-        _noter_message(cur, message_id, user_id, portail, lead_id=lead_id, sujet=sujet)
+        _noter_message(cur, message_id, user_id, portail, lead_id=lead_id, sujet=sujet, analyse=analyse)
         conn.commit()
 
     # Après la fermeture de la transaction ci-dessus : _compter_extraction
@@ -7779,6 +7864,12 @@ _ISSUES_RECEPTION = {
     'portail-vide': "Aucune coordonnée ni contenu exploitable : ignoré",
     'gmail-ignore': "Message Gmail sans lien avec LeBonCoin ou SeLoger : ignoré",
     'quota-atteint': "Quota de prospects de votre forfait atteint : rien créé",
+    'gmail-confirmation': "Confirmation de transfert Gmail (voir le code ci-dessus)",
+}
+_ANALYSES_RECEPTION = {
+    'erreur': "L'analyse automatique n'a pas répondu : coordonnées lues par des règles simples seulement",
+    'absente': "Analyse automatique non configurée : coordonnées lues par des règles simples seulement",
+    'quota': "Quota d'analyses de votre forfait atteint : coordonnées lues par des règles simples seulement",
 }
 _ORIGINES_RECEPTION = {'leboncoin': 'LeBonCoin', 'seloger': 'SeLoger', 'portail': 'E-mail transféré',
                        'api': 'API partenaire'}
@@ -7794,7 +7885,8 @@ def journal_reception():
         with _base() as (conn, cur):
             jeton = _jeton_capture_mail(cur, request.agency_id)
             conn.commit()
-            cur.execute("""SELECT i.source, i.subject, i.received_at, i.lead_id, l.name AS lead_name
+            cur.execute("""SELECT i.source, i.subject, i.received_at, i.lead_id, i.analysis, i.detail,
+                                  l.name AS lead_name
                            FROM inbound_emails i LEFT JOIN leads l ON l.id = i.lead_id
                            WHERE i.user_id = %s ORDER BY i.received_at DESC, i.id DESC LIMIT 30""",
                         (request.agency_id,))
@@ -7804,7 +7896,21 @@ def journal_reception():
                         (request.agency_id, _maintenant() - timedelta(days=30)))
             totaux = cur.fetchone()
         messages = []
+        confirmation = None
+        limite_confirmation = _maintenant() - timedelta(days=3)
         for r in lignes:
+            if (confirmation is None and r['source'] == 'gmail-confirmation' and r['detail']
+                    and r['received_at'] and r['received_at'] > limite_confirmation):
+                try:
+                    detail = _json.loads(r['detail'])
+                    lien = detail.get('url')
+                    confirmation = {
+                        "code": detail.get('code'),
+                        "url": lien if isinstance(lien, str) and lien.startswith('https://mail-settings.google.com/') else None,
+                        "received_at": _iso(r['received_at']),
+                    }
+                except ValueError:
+                    pass
             cree = r['lead_id'] is not None
             if cree:
                 resultat = "Prospect créé"
@@ -7818,17 +7924,61 @@ def journal_reception():
                 "lead_id": r['lead_id'],
                 "lead_name": r['lead_name'],
                 "result": resultat,
+                "analysis": r['analysis'] if r['analysis'] != 'ok' else None,
+                "analysis_note": _ANALYSES_RECEPTION.get(r['analysis']),
             })
         return jsonify({
             "address": _adresse_capture_mail(jeton),
             "last_30_days": {"received": totaux['recus'], "created": totaux['crees']},
             "messages": messages,
+            "gmail_confirmation": confirmation,
             "services": {
                 "mail_forwarding": bool((os.getenv('EMAIL_INBOUND_SECRET') or '').strip()),
                 "analysis": bool((os.getenv('ANTHROPIC_API_KEY') or '').strip()),
                 "gmail": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET),
             },
         }), 200
+    except Exception:
+        return erreur_interne()
+
+
+_MAIL_TEST_ANALYSE = (
+    "Bonjour, une personne souhaite visiter votre annonce « T3 lumineux, Senlis » (réf. A123).\n"
+    "Nom : Julien Test\nTéléphone : 06 00 00 00 09\nEmail : julien.test@example.com\n"
+    "Message : Bonjour, je souhaite visiter ce bien samedi. Mon budget est de 310 000 euros."
+)
+_CONSEILS_ANALYSE = {
+    '401': "La clé de l'analyse automatique est refusée : elle est fausse, expirée ou mal copiée.",
+    '403': "L'accès est refusé pour cette clé.",
+    '400': "La demande est refusée, souvent faute de crédit sur le compte de l'analyse automatique.",
+    '404': "Le modèle choisi est introuvable : vérifiez la variable EXTRACTION_MODEL.",
+    '429': "Trop de demandes en peu de temps : réessayez dans une minute.",
+}
+
+
+@app.route('/api/v1/reception/test-analyse', methods=['POST'])
+@limiter.limit("10 per hour", key_func=_cle_utilisateur)
+@token_required
+def tester_analyse_reception():
+    """Fait lire un faux mail de portail par l'analyse automatique et dit si
+    elle a répondu, avec ce qu'elle a lu. Ne compte pas dans le forfait, ne
+    crée aucun prospect."""
+    try:
+        if not (os.getenv('ANTHROPIC_API_KEY') or '').strip():
+            return jsonify({"ok": False, "message": "L'analyse automatique n'est pas configurée sur le serveur."}), 200
+        consigne = CONSIGNE_PORTAIL.format(
+            portail="un portail d'annonces", date=datetime.utcnow().strftime('%Y-%m-%d'),
+            types=', '.join(TYPES_BIEN), activites=', '.join(ACTIVITES), echeances=', '.join(ECHEANCES),
+            financements=', '.join(FINANCEMENTS), message=_MAIL_TEST_ANALYSE)
+        champs, erreur = _appeler_extraction_ia(consigne)
+        if erreur:
+            code = re.search(r"code (\d{3})", erreur[0])
+            conseil = _CONSEILS_ANALYSE.get(code.group(1)) if code else None
+            return jsonify({"ok": False, "message": conseil or erreur[0], "detail": erreur[0]}), 200
+        email, telephone = _coordonnees_fiables(champs, _MAIL_TEST_ANALYSE)
+        return jsonify({"ok": True, "model": MODELE_EXTRACTION, "read": {
+            "name": champs.get('nom'), "phone": telephone, "email": email, "budget": champs.get('budget'),
+        }}), 200
     except Exception:
         return erreur_interne()
 
