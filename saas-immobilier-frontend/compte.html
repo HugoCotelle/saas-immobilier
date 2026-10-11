@@ -63,6 +63,9 @@
             const [sieges, setSieges] = useState(0);
             const [journal, setJournal] = useState(null);           // journal de réception : null tant que non chargé
             const [messageJournal, setMessageJournal] = useState(null);
+            const [ongletRedir, setOngletRedir] = useState('gmail');   // guide de redirection : gmail, outlook, informatique, portail
+            const [testIA, setTestIA] = useState(null);                // résultat du test de lecture automatique
+            const [occupeTestIA, setOccupeTestIA] = useState(false);
             const [cles, setCles] = useState(null);                 // clés d'API (administrateur seulement)
             const [messageCles, setMessageCles] = useState(null);
             const [nomCle, setNomCle] = useState('');
@@ -318,6 +321,54 @@
                     setMessageJournal({ type: 'error', text: e.message });
                 }
             };
+
+            // Le journal se rafraîchit seul pendant que la page est ouverte : le code de
+            // confirmation Gmail et le premier message de test y apparaissent sans clic.
+            useEffect(() => {
+                const minuteur = setInterval(() => {
+                    if (!document.hidden) appel('/api/v1/reception/journal').then(setJournal).catch(() => {});
+                }, 20000);
+                return () => clearInterval(minuteur);
+            }, []);
+
+            const lancerTestIA = async () => {
+                setOccupeTestIA(true);
+                setTestIA(null);
+                try {
+                    setTestIA(await appel('/api/v1/reception/test-analyse', { method: 'POST' }));
+                } catch (e) {
+                    setTestIA({ ok: false, message: e.message });
+                }
+                setOccupeTestIA(false);
+            };
+
+            // Fichier que Gmail sait importer (Paramètres > Filtres et adresses bloquées > Importer des filtres) :
+            // il crée d'un coup le filtre qui transfère les messages de SeLoger et LeBonCoin.
+            const telechargerFiltreGmail = () => {
+                const xml = "<?xml version='1.0' encoding='UTF-8'?>\n"
+                    + "<feed xmlns='http://www.w3.org/2005/Atom' xmlns:apps='http://schemas.google.com/apps/2006'>\n"
+                    + "\t<title>Mail Filters</title>\n\t<entry>\n\t\t<category term='filter'></category>\n"
+                    + "\t\t<title>Zelyro : prospects LeBonCoin et SeLoger</title>\n"
+                    + "\t\t<apps:property name='from' value='seloger.com OR leboncoin.fr'/>\n"
+                    + "\t\t<apps:property name='forwardTo' value='" + journal.address + "'/>\n"
+                    + "\t</entry>\n</feed>\n";
+                const lienFichier = document.createElement('a');
+                lienFichier.href = URL.createObjectURL(new Blob([xml], { type: 'application/xml' }));
+                lienFichier.download = 'filtre-zelyro.xml';
+                document.body.appendChild(lienFichier);
+                lienFichier.click();
+                lienFichier.remove();
+                setTimeout(() => URL.revokeObjectURL(lienFichier.href), 1000);
+            };
+
+            const messageInformatique = (adresse) =>
+                "Bonjour,\n\n"
+                + "Pourriez-vous mettre en place sur la messagerie de l'agence une règle de transfert automatique : "
+                + "tous les messages dont l'expéditeur contient « seloger.com » ou « leboncoin.fr » doivent être "
+                + "transférés en copie (sans les retirer de la boîte de réception) à l'adresse suivante :\n\n"
+                + adresse + "\n\n"
+                + "Il s'agit des notifications de demandes de contact reçues via nos annonces ; elles alimentent notre outil Zelyro.\n\n"
+                + "Merci d'avance.";
 
             const copierTexte = async (texte, definirMessage, confirmation, idChamp) => {
                 try {
@@ -1052,19 +1103,129 @@
                                                 style={{ flex: '1 1 260px', minWidth: 0 }} />
                                             <button className="btn" onClick={() => copierTexte(journal.address, setMessageJournal, 'Adresse copiée.', 'champ-adresse-mail')}>Copier</button>
                                         </div>
-                                        <p className="field-hint">
-                                            Dans Gmail : Paramètres, onglet « Transfert et POP/IMAP », « Ajouter une adresse de transfert », puis créez un
-                                            filtre sur les expéditeurs seloger.com et leboncoin.fr avec « Transférer le message à » cette adresse.
-                                            Gmail envoie d'abord un message de confirmation : il arrive ici sous la forme d'un prospect « Contact
-                                            (e-mail transféré) », dont la note contient le lien à ouvrir. Supprimez ensuite ce prospect.
+                                        <h3 style={{ margin: '22px 0 4px', fontSize: '15px' }}>Rediriger vos messages vers cette adresse</h3>
+                                        <p className="field-hint" style={{ marginTop: 0 }}>Choisissez votre messagerie. Il suffit de le faire une fois pour l'agence.</p>
+                                        <div className="btn-ligne" style={{ margin: '10px 0 14px' }}>
+                                            {[['gmail', 'Gmail'], ['outlook', 'Outlook'], ['informatique', 'Autre messagerie ou informaticien'], ['portail', 'Directement dans le portail']].map(([cle, libelle]) => (
+                                                <button key={cle} type="button" className={ongletRedir === cle ? 'btn petit' : 'btn secondary petit'}
+                                                    onClick={() => setOngletRedir(cle)}>{libelle}</button>
+                                            ))}
+                                        </div>
+
+                                        {ongletRedir === 'gmail' && (
+                                            <div>
+                                                <p className="panel-note" style={{ marginBottom: '10px' }}>
+                                                    Étape 1. Dans Gmail, cliquez sur la roue en haut à droite, puis « Voir tous les paramètres », onglet
+                                                    « Transfert et POP/IMAP », « Ajouter une adresse de transfert ». Collez l'adresse ci-dessus, puis Suivant, Continuer, OK.
+                                                </p>
+                                                <p className="panel-note" style={{ marginBottom: '10px' }}>
+                                                    Étape 2. Google envoie alors un message de confirmation à cette adresse. Il s'affiche ici dans quelques secondes :
+                                                </p>
+                                                {journal.gmail_confirmation ? (
+                                                    <div className="info-box">
+                                                        <p style={{ margin: '0 0 8px' }}>
+                                                            Google a envoyé le code de confirmation
+                                                            {journal.gmail_confirmation.code ? <> : <strong id="code-gmail">{journal.gmail_confirmation.code}</strong></> : '.'}
+                                                        </p>
+                                                        <div className="btn-ligne">
+                                                            {journal.gmail_confirmation.code && (
+                                                                <button type="button" className="btn secondary petit"
+                                                                    onClick={() => copierTexte(journal.gmail_confirmation.code, setMessageJournal, 'Code copié : collez-le dans Gmail.', 'code-gmail')}>Copier le code</button>
+                                                            )}
+                                                            {journal.gmail_confirmation.url && (
+                                                                <a className="btn secondary petit" href={journal.gmail_confirmation.url} target="_blank" rel="noopener noreferrer">Ouvrir le lien de confirmation</a>
+                                                            )}
+                                                        </div>
+                                                        <p className="field-hint">Dans Gmail, saisissez le code puis cliquez sur « Vérifier » (ou ouvrez le lien).</p>
+                                                    </div>
+                                                ) : (
+                                                    <p className="field-hint" style={{ marginTop: 0 }}>En attente du message de Google (la page se met à jour toute seule).</p>
+                                                )}
+                                                <p className="panel-note" style={{ margin: '14px 0 10px' }}>
+                                                    Étape 3. Téléchargez le filtre ci-dessous. Dans Gmail : Paramètres, onglet « Filtres et adresses bloquées »,
+                                                    « Importer des filtres », « Choisir un fichier », puis « Ouvrir le fichier » et « Créer des filtres ».
+                                                </p>
+                                                <div className="btn-ligne">
+                                                    <button type="button" className="btn secondary petit" onClick={telechargerFiltreGmail}>Télécharger le filtre Gmail</button>
+                                                </div>
+                                                <p className="field-hint">
+                                                    Si Gmail refuse le fichier, créez le filtre à la main : « Créer un filtre », expéditeur « seloger.com OR leboncoin.fr »,
+                                                    puis « Transférer à » l'adresse ci-dessus (possible une fois l'étape 2 terminée).
+                                                </p>
+                                            </div>
+                                        )}
+
+                                        {ongletRedir === 'outlook' && (
+                                            <div>
+                                                <p className="panel-note" style={{ marginBottom: '10px' }}>
+                                                    Dans Outlook sur le web : roue en haut à droite, « Courrier », « Règles », « Ajouter une nouvelle règle ».
+                                                    Condition : l'adresse de l'expéditeur comprend « seloger.com » (puis ajoutez « leboncoin.fr »).
+                                                    Action : « Transférer à » l'adresse ci-dessus. Enregistrez. Les intitulés varient un peu selon la version.
+                                                </p>
+                                                <p className="field-hint">
+                                                    Si le transfert vers l'extérieur est grisé ou refusé, il est bloqué par l'administrateur de votre messagerie :
+                                                    envoyez-lui le message de l'onglet « Autre messagerie ou informaticien ».
+                                                </p>
+                                            </div>
+                                        )}
+
+                                        {ongletRedir === 'informatique' && (
+                                            <div>
+                                                <p className="panel-note" style={{ marginBottom: '10px' }}>
+                                                    Quelle que soit la messagerie (OVH, Orange, Google Workspace, Microsoft 365...), la personne qui la gère
+                                                    sait créer cette règle en quelques minutes. Copiez-lui ce message :
+                                                </p>
+                                                <textarea id="champ-message-informatique" readOnly rows={9} value={messageInformatique(journal.address)}
+                                                    onFocus={(e) => e.target.select()} aria-label="Message à envoyer au responsable de la messagerie" />
+                                                <div className="btn-ligne" style={{ marginTop: '10px' }}>
+                                                    <button type="button" className="btn secondary petit"
+                                                        onClick={() => copierTexte(messageInformatique(journal.address), setMessageJournal, 'Message copié.', 'champ-message-informatique')}>Copier le message</button>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {ongletRedir === 'portail' && (
+                                            <div>
+                                                <p className="panel-note" style={{ marginBottom: '10px' }}>
+                                                    Le plus simple à long terme : que les portails envoient directement leurs notifications à cette adresse.
+                                                    Sur LeBonCoin Pro, les messages arrivent à l'adresse du compte, et cette adresse ne se change pas soi-même :
+                                                    il faut en faire la demande au service client de LeBonCoin, avec un extrait Kbis récent.
+                                                    Pour SeLoger, demandez à votre conseiller s'il peut ajouter une adresse de réception.
+                                                </p>
+                                                <p className="field-hint">En attendant, une règle de transfert (onglets précédents) fait le même travail.</p>
+                                            </div>
+                                        )}
+
+                                        <h3 style={{ margin: '24px 0 4px', fontSize: '15px' }}>Vérifier que tout fonctionne</h3>
+                                        <p className="field-hint" style={{ marginTop: 0 }}>
+                                            Envoyez un e-mail de test à l'adresse de réception avec les lignes « Nom : », « Téléphone : » et « Email : » :
+                                            le prospect apparaît dans le journal ci-dessous. Vous pouvez aussi vérifier la lecture automatique des messages.
                                         </p>
+                                        <div className="btn-ligne" style={{ marginTop: '8px' }}>
+                                            <button type="button" className="btn secondary petit" onClick={lancerTestIA} disabled={occupeTestIA}>
+                                                {occupeTestIA ? 'Test en cours...' : 'Tester la lecture automatique'}
+                                            </button>
+                                        </div>
+                                        {testIA && testIA.ok && (
+                                            <div className="success" style={{ marginTop: '10px' }}>
+                                                La lecture automatique fonctionne : elle a lu {testIA.read.name || 'aucun nom'}, {testIA.read.phone || 'aucun téléphone'}, {testIA.read.email || 'aucun e-mail'}.
+                                            </div>
+                                        )}
+                                        {testIA && !testIA.ok && (
+                                            <div className="error" style={{ marginTop: '10px' }}>{testIA.message}</div>
+                                        )}
+                                        {journal.messages.slice(0, 10).some((m) => m.analysis === 'erreur') && (
+                                            <div className="info-box" style={{ marginTop: '10px' }}>
+                                                La lecture automatique n'a pas répondu pour certains messages récents : le prospect est créé, mais seuls le téléphone, l'e-mail et un nom net sont repris. Cliquez sur « Tester la lecture automatique » pour en voir la cause.
+                                            </div>
+                                        )}
 
                                         <div className="btn-ligne" style={{ marginTop: '18px', justifyContent: 'space-between' }}>
                                             <h3 style={{ margin: 0, fontSize: '15px' }}>Derniers messages reçus</h3>
                                             <button className="btn secondary petit" onClick={chargerJournal}>Actualiser</button>
                                         </div>
                                         {journal.messages.length === 0 ? (
-                                            <p className="field-hint">Rien reçu pour l'instant. Transférez une notification de test pour vérifier que tout fonctionne.</p>
+                                            <p className="field-hint">Rien reçu pour l'instant. Envoyez un e-mail de test à l'adresse de réception pour vérifier que tout fonctionne.</p>
                                         ) : (
                                             <div style={{ overflowX: 'auto' }}>
                                                 <table className="admin-table">
@@ -1081,6 +1242,9 @@
                                                                     {m.created && m.lead_id ? (
                                                                         <a href={`/leads-profile.html?id=${m.lead_id}`}>{m.lead_name || 'Prospect créé'}</a>
                                                                     ) : m.result}
+                                                                    {m.analysis_note && (
+                                                                        <div className="field-hint" style={{ marginTop: '2px' }}>{m.analysis_note}</div>
+                                                                    )}
                                                                 </td>
                                                             </tr>
                                                         ))}
