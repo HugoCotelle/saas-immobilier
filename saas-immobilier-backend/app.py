@@ -1333,7 +1333,13 @@ def _envoyer_email(destinataire, sujet, texte, html, nom_expediteur=None, repond
 # Logo des e-mails : une image publique hébergée avec le site (fichier
 # logo-email.png à la racine du frontend). Les e-mails ne peuvent pas utiliser
 # le logo CSS du site ; LOGO_EMAIL_URL permet de changer l'adresse si besoin.
-LOGO_EMAIL_URL = (os.getenv("LOGO_EMAIL_URL") or "https://www.zelyro.fr/logo-email.png").strip()
+# Par défaut, le logo est servi par ce serveur (route /logo-email.png), à l'adresse que
+# Render fournit lui-même : il s'affiche même si le domaine du site n'est pas encore
+# raccordé. LOGO_EMAIL_URL, si définie, garde la priorité.
+_BASE_PUBLIQUE_RENDER = (os.getenv("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
+LOGO_EMAIL_URL = (os.getenv("LOGO_EMAIL_URL")
+                  or (f"{_BASE_PUBLIQUE_RENDER}/logo-email.png" if _BASE_PUBLIQUE_RENDER
+                      else "https://www.zelyro.fr/logo-email.png")).strip()
 
 
 def _entete_logo_email():
@@ -7239,6 +7245,29 @@ def _adresse_capture_dans(destinataires):
     return None
 
 
+# Mode démonstration : un message dont l'objet commence par « [TEST SeLoger] » ou
+# « [TEST LeBonCoin] » est traité comme une vraie notification de ce portail, y compris
+# l'e-mail « Précisez votre recherche » envoyé au prospect. Il sert à montrer le parcours
+# complet sans attendre une vraie demande. Plafonné par agence pour qu'il ne serve pas
+# à écrire à n'importe qui.
+_TEST_PORTAIL_RE = re.compile(r"(?i)^\s*\[\s*test[\s_-]*(se\s*loger|le\s*bon\s*coin|leboncoin)\s*\]")
+_TESTS_PAR_JOUR = 10
+
+
+def _portail_de_test(cur, user_id, sujet):
+    """'seloger' ou 'leboncoin' si le sujet demande le mode démonstration et que
+    le plafond du jour n'est pas atteint, sinon None."""
+    m = _TEST_PORTAIL_RE.match(sujet or '')
+    if not m:
+        return None
+    cur.execute("""SELECT COUNT(*) AS n FROM inbound_emails
+                   WHERE user_id = %s AND subject ILIKE %s AND received_at > %s""",
+                (user_id, '[%test%', _maintenant() - timedelta(days=1)))
+    if cur.fetchone()['n'] >= _TESTS_PAR_JOUR:
+        return None
+    return 'leboncoin' if 'bon' in m.group(1).lower() else 'seloger'
+
+
 def _traiter_email_entrant(item):
     """Transforme un e-mail entrant (notification LeBonCoin/SeLoger transférée
     par un agent) en prospect. Ne lève jamais : une erreur reste dans les
@@ -7262,6 +7291,13 @@ def _traiter_email_entrant(item):
     expediteur = ((item.get('From') or {}).get('Address') or '').strip()
     portail = _source_portail(expediteur)
     sujet = _texte_court(item.get('Subject'), 255) or ''
+    mode_test = False
+    if portail == 'portail':
+        with _base() as (conn, cur):
+            portail_test = _portail_de_test(cur, user_id, sujet)
+        if portail_test:
+            portail = portail_test
+            mode_test = True
     corps = _corps_texte_email(item)[:6000]
     confirmation = _confirmation_gmail(expediteur, sujet, corps)
     if confirmation:
@@ -7271,10 +7307,10 @@ def _traiter_email_entrant(item):
                            detail=_json.dumps({"code": code, "url": lien}))
             conn.commit()
         return
-    _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, message_id)
+    _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, message_id, mode_test=mode_test)
 
 
-def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, message_id):
+def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, message_id, mode_test=False):
     """Cœur commun aux deux voies de réception d'un e-mail LeBonCoin/SeLoger :
     le transfert manuel (_traiter_email_entrant, via le webhook Brevo) et la
     boîte Gmail connectée (_synchroniser_gmail). Les deux ont déjà résolu
@@ -7331,7 +7367,7 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
                     extraction_effectuee = True
                     analyse = 'ok'
 
-        if champs and champs.get('est_demande_contact') is False:
+        if champs and champs.get('est_demande_contact') is False and not mode_test:
             # Deuxième filtre, après les mots-clés : l'IA confirme que ce
             # n'est pas une vraie demande de contact (alerte, newsletter...).
             # Pas de prospect créé, mais le message est retenu pour ne pas
@@ -7476,7 +7512,17 @@ def _envoyer_email_completion(user_id, lead_id, nom, email_contact, portail):
              "Ce lien est personnel, à usage unique pour votre demande :"],
             bouton=("Préciser ma recherche", lien),
         )
-        _envoyer_email(email_contact, f"Précisez votre recherche — {agence}", texte, html, nom_expediteur=agence)
+        envoye = _envoyer_email(email_contact, f"Précisez votre recherche — {agence}", texte, html,
+                                nom_expediteur=agence)
+        if envoye:
+            # Visible dans l'historique de la fiche : l'agent sait que le prospect a reçu le lien.
+            _assurer_schema()
+            with _base() as (conn, cur):
+                cur.execute("""INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
+                               VALUES (%s, %s, 'note', %s, %s)""",
+                            (lead_id, user_id,
+                             f"E-mail « Précisez votre recherche » envoyé à {email_contact}.", _maintenant()))
+                conn.commit()
     except Exception:
         app.logger.exception("E-mail de complétion : échec d'envoi")
 
@@ -7823,6 +7869,99 @@ def gmail_sync_all():
             app.logger.exception("Synchronisation Gmail : échec pour l'agence %s", user_id)
             resultats[str(user_id)] = "erreur interne"
     return jsonify({"agences": len(agences), "detail": resultats}), 200
+
+
+# Logo des e-mails (image publique, sans authentification).
+_LOGO_EMAIL_PNG = base64.b64decode(
+    "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"
+)
+
+
+@app.route('/logo-email.png', methods=['GET'])
+@limiter.exempt
+def logo_email():
+    reponse = Response(_LOGO_EMAIL_PNG, mimetype='image/png')
+    reponse.headers['Cache-Control'] = 'public, max-age=86400'
+    return reponse
 
 
 @app.route('/webhooks/email-inbound', methods=['POST'])

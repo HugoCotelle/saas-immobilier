@@ -256,6 +256,59 @@ ok(c.get('/api/v1/inbound/ping', headers={"Authorization": f"Bearer {cle2}"}).st
 cur.execute("UPDATE users SET is_active = FALSE WHERE id=%s", (autre,)); conn.commit()
 ok(c.get('/api/v1/inbound/ping', headers={"Authorization": f"Bearer {cle2}"}).status_code == 401, "clés : compte suspendu = clé refusée")
 
+# ------------------------------------------------------------------ mode démonstration et logo des e-mails
+corps_test = "Nom : Julien Test\nTéléphone : 06 00 00 00 09\nEmail : julien.test@example.com\nMessage : Je souhaite visiter ce bien."
+with mock.patch.object(appz, "_lancer_en_arriere_plan", side_effect=lambda f, *a: None) as bg:
+    poster(mail("[TEST SeLoger] Nouveau contact pour votre annonce T3 lumineux", corps_test, de="tom@gmail.com"))
+    appelees = [(c_.args[0].__name__, c_.args[1:]) for c_ in bg.call_args_list]
+    envois = [a for n, a in appelees if n == "_envoyer_email_completion"]
+    ok(len(envois) == 1 and envois[0][3] == "julien.test@example.com" and envois[0][1] > 0 and envois[0][4] == "seloger",
+       "démo : un objet [TEST SeLoger] déclenche l'e-mail de précision, comme une vraie notification")
+cur.execute("SELECT source, name FROM leads WHERE user_id=%s AND email=%s ORDER BY id DESC", (agence, "julien.test@example.com")); conn.commit()
+ligne = cur.fetchone()
+ok(ligne and ligne[0] == "seloger" and ligne[1] == "Julien Test", "démo : fiche créée avec la source SeLoger et le bon nom")
+
+# même sans IA favorable : le mode démonstration crée la fiche
+with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "cle-de-test"}), \
+        mock.patch.object(appz, "_lancer_en_arriere_plan", side_effect=lambda f, *a: None), \
+        mock.patch.object(appz, "_compter_extraction"), \
+        mock.patch.object(appz, "_appeler_extraction_ia", return_value=({"est_demande_contact": False}, None)):
+    poster(mail("[test leboncoin] Nouveau message", corps_test.replace("julien.test", "paul.test"), de="tom@gmail.com"))
+cur.execute("SELECT source FROM leads WHERE user_id=%s AND email=%s", (agence, "paul.test@example.com")); conn.commit()
+ligne = cur.fetchone()
+ok(ligne and ligne[0] == "leboncoin", "démo : l'avis négatif de l'IA ne bloque pas un message de test")
+
+# sans l'étiquette, un e-mail transféré ordinaire n'envoie rien au prospect
+with mock.patch.object(appz, "_lancer_en_arriere_plan", side_effect=lambda f, *a: None) as bg:
+    poster(mail("Nouveau contact T3", corps_test.replace("julien.test", "anna.test"), de="tom@gmail.com"))
+    ok(not [c_ for c_ in bg.call_args_list if c_.args[0].__name__ == "_envoyer_email_completion"],
+       "démo : sans étiquette, aucun e-mail n'est envoyé au prospect")
+
+# plafond quotidien
+with mock.patch.object(appz, "_lancer_en_arriere_plan", side_effect=lambda f, *a: None) as bg:
+    for i in range(appz._TESTS_PAR_JOUR + 2):
+        poster(mail("[TEST SeLoger] essai", corps_test.replace("julien.test", f"lim{i}.test"), de="tom@gmail.com"))
+    envois = [c_ for c_ in bg.call_args_list if c_.args[0].__name__ == "_envoyer_email_completion"]
+    ok(0 < len(envois) <= appz._TESTS_PAR_JOUR, "démo : plafond de messages de test par jour")
+
+# la trace dans la fiche une fois l'e-mail parti
+cur.execute("SELECT id FROM leads WHERE user_id=%s AND email=%s ORDER BY id DESC", (agence, "julien.test@example.com")); conn.commit()
+lead_test = cur.fetchone()[0]
+with mock.patch.object(appz, "_envoi_configure", return_value=True), \
+        mock.patch.object(appz, "_envoyer_email", return_value=True) as envoi:
+    appz._envoyer_email_completion(agence, lead_test, "Julien Test", "julien.test@example.com", "seloger")
+    ok(envoi.call_count == 1 and "completer.html?c=" in envoi.call_args.args[2], "e-mail de précision : lien personnel dans le texte")
+cur.execute("SELECT body FROM lead_notes WHERE lead_id=%s AND body LIKE %s", (lead_test, "E-mail « Précisez%")); conn.commit()
+ok(cur.fetchone() is not None, "e-mail de précision : trace dans l'historique de la fiche")
+with mock.patch.object(appz, "_envoi_configure", return_value=True), \
+        mock.patch.object(appz, "_envoyer_email", return_value=False):
+    appz._envoyer_email_completion(agence, lead_test, "Julien Test", "julien.test@example.com", "seloger")
+cur.execute("SELECT COUNT(*) FROM lead_notes WHERE lead_id=%s AND body LIKE %s", (lead_test, "E-mail « Précisez%")); conn.commit()
+ok(cur.fetchone()[0] == 1, "e-mail de précision : pas de trace si l'envoi échoue")
+
+r = c.get('/logo-email.png')
+ok(r.status_code == 200 and r.mimetype == 'image/png' and r.data[:4] == b'\x89PNG', "logo des e-mails servi par le backend")
+
 cur.execute("DELETE FROM leads WHERE user_id IN (SELECT id FROM users WHERE email LIKE '%@t.test')")
 cur.execute("DELETE FROM users WHERE email LIKE '%@t.test'"); conn.commit()
 print("\nÉCHEC" if ok.failed else "\nTOUT PASSE")
