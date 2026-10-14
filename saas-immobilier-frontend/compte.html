@@ -155,9 +155,9 @@
             }, []);
 
             const PRIX_HT = {
-                essentiel: { mensuel: 79, engage: 75, annuel: 853 },
-                agence: { mensuel: 199, engage: 189, annuel: 2149 },
-                reseau: { mensuel: 449, engage: 427, annuel: 4849 },
+                essentiel: { mensuel: 29, engage: 27.55, annuel: 313.2 },
+                agence: { mensuel: 49, engage: 46.55, annuel: 529.2 },
+                reseau: { mensuel: 79, engage: 75.05, annuel: 853.2 },
             };
             const NOMS_PLAN = { essentiel: 'Essentiel', agence: 'Agence', reseau: 'Réseau' };
             const NOMS_FORMULE = {
@@ -165,7 +165,7 @@
                 engage: 'Mensuel, engagement 12 mois (-5 %)',
                 annuel: 'Annuel prépayé (-10 %)',
             };
-            const eur = (n) => n.toLocaleString('fr-FR') + ' €';
+            const eur = (n) => n.toLocaleString('fr-FR', { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 }) + ' €';
             const prixLigne = (plan, formule) => formule === 'annuel'
                 ? `${eur(PRIX_HT[plan][formule])} HT / an` : `${eur(PRIX_HT[plan][formule])} HT / mois`;
             const dateFr = (iso) => iso ? new Date(iso).toLocaleDateString('fr-FR') : '—';
