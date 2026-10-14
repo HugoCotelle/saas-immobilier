@@ -521,6 +521,7 @@ _DDL_SURFACE = (
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS garants INTEGER",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS situation_pro VARCHAR(20)",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS meuble_souhaite BOOLEAN",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS proprietaire BOOLEAN",
     "ALTER TABLE properties ADD COLUMN IF NOT EXISTS transaction VARCHAR(10) NOT NULL DEFAULT 'vente'",
     "ALTER TABLE properties ADD COLUMN IF NOT EXISTS meuble BOOLEAN",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS surface_min INTEGER",
@@ -2267,7 +2268,7 @@ def get_leads():
         cur.execute("""
             SELECT id, name, email, phone, budget, location, property_type, surface_min, activite, status,
                    financing_status, purchase_urgency, source, created_at,
-                   transaction, revenus, garants, situation_pro, meuble_souhaite, assigned_to,
+                   transaction, revenus, garants, situation_pro, meuble_souhaite, proprietaire, assigned_to,
                    (SELECT MIN(r.due_date) FROM lead_reminders r
                      WHERE r.lead_id = leads.id AND r.done_at IS NULL) AS next_reminder
             FROM leads WHERE user_id = %s ORDER BY id
@@ -2285,7 +2286,7 @@ def get_leads():
         return erreur_interne()
 CSV_ENTETES = ["Nom", "E-mail", "Téléphone", "Projet", "Budget ou loyer max (€)", "Secteur", "Type de bien",
                "Surface min (m²)", "Financement", "Échéance", "Revenus mensuels (€)", "Garants",
-               "Situation professionnelle", "Meublé souhaité", "Statut", "Origine", "Responsable", "Qualité", "Score /100",
+               "Situation professionnelle", "Meublé souhaité", "Déjà propriétaire", "Statut", "Origine", "Responsable", "Qualité", "Score /100",
                "Créé le", "Premier contact le", "Prochaine relance", "Consentement recueilli le"]
 _FINANCEMENT_LIBELLES = {'approved': 'Approuvé', 'in_progress': 'En cours', 'pending': 'En attente',
                          'rejected': 'Refusé', 'unknown': ''}
@@ -2344,7 +2345,7 @@ def export_leads():
                 l.get('budget'), l.get('location'), l.get('property_type'), l.get('surface_min'),
                 _FINANCEMENT_LIBELLES.get(l.get('financing_status') or 'unknown', ''),
                 _ECHEANCE_LIBELLES.get(l.get('purchase_urgency') or 'unknown', ''),
-                l.get('revenus'), l.get('garants'), l.get('situation_pro'), l.get('meuble_souhaite'),
+                l.get('revenus'), l.get('garants'), l.get('situation_pro'), l.get('meuble_souhaite'), l.get('proprietaire'),
                 STATUTS_LIBELLES[statut], l.get('source'), (_nom_membre(l.get('responsable_prenom'), l.get('responsable_email')) if l.get('assigned_to') else ''),
                 _QUALITE_LIBELLES[derive_lead_quality(l)], points_qualite(l),
                 l.get('created_at'), l.get('first_contact_at'), l.get('prochaine_relance'), l.get('consent_at'),
@@ -2390,11 +2391,11 @@ def create_lead():
             INSERT INTO leads
                 (user_id, name, email, phone, budget, location, property_type, surface_min, activite,
                  status, financing_status, purchase_urgency, source,
-                 transaction, revenus, garants, situation_pro, meuble_souhaite, assigned_to)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 transaction, revenus, garants, situation_pro, meuble_souhaite, proprietaire, assigned_to)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id, name, email, phone, budget, location, property_type, surface_min, activite,
                       status, financing_status, purchase_urgency, source,
-                      transaction, revenus, garants, situation_pro, meuble_souhaite, assigned_to
+                      transaction, revenus, garants, situation_pro, meuble_souhaite, proprietaire, assigned_to
         """, (
             request.agency_id,
             nom[:255],
@@ -2413,6 +2414,7 @@ def create_lead():
             _garants_pour(_texte_court(data.get('property_type'), 100), data.get('garants')),
             _situation_pro(data.get('situation_pro')),
             _booleen_souple(data.get('meuble_souhaite')),
+            _booleen_souple(data.get('proprietaire')),
             # Un collaborateur qui saisit un prospect en devient le responsable ;
             # le directeur, lui, répartit après coup.
             request.user_id if request.role == 'employe' else None
@@ -2811,7 +2813,7 @@ def get_lead_detail(lead_id):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, user_id, name, email, phone, budget, location, property_type, surface_min, activite, status, financing_status, purchase_urgency, lead_quality, financing_amount, notes, created_at, source, status_changed_at, first_contact_at, consent_at, transaction, revenus, garants, situation_pro, meuble_souhaite, assigned_to FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.agency_id))
+        cur.execute("SELECT id, user_id, name, email, phone, budget, location, property_type, surface_min, activite, status, financing_status, purchase_urgency, lead_quality, financing_amount, notes, created_at, source, status_changed_at, first_contact_at, consent_at, transaction, revenus, garants, situation_pro, meuble_souhaite, proprietaire, assigned_to FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.agency_id))
         lead = cur.fetchone()
         if lead:
             _charger_engagement(cur, request.agency_id, [lead], lignes=True)
@@ -2878,6 +2880,8 @@ def update_lead_financing(lead_id):
             contact['situation_pro'] = _situation_pro(data.get('situation_pro'))
         if 'meuble_souhaite' in data:
             contact['meuble_souhaite'] = _booleen_souple(data.get('meuble_souhaite'))
+        if 'proprietaire' in data:
+            contact['proprietaire'] = _booleen_souple(data.get('proprietaire'))
 
         conn = get_db_connection()
         try:
@@ -3793,7 +3797,8 @@ def completer_lead(token):
                     revenus = COALESCE(%s, revenus),
                     garants = COALESCE(%s, garants),
                     situation_pro = COALESCE(%s, situation_pro),
-                    meuble_souhaite = COALESCE(%s, meuble_souhaite)
+                    meuble_souhaite = COALESCE(%s, meuble_souhaite),
+                    proprietaire = COALESCE(%s, proprietaire)
                 WHERE id = %s
             """, (
                 _entier_borne(data.get('budget')),
@@ -3809,6 +3814,7 @@ def completer_lead(token):
                 _entier_borne(data.get('garants'), 50),
                 _situation_pro(data.get('situation_pro')),
                 _booleen_souple(data.get('meuble_souhaite')),
+                _booleen_souple(data.get('proprietaire')),
                 lead['id'],
             ))
             # Local commercial ou bureau : aucun garant personnel n'est conservé.
@@ -6194,7 +6200,7 @@ def _construire_taches(cur, agence_id, user_id, role):
     cur.execute("""
         SELECT l.id, l.name, l.email, l.phone, l.budget, l.location, l.property_type, l.surface_min, l.activite,
                l.status, l.financing_status, l.purchase_urgency, l.transaction, l.revenus, l.garants,
-               l.situation_pro, l.meuble_souhaite, l.source, l.created_at, l.assigned_to,
+               l.situation_pro, l.meuble_souhaite, l.proprietaire, l.source, l.created_at, l.assigned_to,
                u.first_name AS resp_prenom, u.email AS resp_email,
                GREATEST(COALESCE(l.status_changed_at, l.created_at),
                         COALESCE((SELECT MAX(n.created_at) FROM lead_notes n WHERE n.lead_id = l.id), l.created_at),
@@ -6375,7 +6381,7 @@ def _construire_taches(cur, agence_id, user_id, role):
         taches.append({
             "lead": {"id": l['id'], "name": l['name'], "phone": l['phone'], "email": l['email'], "budget": l['budget'],
                      "location": l['location'], "transaction": l['transaction'], "status": l['status'] or 'nouveau',
-                     "quality": l['_niveau'], "score": l['_points']},
+                     "quality": l['_niveau'], "score": l['_points'], "proprietaire": l.get('proprietaire')},
             "priorite": 'urgent' if poids >= 85 else ('important' if poids >= 65 else 'normal'),
             "poids": poids, "action": action, "titre": titre,
             "motifs": [{"genre": m['genre'], "texte": m['texte']} for m in liste],
@@ -6677,7 +6683,7 @@ texte autour.
 Date du jour : {date}
 
 Champs : nom, email, telephone, transaction, budget, secteurs, type_bien, \
-nombre_pieces, surface_min, activite, echeance, financement, garants, profession, revenus, meuble, notes
+nombre_pieces, surface_min, activite, echeance, financement, garants, profession, revenus, meuble, proprietaire, notes
 
 Règles strictes :
 - N'invente jamais. Information non explicite dans le message = null.
@@ -6697,6 +6703,7 @@ veut y exercer : exactement l'une de {activites}, ou null.
 - profession : situation professionnelle citée (CDI, étudiant, indépendant...), ou null.
 - revenus : revenus mensuels nets du foyer en euros, entier, si le message en donne, sinon null.
 - meuble : true si la personne cherche un logement meublé, false si elle le veut vide, sinon null.
+- proprietaire : true si la personne dit être déjà propriétaire (elle a un bien à vendre, "je vends ma maison", "achat avec revente"), false si elle dit être locataire ou primo-accédante, sinon null.
 - notes : une phrase résumant ce qui n'entre dans aucun champ, ou null.
 
 Message :
@@ -6786,6 +6793,7 @@ def _valider(brut):
         'situation_pro': _situation_pro(brut.get('profession')),
         'revenus': _entier_souple(brut.get('revenus')),
         'meuble': _booleen_souple(brut.get('meuble')),
+        'proprietaire': _booleen_souple(brut.get('proprietaire')),
         'notes': texte('notes', 1000),
     }
 
@@ -6927,7 +6935,7 @@ commentaire ni texte autour.
 Date du jour : {date}
 
 Champs : est_demande_contact, nom, email, telephone, transaction, budget, secteurs, \
-type_bien, nombre_pieces, surface_min, activite, echeance, financement, garants, profession, revenus, meuble, notes
+type_bien, nombre_pieces, surface_min, activite, echeance, financement, garants, profession, revenus, meuble, proprietaire, notes
 
 Règles strictes :
 - est_demande_contact : true si c'est une vraie demande de contact d'une personne \
@@ -6960,6 +6968,7 @@ exactement l'une de {activites}, ou null.
 - profession : situation professionnelle citée (CDI, étudiant, indépendant...), ou null.
 - revenus : revenus mensuels nets du foyer en euros, entier, si le message en donne, sinon null.
 - meuble : true si la personne cherche un logement meublé, false si elle le veut vide, sinon null.
+- proprietaire : true si la personne dit être déjà propriétaire (elle a un bien à vendre, "je vends ma maison", "achat avec revente"), false si elle dit être locataire ou primo-accédante, sinon null.
 - notes : le message du contact et l'annonce concernée (titre, référence ou adresse) si \
 identifiable, résumés en une ou deux phrases. null si rien d'utile.
 
@@ -7432,8 +7441,8 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
             INSERT INTO leads
                 (user_id, name, email, phone, budget, location, property_type, surface_min, activite,
                  status, financing_status, purchase_urgency, source,
-                 transaction, revenus, garants, situation_pro, meuble_souhaite)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s, %s, %s, %s, %s, %s)
+                 transaction, revenus, garants, situation_pro, meuble_souhaite, proprietaire)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
             user_id, nom[:255],
@@ -7452,6 +7461,7 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
             _garants_pour((champs or {}).get('type_bien'), (champs or {}).get('garants')),
             (champs or {}).get('situation_pro'),
             (champs or {}).get('meuble'),
+            (champs or {}).get('proprietaire'),
         ))
         lead_id = cur.fetchone()['id']
         if notes:
