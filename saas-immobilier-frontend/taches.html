@@ -53,6 +53,11 @@
         const API_URL = 'https://saas-immobilier-921a.onrender.com';
         const fmt = (n) => Number(n || 0).toLocaleString('fr-FR');
         const NIVEAUX = { hot: ['Chaud', 'badge-hot'], warm: ['Tiède', 'badge-warm'], cold: ['Froid', 'badge-cold'] };
+        // Palier de couleur selon le score /100 (voir zelyro.css). Sans score, on retombe sur le niveau historique.
+        const palier = (score, q) => typeof score !== 'number'
+            ? (q === 'hot' ? 'p-vert' : q === 'warm' ? 'p-orange' : 'p-gris')
+            : score >= 90 ? 'p-go' : score >= 80 ? 'p-vert' : score >= 65 ? 'p-jaune' : score >= 45 ? 'p-orange' : 'p-gris';
+
         const STATUTS = { nouveau: 'Nouveau', contacte: 'Contacté', visite: 'Visite', offre: 'Offre' };
         const GROUPES = [
             ['urgent', 'À faire en premier', 'Visites du jour, demandes de visite, relances en retard, prospects restés sans réponse.'],
@@ -120,7 +125,8 @@
                             {t.responsable && <div className="resp">Responsable : {t.responsable}</div>}
                         </div>
                         <div className="tache-badges">
-                            <span className={`badge ${niveau[1]}`}>{niveau[0]} · {l.score}/100</span>
+                            <span className={`badge ${niveau[1]} ${palier(l.score, l.quality)}`}>{niveau[0]} · {l.score}/100</span>
+                            {l.proprietaire === true && <span className="chip-proprio">⌂ Déjà propriétaire</span>}
                             <span className={`statut-badge statut-${l.status}`}>{STATUTS[l.status] || l.status}</span>
                         </div>
                     </div>

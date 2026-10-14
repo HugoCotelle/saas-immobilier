@@ -153,6 +153,11 @@
             ['etudiant', 'Étudiant'], ['autre', 'Autre']
         ];
 
+        // Palier de couleur selon le score /100 (voir zelyro.css). Sans score, on retombe sur le niveau historique.
+        const palier = (score, q) => typeof score !== 'number'
+            ? (q === 'hot' ? 'p-vert' : q === 'warm' ? 'p-orange' : 'p-gris')
+            : score >= 90 ? 'p-go' : score >= 80 ? 'p-vert' : score >= 65 ? 'p-jaune' : score >= 45 ? 'p-orange' : 'p-gris';
+
         const LIBELLES = {
             hot: 'Acheteur actif',
             warm: 'Projet en cours',
@@ -394,6 +399,7 @@
                         garants: data.garants ?? '',
                         situation_pro: data.situation_pro ?? '',
                         meuble_souhaite: data.meuble_souhaite === true ? 'oui' : data.meuble_souhaite === false ? 'non' : '',
+                        proprietaire: data.proprietaire === true ? 'oui' : data.proprietaire === false ? 'non' : '',
                         notes: data.notes ?? ''
                     });
                     setError(null);
@@ -431,6 +437,7 @@
                             purchase_urgency: form.purchase_urgency,
                             financing_amount: form.financing_amount === '' ? null : parseInt(form.financing_amount, 10),
                             transaction: form.transaction,
+                            proprietaire: form.proprietaire === '' ? null : form.proprietaire === 'oui',
                             // Le dossier du locataire n'a de sens que pour une location : on ne l'efface pas si l'agent bascule en achat.
                             ...(form.transaction === 'location' ? {
                                 revenus: form.revenus === '' ? null : parseInt(form.revenus, 10),
@@ -524,6 +531,7 @@
                                 <h1 className="page-title">{lead.name}</h1>
                                 <p className="page-subtitle">
                                     {lead.email || 'Email non renseigné'} · {lead.phone || 'Téléphone non renseigné'}
+                                    {lead.proprietaire === true && <> · <span className="chip-proprio">⌂ Déjà propriétaire</span></>}
                                 </p>
 
                                 {error && <div className="error">{error}</div>}
@@ -709,6 +717,17 @@
                                                     </div>
                                                 </>
                                             )}
+
+                                            <div className="form-row">
+                                                <div className="form-group">
+                                                    <label>Déjà propriétaire ?</label>
+                                                    <select value={form.proprietaire} onChange={(e) => set('proprietaire', e.target.value)}>
+                                                        <option value="">Inconnu</option>
+                                                        <option value="oui">Oui, déjà propriétaire</option>
+                                                        <option value="non">Non</option>
+                                                    </select>
+                                                </div>
+                                            </div>
 
                                             <div className="form-row">
                                                 {!location && (
@@ -948,10 +967,20 @@
                                                 il se déduit de ce que vous renseignez à gauche.
                                             </div>
 
-                                            <div className={`quality-box quality-${apercu.quality}`}>
+                                            <div className={`quality-box quality-${apercu.quality} ${palier(apercu.points, apercu.quality)}`}>
                                                 <div className="quality-label">{location && apercu.quality === 'hot' ? 'Locataire actif' : LIBELLES[apercu.quality]}</div>
                                                 <div className="quality-explain">{apercu.points} points sur 100</div>
+                                                {palier(apercu.points, apercu.quality) === 'p-go' && <div className="quality-go-appel">Go : à appeler maintenant</div>}
                                             </div>
+
+                                            {form.proprietaire === 'oui' && (
+                                                <div className="encadre-proprio">
+                                                    <strong>⌂ Déjà propriétaire</strong>
+                                                    {location
+                                                        ? "Cette personne possède déjà un bien : pensez à lui proposer une estimation ou un mandat de gestion."
+                                                        : "Cette personne possède déjà un bien : c'est souvent un achat avec revente. Proposez-lui une estimation, c'est un mandat potentiel en plus de la vente."}
+                                                </div>
+                                            )}
 
                                             {apercu.lignes.length > 0 ? (
                                                 <div>

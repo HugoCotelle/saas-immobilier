@@ -833,3 +833,85 @@ body.auth::before {
     .panel { padding: 22px 20px; }
     .auth-container { padding: 34px 24px 30px; }
 }
+
+/* ---------- Échelle de score en 5 paliers ----------
+   Se superpose aux trois niveaux historiques (chaud / tiède / froid), qui
+   restent ceux décrits dans les CGU. Le palier ne dépend que du score /100 :
+   90+ vert fluo « go go go », 80-89 vert, 65-79 jaune, 45-64 orange, moins de 45 gris. */
+:root {
+    --go: #39FF14;       --go-ink: #063B0B;   --go-glow: rgba(57, 255, 20, 0.55);
+    --vert: #1F8A3B;     --vert-bg: #DDF1E1;
+    --jaune: #8A6A00;    --jaune-bg: #FBF0B8;  --jaune-bord: #E2B91A;
+    --orange: #A24A12;   --orange-bg: #FADDC3; --orange-bord: #E27A2C;
+    --gris: #5E655C;     --gris-bg: #ECE8DE;   --gris-bord: #A7AC9E;
+    --proprio: #1B4F8A;  --proprio-bg: #DCEBFA; --proprio-bord: #3B82D6;
+}
+
+/* Pastilles (page prospects et tâches) */
+.lead-badge.p-go, .badge.p-go { background: var(--go); color: var(--go-ink); font-weight: 800; box-shadow: 0 0 0 1px rgba(6, 59, 11, 0.25), 0 0 14px var(--go-glow); }
+.lead-badge.p-vert, .badge.p-vert { background: var(--vert-bg); color: var(--vert); }
+.lead-badge.p-jaune, .badge.p-jaune { background: var(--jaune-bg); color: var(--jaune); }
+.lead-badge.p-orange, .badge.p-orange { background: var(--orange-bg); color: var(--orange); }
+.lead-badge.p-gris, .badge.p-gris { background: var(--gris-bg); color: var(--gris); }
+
+/* Cartes prospects */
+.lead-card.p-vert, .lead-card.p-vert:hover { border-left-color: var(--vert); border-left-width: 4px; }
+.lead-card.p-jaune, .lead-card.p-jaune:hover { border-left-color: var(--jaune-bord); }
+.lead-card.p-orange, .lead-card.p-orange:hover { border-left-color: var(--orange-bord); }
+.lead-card.p-gris, .lead-card.p-gris:hover { border-left-color: var(--gris-bord); }
+.lead-card.p-go, .lead-card.p-go:hover {
+    border-left: 6px solid var(--go);
+    border-color: rgba(57, 255, 20, 0.7);
+    border-left-color: var(--go);
+    background: linear-gradient(90deg, rgba(57, 255, 20, 0.13), var(--surface) 38%);
+    box-shadow: 0 0 0 1px rgba(57, 255, 20, 0.45), 0 0 26px rgba(57, 255, 20, 0.38);
+}
+.lead-card.p-go { animation: zelyro-go 2.4s ease-in-out infinite; }
+@keyframes zelyro-go {
+    0%, 100% { box-shadow: 0 0 0 1px rgba(57, 255, 20, 0.45), 0 0 14px rgba(57, 255, 20, 0.25); }
+    50% { box-shadow: 0 0 0 1px rgba(57, 255, 20, 0.8), 0 0 30px rgba(57, 255, 20, 0.55); }
+}
+.pastille-go {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: var(--go); color: var(--go-ink);
+    font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 4px 11px; border-radius: 999px; margin-bottom: 10px;
+}
+.pastille-go::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--go-ink); animation: zelyro-point 1.2s ease-in-out infinite; }
+@keyframes zelyro-point { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+/* Fiche prospect : encadré du score */
+.quality-box.p-go { background: var(--go); box-shadow: 0 0 0 1px rgba(6, 59, 11, 0.3), 0 0 28px var(--go-glow); }
+.quality-box.p-go .quality-label, .quality-box.p-go .quality-explain { color: var(--go-ink); }
+.quality-box.p-go .quality-explain { font-weight: 600; }
+.quality-box.p-vert { background: var(--vert-bg); }
+.quality-box.p-vert .quality-label { color: var(--vert); }
+.quality-box.p-jaune { background: var(--jaune-bg); }
+.quality-box.p-jaune .quality-label { color: var(--jaune); }
+.quality-box.p-orange { background: var(--orange-bg); }
+.quality-box.p-orange .quality-label { color: var(--orange); }
+.quality-box.p-gris { background: var(--gris-bg); }
+.quality-box.p-gris .quality-label { color: var(--gris); }
+.quality-go-appel { display: inline-block; margin-top: 10px; font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; background: var(--go-ink); color: var(--go); padding: 4px 12px; border-radius: 999px; }
+
+/* Déjà propriétaire : bleu, distinct de l'échelle de score */
+.bandeau-proprio {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--proprio-bg); color: var(--proprio);
+    border: 1px solid var(--proprio-bord); border-radius: var(--radius-sm);
+    font-size: 13px; font-weight: 700; padding: 7px 12px; margin: -6px 0 14px;
+}
+.chip-proprio {
+    display: inline-block; background: var(--proprio-bg); color: var(--proprio);
+    border: 1px solid var(--proprio-bord); border-radius: 999px;
+    font-size: 12px; font-weight: 700; padding: 3px 10px;
+}
+.encadre-proprio {
+    background: var(--proprio-bg); border: 1px solid var(--proprio-bord); border-left: 5px solid var(--proprio-bord);
+    border-radius: var(--radius-sm); padding: 14px 16px; margin-bottom: 16px; color: var(--proprio); font-size: 13px; line-height: 1.6;
+}
+.encadre-proprio strong { display: block; font-size: 14px; margin-bottom: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+    .lead-card.p-go, .pastille-go::before { animation: none; }
+}

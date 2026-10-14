@@ -151,6 +151,14 @@
                     </select>
                 </div>
             </div>
+                <div class="form-group" id="bloc-proprio">
+                    <label for="proprietaire">Êtes-vous déjà propriétaire ?</label>
+                    <select id="proprietaire" name="proprietaire">
+                        <option value="">Je préfère ne pas répondre</option>
+                        <option value="oui">Oui, j'ai un bien à vendre ou à garder</option>
+                        <option value="non">Non</option>
+                    </select>
+                </div>
             <div class="form-group">
                 <label for="purchase_urgency" id="label-echeance">Quand souhaitez-vous acheter ?</label>
                 <select id="purchase_urgency" name="purchase_urgency">
@@ -240,6 +248,7 @@
                 montrer('groupe-garants', !typePro());
                 montrer('bloc-situation', loc);
                 montrer('bloc-meuble', loc && !typePro());
+                montrer('bloc-proprio', !loc);
                 montrer('bloc-surface', typePro());
             }
             $('property_type').addEventListener('change', adapter);
@@ -278,6 +287,7 @@
                         garants: enLocation() && !typePro() && $('garants').value !== '' ? parseInt($('garants').value, 10) : null,
                         situation_pro: enLocation() && $('situation_pro').value ? $('situation_pro').value : null,
                         meuble_souhaite: enLocation() && !typePro() && $('meuble_souhaite').value ? $('meuble_souhaite').value === 'oui' : null,
+                        proprietaire: !enLocation() && $('proprietaire').value ? $('proprietaire').value === 'oui' : null,
                         message: $('message-libre').value.trim() || null,
                         website: $('website').value,
                         consent: true

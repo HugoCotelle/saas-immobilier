@@ -44,6 +44,11 @@
             return n.split(' ')[0];
         };
 
+        // Palier de couleur selon le score /100 (voir zelyro.css). Sans score, on retombe sur le niveau historique.
+        const palier = (score, q) => typeof score !== 'number'
+            ? (q === 'hot' ? 'p-vert' : q === 'warm' ? 'p-orange' : 'p-gris')
+            : score >= 90 ? 'p-go' : score >= 80 ? 'p-vert' : score >= 65 ? 'p-jaune' : score >= 45 ? 'p-orange' : 'p-gris';
+
         const BADGES = {
             hot: ['badge-hot', 'Acheteur actif'],
             warm: ['badge-warm', 'Projet en cours'],
@@ -93,7 +98,7 @@
             name: '', email: '', phone: '', budget: '',
             location: '', property_type: '', surface_min: '', activite: '',
             financing_status: 'unknown', purchase_urgency: 'unknown',
-            transaction: 'vente', revenus: '', garants: '', situation_pro: '', meuble_souhaite: ''
+            transaction: 'vente', revenus: '', garants: '', situation_pro: '', meuble_souhaite: '', proprietaire: ''
         };
 
         function App() {
@@ -181,7 +186,8 @@
                                 revenus: form.revenus === '' ? null : parseInt(form.revenus, 10),
                                 garants: form.garants === '' || ['Local commercial', 'Bureau'].includes(form.property_type) ? null : parseInt(form.garants, 10),
                                 situation_pro: form.situation_pro || null,
-                                meuble_souhaite: form.meuble_souhaite === '' ? null : form.meuble_souhaite === 'oui'
+                                meuble_souhaite: form.meuble_souhaite === '' ? null : form.meuble_souhaite === 'oui',
+                                proprietaire: form.proprietaire === '' ? null : form.proprietaire === 'oui'
                             } : {})
                         })
                     });
@@ -434,6 +440,17 @@
                                 )}
 
                                 <div className="form-row">
+                                    <div className="form-group">
+                                        <label>Déjà propriétaire ?</label>
+                                        <select value={form.proprietaire} onChange={(e) => set('proprietaire', e.target.value)}>
+                                            <option value="">Inconnu</option>
+                                            <option value="oui">Oui, déjà propriétaire</option>
+                                            <option value="non">Non</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="form-row">
                                     {form.transaction !== 'location' && (
                                     <div className="form-group">
                                         <label>Financement</label>
@@ -522,10 +539,13 @@
                                     const q = lead.lead_quality || 'cold';
                                     const [cls, libelle0] = BADGES[q] || BADGES.cold;
                                     const libelle = estLocation(lead) && q === 'hot' ? 'Locataire actif' : libelle0;
+                                    const pal = palier(lead.quality_score, q);
                                     const statut = statutDe(lead);
                                     const enRetard = lead.next_reminder && lead.next_reminder < aujourdhui();
                                     return (
-                                        <div key={lead.id} className={`lead-card ${q}`}>
+                                        <div key={lead.id} className={`lead-card ${q} ${pal}`}>
+                                            {pal === 'p-go' && <div className="pastille-go">À appeler maintenant</div>}
+                                            {lead.proprietaire === true && <div className="bandeau-proprio">⌂ Déjà propriétaire · à estimer ?</div>}
                                             <div className="lead-name">{lead.name}</div>
                                             <div className="lead-field">
                                                 <span className="lead-label">Email :</span>
@@ -574,7 +594,7 @@
                                                 </div>
                                             )}
                                             <div className="lead-footer">
-                                                <span className={`lead-badge ${cls}`}
+                                                <span className={`lead-badge ${cls} ${pal}`}
                                                     title="Score de qualité du prospect. Le détail est sur sa fiche.">
                                                     {libelle}{typeof lead.quality_score === 'number' ? ` · ${lead.quality_score}/100` : ''}
                                                 </span>
