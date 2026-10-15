@@ -157,7 +157,7 @@
                 <a class="btn btn-lg btn-ghost" href="/login.html#inscription">Créer un compte</a>
             </div>
             <ul class="hero-points">
-                <li>Trois niveaux de qualification, calculés selon des règles lisibles.</li>
+                <li>Un score de qualité sur 100 et cinq couleurs : le vert fluo, c’est à appeler maintenant.</li>
                 <li>Vos demandes SeLoger et Leboncoin arrivent toutes seules, déjà qualifiées.</li>
                 <li>Un score de correspondance sur 100 entre chaque prospect et vos biens, avec ses raisons.</li>
                 <li>Chaque agence ne voit que ses propres données.</li>
@@ -165,7 +165,7 @@
         </div>
 
         <figure class="hero-figure">
-            <div class="hero-visual" role="img" aria-label="Aperçu illustré de Zelyro avec des données fictives : une liste de trois prospects classés Acheteur actif, Projet en cours et Premier contact, et un bien correspondant avec un score de 86 sur 100 accompagné de ses raisons.">
+            <div class="hero-visual" role="img" aria-label="Aperçu illustré de Zelyro avec des données fictives : une liste de trois prospects avec leur score sur 100 et leur couleur (vert fluo à appeler maintenant, jaune, gris), dont un déjà propriétaire signalé en bleu, et un bien correspondant avec un score de 86 sur 100 accompagné de ses raisons.">
                 <div class="mock-chip" aria-hidden="true">
                     <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-bell"/></svg>
                     <span>Relance&nbsp;: Julien M. <small>· jeudi</small></span>
@@ -181,19 +181,21 @@
                             <span class="mock-title">Prospects</span>
                             <span class="mock-sub">3 affichés</span>
                         </div>
-                        <div class="mock-lead hot">
+                        <div class="mock-lead p-go">
+                            <span class="pastille-go mock-full">À appeler maintenant</span>
                             <span class="mock-lead-name">Camille R.</span>
-                            <span class="lead-badge badge-hot">Acheteur actif</span>
+                            <span class="lead-badge p-go">Acheteur actif · 92/100</span>
                             <span class="mock-lead-meta">Appartement · budget 420 000 € · financement accordé, achat immédiat</span>
                         </div>
-                        <div class="mock-lead warm">
+                        <div class="mock-lead p-jaune">
+                            <span class="bandeau-proprio mock-full">⌂ Déjà propriétaire · à estimer ?</span>
                             <span class="mock-lead-name">Julien M.</span>
-                            <span class="lead-badge badge-warm">Projet en cours</span>
+                            <span class="lead-badge p-jaune">Projet en cours · 68/100</span>
                             <span class="mock-lead-meta">Maison · budget 560 000 € · financement en cours, achat sous 3 à 6 mois</span>
                         </div>
-                        <div class="mock-lead cold">
+                        <div class="mock-lead p-gris">
                             <span class="mock-lead-name">Sophie L.</span>
-                            <span class="lead-badge badge-cold">Premier contact</span>
+                            <span class="lead-badge p-gris">Premier contact · 31/100</span>
                             <span class="mock-lead-meta">Dossier incomplet : budget et secteur non renseignés</span>
                         </div>
                     </div>
@@ -262,14 +264,14 @@
 <section class="section demo" id="demo" aria-labelledby="titre-demo">
     <div class="wrap">
         <div class="section-head">
-            <p class="eyebrow">En une minute</p>
+            <p class="eyebrow">En 34 secondes</p>
             <h2 id="titre-demo">Des demandes éparpillées à la visite programmée.</h2>
-            <p>Du premier message d’un prospect à la visite fixée : voyez en moins d’une minute ce que Zelyro change dans le quotidien de votre agence. Exemple avec des données fictives.</p>
+            <p>Du premier message d’un prospect à la visite fixée : voyez en 34 secondes ce que Zelyro change dans le quotidien de votre agence. Exemple avec des données fictives.</p>
         </div>
         <figure class="demo-frame">
-            <video id="demo-video" controls preload="none" playsinline poster="/demo/zelyro-demo-poster.jpg" aria-label="Zelyro en une minute : demandes rassemblées et classées, fiche remplie depuis un mail de portail, biens proposés, message envoyé, prospect prévenu.">
-                <source src="/demo/zelyro-demo.mp4" type="video/mp4">
-                Votre navigateur ne lit pas cette vidéo. <a href="/demo/zelyro-demo.mp4">Télécharger la vidéo</a>.
+            <video id="demo-video" controls preload="none" playsinline poster="/demo/zelyro-promo-poster.jpg" aria-label="Zelyro en 34 secondes : les demandes qui s’empilent, le prospect à appeler en premier avec son score sur 100, le prospect déjà propriétaire à qui proposer une estimation, le bon bien proposé en un clic.">
+                <source src="/demo/zelyro-promo.mp4" type="video/mp4">
+                Votre navigateur ne lit pas cette vidéo. <a href="/demo/zelyro-promo.mp4">Télécharger la vidéo</a>.
             </video>
         </figure>
     </div>
@@ -288,12 +290,13 @@
             <article class="feat">
                 <div class="feat-icon"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-funnel"/></svg></div>
                 <h3>Qualification automatique des prospects</h3>
-                <p>Chaque prospect est classé selon trois niveaux. Le niveau découle de l’état du financement, de l’urgence du projet d’achat et de la complétude du dossier. Ce sont des règles de calcul simples, pas un modèle opaque.</p>
+                <p>Chaque prospect reçoit un score sur 100, affiché dans l’une de cinq couleurs, du vert fluo (à appeler maintenant) au gris (premier contact). Le score découle de l’état du financement, de l’urgence du projet d’achat et de la complétude du dossier. Un repère bleu signale les acquéreurs déjà propriétaires, pour penser à leur proposer une estimation. Ce sont des règles de calcul simples, pas un modèle opaque.</p>
                 <div class="feat-visual">
                     <div class="box">
                         <div class="crit"><span class="pill">Financement</span><span class="plus" aria-hidden="true">+</span><span class="pill">Urgence</span><span class="plus" aria-hidden="true">+</span><span class="pill">Dossier complet</span></div>
-                        <div class="flow-arrow" aria-hidden="true">donne</div>
-                        <div class="badges"><span class="lead-badge badge-hot">Acheteur actif</span><span class="lead-badge badge-warm">Projet en cours</span><span class="lead-badge badge-cold">Premier contact</span></div>
+                        <div class="flow-arrow" aria-hidden="true">donne un score sur 100</div>
+                        <div class="badges"><span class="lead-badge p-go">90 et plus</span><span class="lead-badge p-vert">80 à 89</span><span class="lead-badge p-jaune">65 à 79</span><span class="lead-badge p-orange">45 à 64</span><span class="lead-badge p-gris">moins de 45</span></div>
+                        <div class="badges badges-proprio"><span class="chip-proprio">⌂ Déjà propriétaire</span></div>
                     </div>
                 </div>
             </article>
