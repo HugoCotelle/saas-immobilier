@@ -523,6 +523,8 @@ _DDL_SURFACE = (
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS meuble_souhaite BOOLEAN",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS proprietaire BOOLEAN",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS bien_adresse VARCHAR(255)",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS bien_code_postal VARCHAR(10)",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS bien_ville VARCHAR(100)",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS bien_type VARCHAR(20)",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS bien_surface INTEGER",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS bien_pieces INTEGER",
@@ -791,7 +793,9 @@ def _assurer_schema():
                        EXISTS (SELECT 1 FROM information_schema.columns
                                WHERE table_name = 'leads' AND column_name = 'proprietaire'),
                        EXISTS (SELECT 1 FROM information_schema.columns
-                               WHERE table_name = 'leads' AND column_name = 'bien_adresse')
+                               WHERE table_name = 'leads' AND column_name = 'bien_adresse'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'leads' AND column_name = 'bien_ville')
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
@@ -2821,7 +2825,7 @@ def get_lead_detail(lead_id):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, user_id, name, email, phone, budget, location, property_type, surface_min, activite, status, financing_status, purchase_urgency, lead_quality, financing_amount, notes, created_at, source, status_changed_at, first_contact_at, consent_at, transaction, revenus, garants, situation_pro, meuble_souhaite, proprietaire, bien_adresse, bien_type, bien_surface, bien_pieces, assigned_to FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.agency_id))
+        cur.execute("SELECT id, user_id, name, email, phone, budget, location, property_type, surface_min, activite, status, financing_status, purchase_urgency, lead_quality, financing_amount, notes, created_at, source, status_changed_at, first_contact_at, consent_at, transaction, revenus, garants, situation_pro, meuble_souhaite, proprietaire, bien_adresse, bien_code_postal, bien_ville, bien_type, bien_surface, bien_pieces, assigned_to FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.agency_id))
         lead = cur.fetchone()
         if lead:
             _charger_engagement(cur, request.agency_id, [lead], lignes=True)
@@ -2893,6 +2897,11 @@ def update_lead_financing(lead_id):
         # Bien du prospect propriétaire (sert à l'estimation indicative) : seulement si présent.
         if 'bien_adresse' in data:
             contact['bien_adresse'] = _texte_court(data.get('bien_adresse'), 255)
+        if 'bien_code_postal' in data:
+            cp = re.sub(r'\s', '', str(data.get('bien_code_postal') or ''))
+            contact['bien_code_postal'] = cp if re.fullmatch(r'\d{5}', cp) else None
+        if 'bien_ville' in data:
+            contact['bien_ville'] = _texte_court(data.get('bien_ville'), 100)
         if 'bien_type' in data:
             contact['bien_type'] = data.get('bien_type') if data.get('bien_type') in ('Appartement', 'Maison') else None
         if 'bien_surface' in data:
@@ -3122,25 +3131,48 @@ def _dvf_ventes_commune(insee):
 
 def _dvf_geocoder(adresse):
     """Position d'une adresse via la Base adresse nationale (service public)."""
+    import time
     dernier = None
     for url in GEOCODAGES:
-        try:
-            r = requests.get(url, params={'q': adresse, 'limit': 1}, timeout=(4, 8))
-            if r.status_code != 200:
+        trouves = None
+        for essai in range(2):                # une panne passagère ne doit pas bloquer l'agent
+            try:
+                r = requests.get(url, params={'q': adresse, 'limit': 1}, timeout=(4, 8))
+                if r.status_code == 200:
+                    trouves = (r.json() or {}).get('features') or []
+                    break
                 dernier = r.status_code
-                continue
-            trouves = (r.json() or {}).get('features') or []
-        except (requests.RequestException, ValueError):
-            dernier = 'réseau'
+                if r.status_code < 500 and r.status_code != 429:
+                    break
+            except (requests.RequestException, ValueError):
+                dernier = 'réseau'
+            time.sleep(0.5)
+        if trouves is None:
             continue
         if not trouves:
-            raise EstimationErreur("Adresse introuvable. Indiquez le numéro, la rue, le code postal et la ville.")
+            raise EstimationErreur("Adresse introuvable. Vérifiez le numéro, la rue, le code postal et la ville.")
         prop = trouves[0].get('properties') or {}
         lon, lat = trouves[0]['geometry']['coordinates'][:2]
         if prop.get('type') not in ('housenumber', 'street') or (prop.get('score') or 0) < 0.5:
-            raise EstimationErreur("Adresse trop imprécise. Indiquez le numéro, la rue, le code postal et la ville.")
-        return {'lat': lat, 'lon': lon, 'label': prop.get('label') or adresse, 'insee': prop.get('citycode')}
+            raise EstimationErreur("Adresse trop imprécise. Indiquez le numéro et la rue, avec le code postal et la ville.")
+        return {'lat': lat, 'lon': lon, 'label': prop.get('label') or adresse, 'insee': prop.get('citycode'),
+                'postcode': prop.get('postcode')}
     raise EstimationErreur("Le service de localisation des adresses ne répond pas. Réessayez dans quelques minutes.", 502)
+
+
+_DVF_MOTS_VIDES = {'rue', 'avenue', 'boulevard', 'bld', 'blvd', 'bd', 'av', 'ave', 'chemin', 'route', 'impasse', 'allee', 'place',
+                   'square', 'cours', 'quai', 'passage', 'residence', 'res', 'les', 'des', 'du', 'de', 'la', 'le', 'aux', 'sur', 'sous',
+                   'the', 'bis', 'ter', 'saint', 'sainte', 'st', 'ste'}
+
+
+def _dvf_normaliser(texte):
+    texte = unicodedata.normalize('NFD', str(texte or '')).encode('ascii', 'ignore').decode()
+    return re.sub(r'[^a-z0-9]+', ' ', texte.lower()).strip()
+
+
+def _dvf_mots_rue(adresse):
+    """Mots caractéristiques d'une adresse saisie (sans numéro ni mot générique : « rue », « de »...)."""
+    return [m for m in _dvf_normaliser(adresse).split() if len(m) >= 3 and not m.isdigit() and m not in _DVF_MOTS_VIDES]
 
 
 # Combinaisons essayées de la plus précise à la plus large : écart de surface
@@ -3183,13 +3215,25 @@ def _dvf_arrondi(valeur):
     return int(round(valeur / pas) * pas)
 
 
-def estimer_bien(adresse, type_bien, surface, pieces=None, ventes_fn=None, geocodeur=None, aujourdhui=None):
+def estimer_bien(adresse, type_bien, surface, pieces=None, ventes_fn=None, geocodeur=None, aujourdhui=None,
+                 code_postal=None, ville=None):
     """Fourchette de valeur indicative d'un logement d'après les ventes DVF proches.
 
     ventes_fn(insee) et geocodeur(adresse) sont injectables pour les tests.
     """
     aujourdhui = aujourdhui or date.today()
-    pos = (geocodeur or _dvf_geocoder)(adresse)
+    complete = ', '.join(x for x in (adresse, ' '.join(y for y in (code_postal, ville) if y)) if x)
+    pos = (geocodeur or _dvf_geocoder)(complete)
+    if code_postal and pos.get('postcode') and pos['postcode'] != code_postal:
+        raise EstimationErreur(f"L'adresse trouvée ({pos['label']}) ne correspond pas au code postal {code_postal}. "
+                               "Vérifiez la rue, le code postal et la ville.")
+    # La Base adresse propose la rue la plus proche quand la saisie est fausse : on vérifie qu'elle correspond.
+    mots_rue = _dvf_mots_rue(adresse)
+    etiquette = _dvf_normaliser(pos.get('label'))
+    manquants = [m for m in mots_rue if m not in etiquette]
+    if mots_rue and len(manquants) == len(mots_rue):
+        raise EstimationErreur(f"Cette rue est introuvable à cette adresse (le service propose « {pos['label']} »). "
+                               "Vérifiez l'orthographe de la rue, le code postal et la ville.")
     if not pos.get('insee'):
         raise EstimationErreur("Commune introuvable pour cette adresse.")
     ventes = (ventes_fn or _dvf_ventes_commune)(pos['insee'])
@@ -3213,6 +3257,8 @@ def estimer_bien(adresse, type_bien, surface, pieces=None, ventes_fn=None, geoco
     else:
         confiance = 'faible'
     avertissements = []
+    if manquants:
+        avertissements.append("L'adresse retenue ne correspond pas exactement à la saisie : vérifiez-la ci-dessus.")
     if type_bien == 'Maison':
         avertissements.append("La surface du terrain, la piscine et l'état de la maison ne sont pas pris en compte.")
     else:
@@ -3255,7 +3301,7 @@ def estimation_bien_lead(lead_id):
         conn = get_db_connection()
         try:
             cur = conn.cursor(cursor_factory=RealDictCursor)
-            cur.execute("SELECT bien_adresse, bien_type, bien_surface, bien_pieces FROM leads WHERE id = %s AND user_id = %s",
+            cur.execute("SELECT bien_adresse, bien_code_postal, bien_ville, bien_type, bien_surface, bien_pieces FROM leads WHERE id = %s AND user_id = %s",
                         (lead_id, request.agency_id))
             fiche = cur.fetchone()
         finally:
@@ -3264,17 +3310,21 @@ def estimation_bien_lead(lead_id):
             return jsonify({"message": "Lead not found"}), 404
 
         adresse = _texte_court(data.get('adresse') if 'adresse' in data else fiche['bien_adresse'], 255)
+        cp = re.sub(r'\s', '', str(data.get('code_postal') if 'code_postal' in data else (fiche['bien_code_postal'] or '')))
+        ville = _texte_court(data.get('ville') if 'ville' in data else fiche['bien_ville'], 100)
         type_bien = data.get('type') if 'type' in data else fiche['bien_type']
         surface = _entier_borne(data.get('surface') if 'surface' in data else fiche['bien_surface'], 100000)
         pieces = _entier_borne(data.get('pieces') if 'pieces' in data else fiche['bien_pieces'], 50)
-        if not adresse or len(adresse) < 6:
-            return jsonify({"message": "Indiquez l'adresse du bien (numéro, rue, code postal, ville)."}), 400
+        if not adresse or len(adresse) < 4:
+            return jsonify({"message": "Indiquez l'adresse du bien (numéro et rue)."}), 400
+        if not re.fullmatch(r'\d{5}', cp) or not ville:
+            return jsonify({"message": "Indiquez le code postal (5 chiffres) et la ville du bien."}), 400
         if type_bien not in DVF_TYPES:
             return jsonify({"message": "Choisissez le type de bien : appartement ou maison."}), 400
         if not surface or not 9 <= surface <= 1000:
             return jsonify({"message": "Indiquez la surface habitable, entre 9 et 1000 m²."}), 400
         try:
-            return jsonify(estimer_bien(adresse, type_bien, surface, pieces)), 200
+            return jsonify(estimer_bien(adresse, type_bien, surface, pieces, code_postal=cp, ville=ville)), 200
         except EstimationErreur as e:
             return jsonify({"message": e.message}), e.statut
     except Exception:
