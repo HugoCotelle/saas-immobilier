@@ -284,6 +284,12 @@ body.pub {
 .feat:hover { border-color: var(--line-strong); box-shadow: var(--shadow-hover); transform: translateY(-4px); }
 .feat.w2 { grid-column: span 2; }
 .feat.w4 { grid-column: span 4; }
+.feat.w6 { grid-column: span 6; }
+.est-range { font-family: var(--serif); font-size: 26px; font-weight: 500; color: var(--ink); line-height: 1.2; }
+.est-range span { font-family: var(--serif); font-style: italic; font-size: 17px; color: var(--muted); margin: 0 3px; }
+.est-centre { margin-top: 4px; font-size: 13.5px !important; color: var(--ink-2); }
+.est-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.est-ok { background: var(--vertbg, #DDF1E1); border-color: #B8E2C2; color: #1F6B33; font-weight: 600; }
 .feat-icon {
     width: 44px; height: 44px; border-radius: 12px; background: var(--sage-100); color: var(--sage-700);
     display: grid; place-items: center; margin-bottom: 22px; flex: none;

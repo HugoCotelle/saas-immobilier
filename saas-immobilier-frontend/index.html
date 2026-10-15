@@ -107,6 +107,7 @@
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
 <defs>
 <symbol id="ck" viewBox="0 0 12 12"><path d="M2.5 6.5l2.5 2.5 4.5-5.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-home" viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v8.500a1.500 1.500 0 0 1-1.500 1.500h-13A1.500 1.500 0 0 1 4 19.500z"/><path d="M9.500 21v-6h5v6"/></symbol>
 <symbol id="i-funnel" viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4"/></symbol>
 <symbol id="i-match" viewBox="0 0 24 24"><circle cx="9" cy="12" r="5.5"/><circle cx="15" cy="12" r="5.5"/></symbol>
 <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4M8 14.5l2 2 3.5-3.5"/></symbol>
@@ -283,7 +284,7 @@
         <div class="section-head">
             <p class="eyebrow">Fonctionnalités</p>
             <h2 id="titre-fonctions">Ce que fait Zelyro, concrètement.</h2>
-            <p>Six fonctions dans un seul outil, pour suivre chaque prospect de son arrivée à la signature.</p>
+            <p>Sept fonctions dans un seul outil, pour suivre chaque prospect de son arrivée à la signature.</p>
         </div>
 
         <div class="bento">
@@ -320,7 +321,21 @@
                 </div>
             </article>
 
-            <article class="feat w4">
+            <article class="feat">
+                <div class="feat-icon"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-home"/></svg></div>
+                <h3>Estimation du bien des prospects propriétaires</h3>
+                <p>Quand un prospect est déjà propriétaire, saisissez l’adresse de son bien : Zelyro calcule une fourchette de valeur à partir des ventes réelles des environs (base DVF, publiée par l’État). C’est un outil interne, pour préparer l’appel ou le rendez-vous d’estimation. L’estimation est indicative et se confirme en visite.</p>
+                <div class="feat-visual">
+                    <div class="box">
+                        <div class="vis-label"><span>Exemple d’estimation</span><span>T3 · 68 m²</span></div>
+                        <div class="est-range">276 000 € <span>à</span> 345 000 €</div>
+                        <p class="est-centre">Valeur centrale : 315 000 € · 4 600 €/m²</p>
+                        <div class="est-meta"><span class="pill est-ok">Fiabilité correcte</span><span class="pill">39 ventes comparables</span><span class="pill">dans 300 m</span></div>
+                    </div>
+                </div>
+            </article>
+
+            <article class="feat">
                 <div class="feat-icon"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-cal"/></svg></div>
                 <h3>Suivi des prospects</h3>
                 <p>Chaque prospect avance par statut : Nouveau, Contacté, Visite, Offre, Signé ou Perdu. Des notes datées conservent l’historique des échanges, et des rappels de relance indiquent quand recontacter.</p>
@@ -343,7 +358,7 @@
                 </div>
             </article>
 
-            <article class="feat w2">
+            <article class="feat">
                 <div class="feat-icon"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-bell"/></svg></div>
                 <h3>Alertes par e-mail</h3>
                 <p>Quand un bien correspond à un prospect, vous recevez un e-mail. Inutile de surveiller vous-même chaque nouvelle entrée du portefeuille.</p>
@@ -361,7 +376,7 @@
                 </div>
             </article>
 
-            <article class="feat w2">
+            <article class="feat">
                 <div class="feat-icon"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-inbox"/></svg></div>
                 <h3>Portails, import et formulaire de contact</h3>
                 <p>Les demandes de contact SeLoger et Leboncoin sont détectées dans votre boîte Gmail et deviennent des prospects. Importez aussi vos prospects existants depuis un fichier Excel ou CSV : chaque agence dispose enfin d’un formulaire de contact hébergé, dont les demandes arrivent directement dans l’outil.</p>
@@ -375,7 +390,7 @@
                 </div>
             </article>
 
-            <article class="feat w4">
+            <article class="feat w6">
                 <div class="feat-icon"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-bars"/></svg></div>
                 <h3>Tableau de bord et portefeuille de biens</h3>
                 <p>Le tableau de bord donne une vue d’ensemble de l’activité. Le portefeuille rassemble les fiches de vos biens (type, prix, surface, adresse), qui servent ensuite au rapprochement. Vous les ajoutez un par un ou en important l’export CSV de votre logiciel.</p>
