@@ -7,6 +7,7 @@
     <script src="vendor/react.production.min.js"></script>
     <script src="vendor/react-dom.production.min.js"></script>
     <script src="vendor/babel.min.js"></script>
+    <script src="vendor/qrcode.js"></script>
     <meta name="theme-color" content="#F6F2EA">
     <meta name="robots" content="noindex">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
@@ -254,6 +255,8 @@
                                     </p>
                                 </div>
 
+                                <QrDemo />
+
                                 <div className="panel">
                                     <div className="panel-header">
                                         <h2 className="panel-title">Clés d'activation</h2>
@@ -461,6 +464,68 @@
                         )}
                     </div>
                 </>
+            );
+        }
+
+        // QR code vers la démo mobile (page /demo.html). Dessiné ici même par la bibliothèque hébergée avec le site.
+        const ADRESSE_DEMO = 'https://www.zelyro.fr/demo.html';
+        function QrDemo() {
+            const canvasRef = React.useRef(null);
+            const dessiner = (canvas, taille) => {
+                const qr = qrcode(0, 'Q');
+                qr.addData(ADRESSE_DEMO);
+                qr.make();
+                const n = qr.getModuleCount(), marge = 4, px = Math.floor(taille / (n + 2 * marge));
+                canvas.width = canvas.height = px * (n + 2 * marge);
+                const c = canvas.getContext('2d');
+                c.fillStyle = '#FFFFFF'; c.fillRect(0, 0, canvas.width, canvas.height);
+                c.fillStyle = '#1F2A24';
+                for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) {
+                    if (qr.isDark(r, k)) c.fillRect((k + marge) * px, (r + marge) * px, px, px);
+                }
+            };
+            useEffect(() => { if (canvasRef.current) dessiner(canvasRef.current, 480); }, []);
+            const telechargerPng = () => {
+                const grand = document.createElement('canvas');
+                dessiner(grand, 1600);
+                grand.toBlob((blob) => {
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob); a.download = 'Zelyro_QR_demo.png';
+                    document.body.appendChild(a); a.click(); a.remove();
+                    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+                }, 'image/png');
+            };
+            const telechargerSvg = () => {
+                const qr = qrcode(0, 'Q');
+                qr.addData(ADRESSE_DEMO);
+                qr.make();
+                const svg = qr.createSvgTag({ cellSize: 20, margin: 80, scalable: true })
+                    .replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+                const blob = new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + svg], { type: 'image/svg+xml' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob); a.download = 'Zelyro_QR_demo.svg';
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+            };
+            return (
+                <div className="panel">
+                    <div className="panel-header"><h2 className="panel-title">QR code de la démo</h2></div>
+                    <p className="panel-note">
+                        Un prospect le scanne avec son téléphone et parcourt la démo en cinq écrans. Il mène à la page de démonstration du site.
+                    </p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '24px', alignItems: 'center' }}>
+                        <canvas ref={canvasRef} role="img" aria-label={'QR code vers ' + ADRESSE_DEMO}
+                            style={{ width: '200px', height: '200px', border: '1px solid var(--line)', borderRadius: '12px', background: '#fff' }} />
+                        <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+                            <p style={{ margin: '0 0 14px', overflowWrap: 'anywhere' }}>{ADRESSE_DEMO}</p>
+                            <div className="btn-ligne">
+                                <button className="btn petit" onClick={telechargerPng}>Télécharger en PNG</button>
+                                <button className="btn secondary petit" onClick={telechargerSvg}>Télécharger en SVG (impression)</button>
+                                <a className="btn secondary petit" href="/demo.html" target="_blank" rel="noopener">Ouvrir la démo</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             );
         }
 

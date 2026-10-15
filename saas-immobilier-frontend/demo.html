@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Démo Zelyro</title>
+<meta name="description" content="Démo interactive de Zelyro en cinq écrans : les demandes arrivent, sont classées par score, puis suivies jusqu'à la visite. Exemple avec des données fictives.">
+<meta name="theme-color" content="#F6F2EA">
+<link rel="canonical" href="https://www.zelyro.fr/demo.html">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+<style>
+/* Polices hébergées avec le site (aucune requête vers Google Fonts). */
+@font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('/vendor/fonts/inter-latin-wght-normal.woff2') format('woff2')}
+@font-face{font-family:'Playfair Display';font-style:normal;font-weight:400 900;font-display:swap;src:url('/vendor/fonts/playfair-display-latin-wght-normal.woff2') format('woff2')}
+@font-face{font-family:'Playfair Display';font-style:italic;font-weight:400 900;font-display:swap;src:url('/vendor/fonts/playfair-display-latin-wght-italic.woff2') format('woff2')}
+
+/* Layout: one narrow column built for a phone held in one hand. A step fills the screen, a fixed Suivant button sits at the thumb. Brand: Zelyro cream, sage and ink. */
+:root{
+  color-scheme:light;
+  --bg:#F6F2EA; --surface:#FFFEFB; --ink:#1F2A24; --muted:#5B6660; --line:#E3DDD0;
+  --accent:#4A5D4F; --accent-soft:#E3E8DD; --on-accent:#F6F2EA;
+  --c-chaud:#2A8450; --c-chaud-ink:#FFFFFF;
+  --c-proprio:#DCF2CC; --c-proprio-ink:#2D5A1B; --c-proprio-line:#8FCB6F;
+  --c-pot:#F4902C; --c-pot-ink:#2B1600;
+  --c-froid:#D2402F; --c-froid-ink:#FFFFFF;
+  --wa:#128C4A; --wa-ink:#FFFFFF;
+  --hero-bg:#1F2A24; --hero-ink:#F6F2EA;
+  --display:'Playfair Display',Georgia,'Times New Roman',serif;
+  --sans:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#151B17; --surface:#1E2621; --ink:#EDEAE0; --muted:#A3ADA6; --line:#2D3730;
+    --accent:#9DB5A0; --accent-soft:#28332C; --on-accent:#151B17;
+    --c-chaud:#3DAA68; --c-chaud-ink:#08140C;
+    --c-proprio:#2A3E20; --c-proprio-ink:#C6E8AE; --c-proprio-line:#6FA855;
+    --c-pot:#F7A54A; --c-pot-ink:#2B1600;
+    --c-froid:#E8604F; --c-froid-ink:#1C0805;
+    --wa:#25D366; --wa-ink:#06210F;
+    --hero-bg:#26352B; --hero-ink:#F1EEE4; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#151B17; --surface:#1E2621; --ink:#EDEAE0; --muted:#A3ADA6; --line:#2D3730;
+  --accent:#9DB5A0; --accent-soft:#28332C; --on-accent:#151B17;
+  --c-chaud:#3DAA68; --c-chaud-ink:#08140C;
+    --c-proprio:#2A3E20; --c-proprio-ink:#C6E8AE; --c-proprio-line:#6FA855;
+    --c-pot:#F7A54A; --c-pot-ink:#2B1600;
+    --c-froid:#E8604F; --c-froid-ink:#1C0805;
+    --wa:#25D366; --wa-ink:#06210F;
+    --hero-bg:#26352B; --hero-ink:#F1EEE4; color-scheme:dark;
+}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.5;-webkit-text-size-adjust:100%}
+img{max-width:100%}
+*{box-sizing:border-box}
+.app{min-height:100%;max-width:520px;margin:0 auto;display:flex;flex-direction:column;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-top:max(16px,env(safe-area-inset-top,0px));padding-bottom:16px}
+header.top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--display);font-size:17px;letter-spacing:.2em;font-weight:500}
+.brand i{display:block;width:9px;height:9px;background:var(--accent);transform:rotate(45deg)}
+.count{font-size:13px;color:var(--muted);letter-spacing:.08em;font-variant-numeric:tabular-nums}
+.progress{display:flex;gap:6px;margin-top:14px}
+.progress span{flex:1;height:4px;border-radius:2px;background:var(--line);transition:background .25s}
+.progress span.on{background:var(--accent)}
+main{flex:1;display:flex;flex-direction:column;padding-top:16px;min-width:0}
+.step{display:flex;flex-direction:column;gap:12px;animation:rise .3s ease both}
+@keyframes rise{from{transform:translateY(8px)}to{transform:none}}
+@media (prefers-reduced-motion:reduce){.step{animation:none}.progress span{transition:none}}
+.eyebrow{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);display:flex;align-items:center;gap:8px}
+.eyebrow i{width:7px;height:7px;background:var(--accent);transform:rotate(45deg);display:block}
+h1{font-family:var(--display);font-weight:500;font-size:clamp(27px,8vw,38px);line-height:1.1;letter-spacing:-.01em;margin:0;text-wrap:balance}
+h1 em{color:var(--accent);font-style:italic}
+.lede{margin:0;color:var(--muted);font-size:16px;max-width:34em}
+.note{font-size:13px;color:var(--muted)}
+.list{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
+.row{width:100%;text-align:left;font:inherit;color:inherit;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px 12px;
+  display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:10px;align-items:center}
+@media (max-width:420px){.avatar{display:none}.row{grid-template-columns:minmax(0,1fr) auto}}
+button.row{cursor:pointer}
+button.row:focus-visible,.btn:focus-visible,.copy:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.avatar{width:42px;height:42px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-family:var(--display);font-weight:600;font-size:15px}
+.who{min-width:0}
+.name{font-weight:600;font-size:15.5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tag{font-size:11.5px;font-weight:500;background:var(--accent-soft);color:var(--accent);padding:2px 8px;border-radius:999px;white-space:nowrap}
+.meta{font-size:13.5px;color:var(--muted);margin-top:1px}
+.right{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.chip{font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.chip.chaud{background:var(--c-chaud);color:var(--c-chaud-ink)}
+.chip.proprio{background:var(--c-proprio);color:var(--c-proprio-ink);box-shadow:inset 0 0 0 1px var(--c-proprio-line)}
+.chip.potentiel{background:var(--c-pot);color:var(--c-pot-ink)}
+.chip.froid{background:var(--c-froid);color:var(--c-froid-ink)}
+.row.l-chaud,.row.l-proprio,.row.l-potentiel,.row.l-froid{padding-left:17px}
+.row.l-chaud{box-shadow:inset 6px 0 0 var(--c-chaud)}
+.row.l-proprio{box-shadow:inset 6px 0 0 var(--c-proprio-line)}
+.row.l-potentiel{box-shadow:inset 6px 0 0 var(--c-pot)}
+.row.l-froid{box-shadow:inset 6px 0 0 var(--c-froid)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:10px;height:10px;border-radius:50%;display:block}
+.dot-chaud{background:var(--c-chaud)}.dot-proprio{background:var(--c-proprio-line)}.dot-potentiel{background:var(--c-pot)}.dot-froid{background:var(--c-froid)}
+.score{font-family:var(--display);font-size:26px;line-height:1;font-weight:600;font-variant-numeric:tabular-nums}
+.score small{font-family:var(--sans);font-size:12px;font-weight:400;color:var(--muted);margin-left:2px}
+.time{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.detail{background:var(--surface);border:1px solid var(--line);border-top:0;border-radius:0 0 14px 14px;margin-top:-12px;padding:20px 14px 14px;display:grid;gap:9px}
+.crit{display:grid;grid-template-columns:92px minmax(0,1fr) 44px;gap:10px;align-items:center;font-size:13.5px}
+.crit .bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
+.crit .bar b{display:block;height:100%;background:var(--accent);border-radius:3px}
+.crit .val{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+.hint{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
+.tap{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{transform:scale(1.6);opacity:.45}}
+@media (prefers-reduced-motion:reduce){.tap{animation:none}}
+.todo{display:grid;grid-template-columns:52px minmax(0,1fr);gap:8px 14px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px}
+.todo .n{font-family:var(--display);font-size:42px;line-height:1;font-weight:600;font-variant-numeric:tabular-nums}
+.todo .n.warn{color:var(--c-froid)}
+.todo .k{font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.todo .t{font-size:15.5px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;display:grid;gap:10px}
+.bien{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px 12px;align-items:flex-start}
+.bien strong{font-size:15.5px}
+.bubble{background:var(--accent-soft);border-radius:14px 14px 14px 4px;padding:12px 14px;font-size:15px}
+.bubble .lbl{font-size:11.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin-bottom:4px}
+.notif{display:flex;align-items:center;gap:10px;background:var(--c-proprio);color:var(--c-proprio-ink);border-radius:12px;padding:10px 12px;font-size:14px;font-weight:500}
+.notif i{width:8px;height:8px;border-radius:50%;background:var(--c-chaud);flex:none}
+.cta{display:grid;gap:10px}
+.btn{font:inherit;font-weight:600;font-size:16px;text-align:center;text-decoration:none;border-radius:12px;padding:14px 18px;border:1px solid var(--accent);cursor:pointer;display:block;width:100%}
+.btn.primary{background:var(--accent);color:var(--on-accent)}
+.btn.ghost{background:transparent;color:var(--accent)}
+.contact{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.contact span{font-weight:500;overflow-wrap:anywhere;user-select:all}
+.copy{font:inherit;font-size:13px;font-weight:600;color:var(--accent);background:var(--accent-soft);border:0;border-radius:8px;padding:6px 12px;cursor:pointer;flex:none}
+nav.nav{position:sticky;bottom:env(safe-area-inset-bottom,0px);margin-top:auto;padding-top:12px;padding-bottom:8px;background:linear-gradient(to top,var(--bg) 70%,transparent);display:grid;grid-template-columns:auto 1fr;gap:10px}
+nav.nav .btn{width:auto}
+nav.nav .btn.primary{width:100%}
+nav.nav[data-last="1"]{display:none}
+nav.nav .btn[disabled]{visibility:hidden}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px}
+.hero{background:var(--hero-bg);color:var(--hero-ink);border-radius:18px;padding:16px;display:grid;gap:14px}
+.hero .big{display:flex;align-items:center;gap:14px}
+.hero .num{font-family:var(--display);font-size:72px;line-height:.85;font-weight:600;font-variant-numeric:tabular-nums}
+.hero .txt{font-size:15px;line-height:1.35;opacity:.92}
+.seg{display:flex;gap:5px;height:12px}
+.seg i{display:block;border-radius:6px;transform-origin:left;animation:grow .7s ease both}
+.seg .a{flex:1;background:var(--c-chaud)}
+.seg .b{flex:2;background:var(--c-pot);animation-delay:.2s}
+.seg .c{flex:1;background:var(--c-proprio-line);animation-delay:.4s}
+@keyframes grow{from{transform:scaleX(0)}to{transform:none}}
+@media (prefers-reduced-motion:reduce){.seg i{animation:none}}
+.grp{background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.grp-h{display:flex;align-items:center;gap:12px;padding:12px 14px}
+.badge{width:46px;height:46px;border-radius:13px;display:grid;place-items:center;font-family:var(--display);font-size:28px;font-weight:600;flex:none;font-variant-numeric:tabular-nums}
+.badge.g{background:var(--c-chaud);color:var(--c-chaud-ink)}
+.badge.o{background:var(--c-pot);color:var(--c-pot-ink)}
+.badge.l{background:var(--c-proprio);color:var(--c-proprio-ink);box-shadow:inset 0 0 0 2px var(--c-proprio-line)}
+.grp-h .k{font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.grp-h .t{font-size:14.5px}
+.grp ul{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+.grp li{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 14px}
+.grp li+li{border-top:1px solid var(--line)}
+.grp li .n{font-weight:600;font-size:14.5px}
+.grp li .d{color:var(--muted);font-size:13px}
+.pill{font-size:12.5px;font-weight:600;padding:4px 10px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums;display:inline-flex;align-items:center;gap:5px}
+.pill svg.ic{width:14px;height:14px}
+.pill [data-ic]{display:flex}
+.pill.g{background:var(--c-chaud);color:var(--c-chaud-ink)}
+.pill.o{background:var(--c-pot);color:var(--c-pot-ink)}
+.pill.r{background:var(--c-froid);color:var(--c-froid-ink)}
+.pill.l{background:var(--c-proprio);color:var(--c-proprio-ink);box-shadow:inset 0 0 0 1px var(--c-proprio-line)}
+.btn [data-ic]{display:flex;align-items:center}
+.btn.wa{background:var(--wa);border-color:var(--wa);color:var(--wa-ink)}
+svg.ic{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.acts{display:flex;gap:8px;margin-top:4px}
+.act{flex:1;font:inherit;font-size:13.5px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:7px;padding:10px 6px;border-radius:10px;
+  background:var(--surface);color:var(--ink);border:1px solid var(--line);cursor:pointer;min-width:0}
+.act.wa{background:var(--wa);border-color:var(--wa);color:var(--wa-ink)}
+.act:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.act svg.ic{width:17px;height:17px}
+.actnote{font-size:12.5px;color:var(--muted);min-height:1.4em}
+@media (max-width:420px){.avatar{display:none}.row{grid-template-columns:minmax(0,1fr) auto}}
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <header class="top">
+    <div class="brand"><i></i>ZELYRO</div>
+    <div class="count" id="count">1 / 5</div>
+  </header>
+  <div class="progress" id="progress" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+
+  <main id="stage" aria-live="polite">
+
+    <section class="step" id="s1">
+      <div class="eyebrow"><i></i>Lundi, 8 h 42</div>
+      <h1>Les demandes arrivent <em>de partout.</em></h1>
+      <p class="lede">Portail, site, e-mail, téléphone : quatre demandes ce matin, dans l'ordre d'arrivée.</p>
+      <ul class="list" id="list-arrival"></ul>
+      <p class="note">Exemple, données fictives.</p>
+    </section>
+
+    <section class="step" id="s2" hidden>
+      <div class="eyebrow"><i></i>Classement</div>
+      <h1>Zelyro les rassemble <em>et les classe.</em></h1>
+      <p class="lede">Un seul endroit, du plus chaud au plus froid, avec un score sur 100.</p>
+      <div class="hint"><span class="tap"></span>Touchez un prospect pour voir d'où vient son score.</div>
+      <div class="legend" id="legend"></div>
+      <div class="list" id="list-ranked"></div>
+      <p class="note">Exemple, données fictives.</p>
+    </section>
+
+    <section class="step" id="s3" hidden>
+      <div class="eyebrow"><i></i>Aujourd'hui</div>
+      <h1>Il vous dit <em>par où commencer.</em></h1>
+      <div class="hero">
+        <div class="big"><span class="num">4</span><span class="txt">actions pour ce matin,<br>classées par priorité</span></div>
+        <div class="seg" aria-hidden="true"><i class="a"></i><i class="b"></i><i class="c"></i></div>
+      </div>
+      <div class="list">
+        <div class="grp">
+          <div class="grp-h"><div class="badge g">1</div><div><div class="k">À rappeler en premier</div><div class="t">Une demande de visite</div></div></div>
+          <ul><li><div><div class="n">Thomas Girard</div><div class="d">Villa · Gouvieux</div></div><span class="pill g">83/100</span></li></ul>
+        </div>
+        <div class="grp">
+          <div class="grp-h"><div class="badge o">2</div><div><div class="k">Sans réponse depuis 24 h</div><div class="t">Plus l'attente est longue, plus le prospect refroidit.</div></div></div>
+          <ul>
+            <li><div><div class="n">Karim Benali</div><div class="d">E-mail · Senlis</div></div><span class="pill o"><span data-ic="clock"></span>Attend depuis 26 h</span></li>
+            <li><div><div class="n">Sophie Lambert</div><div class="d">Portail · Chantilly</div></div><span class="pill r"><span data-ic="clock"></span>Attend depuis 31 h</span></li>
+          </ul>
+        </div>
+        <div class="grp">
+          <div class="grp-h"><div class="badge l">1</div><div><div class="k">À recontacter</div><div class="t">Un bien correspond à un ancien prospect</div></div></div>
+          <ul><li><div><div class="n">Marc Lefèvre</div><div class="d">Maison · Senlis · 395 000 €</div></div><span class="pill l">87/100</span></li></ul>
+        </div>
+      </div>
+      <p class="note">Exemple, données fictives.</p>
+    </section>
+
+    <section class="step" id="s4" hidden>
+      <div class="eyebrow"><i></i>Jusqu'à la visite</div>
+      <h1>Puis il vous accompagne <em>jusqu'à la visite.</em></h1>
+      <p class="lede">Le bien est rapproché, le message est rédigé, vous êtes prévenu quand le prospect répond.</p>
+      <div class="card">
+        <div class="bien"><div><strong>Villa 6 pièces</strong><div class="meta">Gouvieux · 640 000 €</div></div><span class="chip chaud">Thomas Girard · 83/100</span></div>
+        <div class="bubble"><div class="lbl">Message prêt à envoyer</div>Bonjour Thomas, une villa de 6 pièces vient d'arriver à Gouvieux, dans votre budget. Je vous propose une visite jeudi à 17 h ?</div>
+        <div id="acts4"></div>
+        <div class="notif"><i></i>Thomas Girard demande à visiter</div>
+      </div>
+      <p class="note">Exemple, données fictives.</p>
+    </section>
+
+    <section class="step" id="s5" hidden>
+      <div class="eyebrow"><i></i>À vous</div>
+      <h1>Voyez-le dans <em>votre agence.</em></h1>
+      <p class="lede">Zelyro s'ajoute à votre logiciel actuel. Rien à changer, rien à ressaisir.</p>
+      <div class="cta">
+        <a class="btn wa" id="wa" href="#" target="_blank" rel="noopener" hidden><span data-ic="wa"></span>WhatsApp</a>
+        <a class="btn primary" id="mail" href="mailto:contact@zelyro.fr?subject=Demande%20de%20d%C3%A9mo%20Zelyro"><span data-ic="mail"></span>E-mail</a>
+        <a class="btn ghost" href="https://www.zelyro.fr" target="_blank" rel="noopener"><span data-ic="globe"></span>Site zelyro.fr</a>
+        <div class="contact"><span id="addr">contact@zelyro.fr</span><button class="copy" id="copy" type="button">Copier</button></div>
+        <button class="btn ghost" id="restart" type="button">Revoir la démo</button>
+      </div>
+    </section>
+
+  </main>
+
+  <nav class="nav" id="nav" data-last="0">
+    <button class="btn ghost" id="prev" type="button" disabled>Précédent</button>
+    <button class="btn primary" id="next" type="button">Commencer</button>
+  </nav>
+</div>
+
+<script>
+(function(){
+  var P=[
+    {i:'TG',n:'Thomas Girard',src:'Formulaire',m:'Villa · Gouvieux · 650 000 €',t:'8 h 31',s:83,lvl:'chaud',L:'Acquéreur chaud',c:[['Budget',20],['Type de bien',18],['Secteur',15],['Financement',16],['Urgence',14]]},
+    {i:'SL',n:'Sophie Lambert',src:'Portail',m:'Appart. · Chantilly · 289 000 €',t:'8 h 36',s:81,lvl:'proprio',L:'Déjà propriétaire',c:[['Budget',19],['Type de bien',20],['Secteur',17],['Financement',13],['Urgence',12]]},
+    {i:'KB',n:'Karim Benali',src:'E-mail',m:'Maison · Senlis · 410 000 €',t:'8 h 12',s:64,lvl:'potentiel',L:'Prospect potentiel',c:[['Budget',16],['Type de bien',14],['Secteur',12],['Financement',12],['Urgence',10]]},
+    {i:'JM',n:'Julie Moreau',src:'Téléphone',m:'Appart. · Creil · 195 000 €',t:'7 h 58',s:38,lvl:'froid',L:'Prospect froid',c:[['Budget',10],['Type de bien',8],['Secteur',8],['Financement',6],['Urgence',6]]}
+  ];
+  function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+  function who(p){return '<div class="avatar">'+esc(p.i)+'</div><div class="who"><div class="name">'+esc(p.n)+' <span class="tag">'+esc(p.src)+'</span></div><div class="meta">'+esc(p.m.replace(/(\d) (\d{3})/g,'$1 $2').replace(/ €/g,' €'))+'</div></div>'}
+
+  // Step 1: arrival order
+  var arrival=[P[3],P[2],P[0],P[1]];
+  document.getElementById('list-arrival').innerHTML=arrival.map(function(p){
+    return '<li class="row">'+who(p)+'<div class="right"><span class="time">'+esc(p.t)+'</span></div></li>';
+  }).join('');
+
+  // Icons (inline, stroke style)
+  var WA_NUMBER=''; // numéro WhatsApp au format international sans + (ex. 33612345678). Vide : le bouton WhatsApp du dernier écran reste masqué.
+  var WA_TEXT='Bonjour, je souhaite une démonstration de Zelyro.';
+  var PH='M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z';
+  var IC={
+    wa:'<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path transform="translate(7 6.8) scale(.42)" d="'+PH+'"/></svg>',
+    mail:'<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>',
+    globe:'<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>',
+    phone:'<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="'+PH+'"/></svg>',
+    clock:'<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>'
+  };
+  function acts(){
+    return '<div class="acts">'+
+      '<button type="button" class="act wa" data-msg="WhatsApp s\'ouvre avec le message prêt à envoyer.">'+IC.wa+'WhatsApp</button>'+
+      '<button type="button" class="act" data-msg="Votre messagerie s\'ouvre avec le message prêt à envoyer.">'+IC.mail+'E-mail</button>'+
+      '<button type="button" class="act" data-msg="L\'appel se lance en un toucher.">'+IC.phone+'Appeler</button></div>'+
+      '<div class="actnote">Un toucher : le contact se fait depuis la fiche.</div>';
+  }
+  document.getElementById('acts4').innerHTML=acts();
+  var noteTimer=null;
+  document.addEventListener('click',function(e){
+    var a=e.target.closest('.act'); if(!a) return;
+    var box=a.closest('.detail, .card'); if(!box) return;
+    var note=box.querySelector('.actnote'); if(!note) return;
+    note.textContent='Exemple : '+a.getAttribute('data-msg');
+    clearTimeout(noteTimer);
+    noteTimer=setTimeout(function(){note.textContent='Un toucher : le contact se fait depuis la fiche.'},2600);
+  });
+
+  // Legend of the colour code
+  var LV=[['proprio','Acquéreur déjà propriétaire'],['chaud','Acquéreur chaud'],['potentiel','Prospect potentiel'],['froid','Prospect froid']];
+  document.getElementById('legend').innerHTML=LV.map(function(l){return '<span><i class="dot-'+l[0]+'"></i>'+esc(l[1])+'</span>'}).join('');
+
+  // Step 2: ranked, expandable
+  var ranked=P.slice().sort(function(a,b){return b.s-a.s});
+  var rk=document.getElementById('list-ranked');
+  rk.innerHTML=ranked.map(function(p,idx){
+    var bars=p.c.map(function(c){return '<div class="crit"><span>'+esc(c[0])+'</span><span class="bar"><b style="width:'+(c[1]/20*100)+'%"></b></span><span class="val">'+c[1]+'/20</span></div>'}).join('');
+    return '<div class="item"><button type="button" class="row l-'+p.lvl+'" aria-expanded="'+(idx===0)+'" data-i="'+idx+'">'+who(p)+
+      '<div class="right"><span class="chip '+p.lvl+'">'+esc(p.L)+'</span><span class="score">'+p.s+'<small>/100</small></span></div></button>'+
+      '<div class="detail" '+(idx===0?'':'hidden')+'>'+bars+acts()+'</div></div>';
+  }).join('');
+  rk.addEventListener('click',function(e){
+    var b=e.target.closest('button.row'); if(!b) return;
+    var open=b.getAttribute('aria-expanded')==='true';
+    var items=rk.querySelectorAll('.item');
+    for(var k=0;k<items.length;k++){
+      items[k].querySelector('button').setAttribute('aria-expanded','false');
+      items[k].querySelector('.detail').hidden=true;
+    }
+    if(!open){b.setAttribute('aria-expanded','true');b.parentNode.querySelector('.detail').hidden=false}
+  });
+
+  // Navigation
+  var N=5, cur=0;
+  var steps=[].slice.call(document.querySelectorAll('.step'));
+  var bars=[].slice.call(document.querySelectorAll('#progress span'));
+  var count=document.getElementById('count'), prev=document.getElementById('prev'), next=document.getElementById('next'), nav=document.getElementById('nav');
+  var labels=['Commencer','Suivant','Suivant','Suivant',''];
+  function go(i){
+    cur=Math.max(0,Math.min(N-1,i));
+    steps.forEach(function(s,k){s.hidden=(k!==cur)});
+    bars.forEach(function(b,k){b.className=(k<=cur)?'on':''});
+    count.textContent=(cur+1)+' / '+N;
+    prev.disabled=(cur===0);
+    next.textContent=labels[cur];
+    nav.setAttribute('data-last',cur===N-1?'1':'0');
+    window.scrollTo(0,0);
+  }
+  next.addEventListener('click',function(){go(cur+1)});
+  prev.addEventListener('click',function(){go(cur-1)});
+  document.getElementById('restart').addEventListener('click',function(){go(0)});
+  document.addEventListener('keydown',function(e){
+    if(e.key==='ArrowRight')go(cur+1); else if(e.key==='ArrowLeft')go(cur-1);
+  });
+  var x0=null;
+  document.addEventListener('touchstart',function(e){x0=e.touches[0].clientX},{passive:true});
+  document.addEventListener('touchend',function(e){
+    if(x0===null)return; var dx=e.changedTouches[0].clientX-x0; x0=null;
+    if(Math.abs(dx)>70){ if(dx<0)go(cur+1); else go(cur-1); }
+  },{passive:true});
+
+  // Copy address, with a selection fallback
+  var addr=document.getElementById('addr'), cp=document.getElementById('copy');
+  cp.addEventListener('click',function(){
+    function done(){cp.textContent='Copié';setTimeout(function(){cp.textContent='Copier'},1800)}
+    function sel(){var r=document.createRange();r.selectNodeContents(addr);var s=window.getSelection();s.removeAllRanges();s.addRange(r);cp.textContent='Sélectionné';setTimeout(function(){cp.textContent='Copier'},1800)}
+    try{ navigator.clipboard.writeText(addr.textContent).then(done,sel) }catch(err){ sel() }
+  });
+  // Static icons and the WhatsApp contact button
+  [].forEach.call(document.querySelectorAll('[data-ic]'),function(el){el.innerHTML=IC[el.getAttribute('data-ic')]||''});
+  var wa=document.getElementById('wa');
+  if(WA_NUMBER){wa.href='https://wa.me/'+WA_NUMBER+'?text='+encodeURIComponent(WA_TEXT);wa.hidden=false}
+  go(0);
+})();
+</script>
+
+</body>
+</html>
