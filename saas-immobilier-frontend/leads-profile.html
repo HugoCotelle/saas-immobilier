@@ -208,6 +208,7 @@
                     <div className="estim-mediane">
                         Valeur centrale : {euros(e.mediane)} · {r.prix_m2.median.toLocaleString('fr-FR')} €/m²
                     </div>
+                    <div className="estim-adresse">Adresse retenue : {r.adresse_trouvee}</div>
                     <div className="estim-meta">
                         <span className={`estim-confiance estim-${r.confiance}`}>{libelleConfiance}</span>
                         <span>{r.nb_ventes} ventes comparables</span>
@@ -451,6 +452,8 @@
                         meuble_souhaite: data.meuble_souhaite === true ? 'oui' : data.meuble_souhaite === false ? 'non' : '',
                         proprietaire: data.proprietaire === true ? 'oui' : data.proprietaire === false ? 'non' : '',
                         bien_adresse: data.bien_adresse ?? '',
+                        bien_code_postal: data.bien_code_postal ?? '',
+                        bien_ville: data.bien_ville ?? '',
                         bien_type: data.bien_type ?? '',
                         bien_surface: data.bien_surface ?? '',
                         bien_pieces: data.bien_pieces ?? '',
@@ -495,6 +498,8 @@
                             // Le bien n'est envoyé que pour un prospect propriétaire : sinon on ne touche à rien.
                             ...(form.proprietaire === 'oui' ? {
                                 bien_adresse: form.bien_adresse.trim() || null,
+                                bien_code_postal: form.bien_code_postal.trim() || null,
+                                bien_ville: form.bien_ville.trim() || null,
                                 bien_type: form.bien_type || null,
                                 bien_surface: form.bien_surface === '' ? null : parseInt(form.bien_surface, 10),
                                 bien_pieces: form.bien_pieces === '' ? null : parseInt(form.bien_pieces, 10)
@@ -547,6 +552,8 @@
                         method: 'POST',
                         body: JSON.stringify({
                             adresse: form.bien_adresse,
+                            code_postal: form.bien_code_postal,
+                            ville: form.bien_ville,
                             type: form.bien_type,
                             surface: form.bien_surface === '' ? null : parseInt(form.bien_surface, 10),
                             pieces: form.bien_pieces === '' ? null : parseInt(form.bien_pieces, 10)
@@ -815,10 +822,22 @@
                                                     <p className="estim-aide">Outil interne, à ne pas montrer au prospect. Estimation indicative d'après les ventes réelles autour du bien (base DVF).</p>
                                                     <div className="form-row">
                                                         <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                                                            <label>Adresse du bien</label>
+                                                            <label>Adresse du bien (numéro et rue)</label>
                                                             <input type="text" maxLength="255" value={form.bien_adresse}
                                                                 onChange={(e) => set('bien_adresse', e.target.value)}
-                                                                placeholder="12 rue Nationale, 59800 Lille" />
+                                                                placeholder="12 rue Nationale" />
+                                                        </div>
+                                                        <div className="form-group">
+                                                            <label>Code postal</label>
+                                                            <input type="text" inputMode="numeric" maxLength="5" value={form.bien_code_postal}
+                                                                onChange={(e) => set('bien_code_postal', e.target.value.replace(/\D/g, ''))}
+                                                                placeholder="59800" />
+                                                        </div>
+                                                        <div className="form-group">
+                                                            <label>Ville</label>
+                                                            <input type="text" maxLength="100" value={form.bien_ville}
+                                                                onChange={(e) => set('bien_ville', e.target.value)}
+                                                                placeholder="Lille" />
                                                         </div>
                                                         <div className="form-group">
                                                             <label>Type de bien</label>

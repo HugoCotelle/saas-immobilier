@@ -953,3 +953,4 @@ body.auth::before {
 .estim-table th { text-align: left; font-weight: 700; color: var(--ink-3); border-bottom: 1px solid var(--line); padding: 6px 8px 6px 0; white-space: nowrap; }
 .estim-table td { padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); color: var(--ink); white-space: nowrap; }
 .estim-source { margin-top: 12px; font-size: 11px; color: var(--ink-3); line-height: 1.5; }
+.estim-adresse { margin-top: 8px; font-size: 12px; color: var(--ink-3); }
