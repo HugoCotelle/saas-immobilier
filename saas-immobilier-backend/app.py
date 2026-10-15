@@ -789,7 +789,9 @@ def _assurer_schema():
                        EXISTS (SELECT 1 FROM information_schema.columns
                                WHERE table_name = 'inbound_emails' AND column_name = 'detail'),
                        EXISTS (SELECT 1 FROM information_schema.columns
-                               WHERE table_name = 'leads' AND column_name = 'proprietaire')
+                               WHERE table_name = 'leads' AND column_name = 'proprietaire'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'leads' AND column_name = 'bien_adresse')
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
