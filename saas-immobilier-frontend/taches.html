@@ -43,6 +43,12 @@
         @media (max-width: 800px) { .tache-fait .form-row { grid-template-columns: 1fr; } }
         .toast-ok { background: var(--sage-50); border: 1px solid var(--sage-100); color: var(--sage-700); border-radius: var(--radius-sm); padding: 12px 16px; font-size: 14px; margin-bottom: 18px; }
         .resp { font-size: 12px; color: var(--ink-3); }
+        .recherche-taches { position: relative; margin: 20px 0 14px; }
+        .recherche-taches input { width: 100%; padding-right: 44px; }
+        .recherche-taches .effacer { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: transparent; border: 0; font-size: 22px; line-height: 1; color: var(--ink-3); cursor: pointer; padding: 4px 10px; }
+        .nb-resultats { font-size: 13px; color: var(--ink-3); margin: -4px 0 14px; }
+        .tache-actions .btn:first-child { margin-left: 0; }
+        .visite-quand { font-family: var(--serif); font-size: 15px; color: var(--sage-700); margin-top: 4px; }
     </style>
 </head>
 <body>
@@ -96,6 +102,48 @@
         }
         function ecrireReportees(jour, ids) {
             try { localStorage.setItem('zelyro_taches_reportees', JSON.stringify({ jour, ids })); } catch (e) { /* ignoré */ }
+        }
+
+        // Recherche : insensible à la casse et aux accents ; tous les mots saisis doivent se retrouver.
+        const normaliser = (x) => String(x == null ? '' : x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+        const chiffres = (x) => String(x == null ? '' : x).replace(/\D/g, '');
+        const motsRecherche = (q) => normaliser(q).split(/\s+/).filter(Boolean);
+        const correspond = (mots, parties) => {
+            if (mots.length === 0) return true;
+            const texte = normaliser(parties.filter(Boolean).join(' '));
+            const nums = chiffres(parties.join(' '));
+            return mots.every((m) => texte.includes(m) || (/^\d{3,}$/.test(m) && nums.includes(m)));
+        };
+        const partiesTache = (t) => [t.lead.name, t.lead.phone, t.lead.email, t.lead.location, t.titre, t.responsable,
+            t.rdv && t.rdv.bien, t.proposition && t.proposition.title,
+            ...t.motifs.map((m) => m.texte), ...t.contexte];
+        const partiesVisite = (v) => [v.lead.name, v.lead.phone, v.lead.email, v.lead.location, v.bien, v.libelle, v.responsable];
+
+        // Visite confirmée plus lointaine que 48 h (rendez-vous pris par le prospect ou fixé par l'agent).
+        function LigneVisite({ v }) {
+            const l = v.lead;
+            const tel = numeroInternational(l.phone);
+            const niveau = NIVEAUX[l.quality] || NIVEAUX.cold;
+            return (
+                <div className="tache normal">
+                    <div className="tache-haut">
+                        <div>
+                            <div className="tache-titre">Visite avec {l.name}</div>
+                            <div className="visite-quand">{v.libelle}{v.bien ? ` · ${v.bien}` : ''}</div>
+                            {v.responsable && <div className="resp">Responsable : {v.responsable}</div>}
+                        </div>
+                        <div className="tache-badges">
+                            <span className={`badge ${niveau[1]} ${palier(l.score, l.quality)}`}>{niveau[0]} · {l.score}/100</span>
+                            {l.proprietaire === true && <span className="chip-proprio">⌂ Déjà propriétaire</span>}
+                            <span className={`statut-badge statut-${l.status}`}>{STATUTS[l.status] || l.status}</span>
+                        </div>
+                    </div>
+                    <div className="tache-actions">
+                        {tel.length >= 9 && <a className="btn petit secondary" href={`tel:+${tel}`}>Appeler</a>}
+                        <a className="btn petit secondary" href={`/leads-profile.html?id=${l.id}`}>Voir la fiche</a>
+                    </div>
+                </div>
+            );
         }
 
         function Carte({ t, user, onFait, onReporter, enCours }) {
@@ -210,6 +258,7 @@
             const [reportees, setReportees] = useState([]);
             const [voirReportees, setVoirReportees] = useState(false);
             const [enCours, setEnCours] = useState(false);
+            const [recherche, setRecherche] = useState('');
 
             const handleLogout = () => {
                 localStorage.removeItem('token');
@@ -270,14 +319,22 @@
             const ramener = () => { setReportees([]); ecrireReportees(data.date, []); setVoirReportees(false); };
 
             const taches = data ? data.taches : [];
+            const mots = useMemo(() => motsRecherche(recherche), [recherche]);
             const visibles = useMemo(() => taches.filter((t) => {
+                if (!correspond(mots, partiesTache(t))) return false;
                 if (!voirReportees && reportees.includes(t.lead.id)) return false;
                 if (voirReportees && !reportees.includes(t.lead.id)) return false;
                 if (filtre === 'appels') return t.action === 'appeler';
                 if (filtre === 'emails') return t.action === 'email';
                 if (filtre === 'visites') return t.action === 'visite';
                 return true;
-            }), [taches, reportees, voirReportees, filtre]);
+            }), [taches, reportees, voirReportees, filtre, mots]);
+            // Visites plus lointaines : dans l'onglet Visites, et aussi dans « Tout » quand on cherche quelqu'un.
+            const aVenir = useMemo(() => {
+                if (voirReportees) return [];
+                if (!(filtre === 'visites' || (filtre === 'tout' && mots.length > 0))) return [];
+                return ((data && data.visites_a_venir) || []).filter((v) => correspond(mots, partiesVisite(v)));
+            }, [data, filtre, mots, voirReportees]);
             const nbReportees = taches.filter((t) => reportees.includes(t.lead.id)).length;
 
             const dateLongue = data ? new Date(data.date + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) : '';
@@ -333,6 +390,18 @@
                                     <div className="stat-card"><div className="stat-value">{c.visites}</div><div className="stat-label">Visites</div></div>
                                 </div>
 
+                                <div className="recherche-taches">
+                                    <input type="search" value={recherche} onChange={(e) => setRecherche(e.target.value)}
+                                        placeholder="Rechercher un prospect, un téléphone, une ville, un bien…"
+                                        aria-label="Rechercher dans la liste À faire" />
+                                    {recherche && <button type="button" className="effacer" onClick={() => setRecherche('')} aria-label="Effacer la recherche">×</button>}
+                                </div>
+                                {mots.length > 0 && (
+                                    <p className="nb-resultats" role="status">
+                                        {visibles.length + aVenir.length === 0 ? 'Aucun résultat' : `${visibles.length + aVenir.length} résultat${visibles.length + aVenir.length > 1 ? 's' : ''}`} pour « {recherche.trim()} ».
+                                    </p>
+                                )}
+
                                 <div className="filtres-taches" role="group" aria-label="Filtrer les tâches">
                                     {[['tout', 'Tout'], ['appels', 'Appels'], ['emails', 'E-mails'], ['visites', 'Visites']].map(([k, l]) => (
                                         <button key={k} className={filtre === k ? 'actif' : ''} onClick={() => setFiltre(k)}>{l}</button>
@@ -346,12 +415,16 @@
                                     {voirReportees && <button onClick={ramener}>Tout remettre dans la liste</button>}
                                 </div>
 
-                                {visibles.length === 0 ? (
+                                {visibles.length === 0 && aVenir.length === 0 ? (
                                     <div className="panel">
                                         <div className="empty-state">
-                                            {taches.length === 0
-                                                ? <>Rien à faire en priorité aujourd'hui.<br />Les nouveaux prospects, relances et demandes de visite apparaîtront ici dès qu'il y en aura.</>
-                                                : <>Aucune tâche dans cette vue.</>}
+                                            {mots.length > 0
+                                                ? <>Aucun résultat pour « {recherche.trim()} ».</>
+                                                : filtre === 'visites'
+                                                    ? <>Aucune visite programmée pour l'instant.<br />Les rendez-vous pris par vos prospects ou fixés depuis une fiche apparaîtront ici.</>
+                                                    : taches.length === 0
+                                                        ? <>Rien à faire en priorité aujourd'hui.<br />Les nouveaux prospects, relances et demandes de visite apparaîtront ici dès qu'il y en aura.</>
+                                                        : <>Aucune tâche dans cette vue.</>}
                                             <br /><a href="/dashboard.html" style={{ color: 'var(--sage-700)' }}>Ouvrir le tableau de bord</a>
                                         </div>
                                     </div>
@@ -369,6 +442,13 @@
                                             </section>
                                         );
                                     })
+                                )}
+                                {aVenir.length > 0 && (
+                                    <section>
+                                        <h2 className="groupe-titre">Visites à venir <span className="nb">{aVenir.length}</span></h2>
+                                        <p className="field-hint" style={{ marginTop: -8, marginBottom: 14 }}>Rendez-vous confirmés dans plus de 48 heures, par ordre de date.</p>
+                                        {aVenir.map((v) => <LigneVisite key={v.lead.id + v.debut} v={v} />)}
+                                    </section>
                                 )}
                                 {data.reste > 0 && <p className="field-hint">… et {data.reste} autre{data.reste > 1 ? 's' : ''} prospect{data.reste > 1 ? 's' : ''} moins prioritaire{data.reste > 1 ? 's' : ''}, qui apparaîtront quand cette liste aura avancé.</p>}
                             </>

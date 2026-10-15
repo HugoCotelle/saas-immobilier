@@ -195,6 +195,55 @@
         const dateHeure = (iso) => new Date(iso).toLocaleString('fr-FR',
             { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
+        const euros = (n) => `${Math.round(n).toLocaleString('fr-FR')} €`;
+
+        // Résultat de l'estimation indicative (usage interne : ne pas montrer au prospect).
+        function ResultatEstimation({ r }) {
+            const e = r.estimation;
+            const libelleConfiance = { bonne: 'Fiabilité correcte', moyenne: 'Fiabilité moyenne', faible: 'Fiabilité faible' }[r.confiance] || '';
+            return (
+                <div className="estim-resultat">
+                    <div className="estim-etiquette">Valeur indicative</div>
+                    <div className="estim-fourchette">{euros(e.basse)} <span>à</span> {euros(e.haute)}</div>
+                    <div className="estim-mediane">
+                        Valeur centrale : {euros(e.mediane)} · {r.prix_m2.median.toLocaleString('fr-FR')} €/m²
+                    </div>
+                    <div className="estim-meta">
+                        <span className={`estim-confiance estim-${r.confiance}`}>{libelleConfiance}</span>
+                        <span>{r.nb_ventes} ventes comparables</span>
+                        <span>{r.rayon_m ? `dans ${r.rayon_m} m` : 'dans la commune'}</span>
+                        <span>sur {r.annees} ans</span>
+                    </div>
+                    <ul className="estim-avertissements">
+                        {r.avertissements.map((a, i) => <li key={i}>{a}</li>)}
+                    </ul>
+                    <details className="estim-details">
+                        <summary>Voir les ventes les plus proches</summary>
+                        <div className="estim-table-wrap">
+                            <table className="estim-table">
+                                <thead>
+                                    <tr><th>Adresse</th><th>Date</th><th>Surface</th><th>Prix</th><th>€/m²</th><th>Distance</th></tr>
+                                </thead>
+                                <tbody>
+                                    {r.comparables.map((c, i) => (
+                                        <tr key={i}>
+                                            <td>{c.adresse || 'Adresse non communiquée'}</td>
+                                            <td>{dateCourte(c.date)}</td>
+                                            <td>{c.surface} m²{c.pieces ? ` · ${c.pieces} p.` : ''}</td>
+                                            <td>{euros(c.prix)}</td>
+                                            <td>{c.prix_m2.toLocaleString('fr-FR')}</td>
+                                            <td>{c.distance_m} m</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </details>
+                    <p className="estim-source">Source : {r.source}. Estimation indicative, à confirmer par une visite.</p>
+                </div>
+            );
+        }
+
         function LeadProfile() {
             const [lead, setLead] = useState(null);
             const [form, setForm] = useState(null);
@@ -219,6 +268,7 @@
             const [occupe, setOccupe] = useState(false);
             const [erreurSuivi, setErreurSuivi] = useState(null);
             const [confirmerSuppression, setConfirmerSuppression] = useState(false);
+            const [estim, setEstim] = useState({ chargement: false, resultat: null, erreur: null });
 
             const leadId = new URLSearchParams(window.location.search).get('id');
 
@@ -400,6 +450,10 @@
                         situation_pro: data.situation_pro ?? '',
                         meuble_souhaite: data.meuble_souhaite === true ? 'oui' : data.meuble_souhaite === false ? 'non' : '',
                         proprietaire: data.proprietaire === true ? 'oui' : data.proprietaire === false ? 'non' : '',
+                        bien_adresse: data.bien_adresse ?? '',
+                        bien_type: data.bien_type ?? '',
+                        bien_surface: data.bien_surface ?? '',
+                        bien_pieces: data.bien_pieces ?? '',
                         notes: data.notes ?? ''
                     });
                     setError(null);
@@ -438,6 +492,13 @@
                             financing_amount: form.financing_amount === '' ? null : parseInt(form.financing_amount, 10),
                             transaction: form.transaction,
                             proprietaire: form.proprietaire === '' ? null : form.proprietaire === 'oui',
+                            // Le bien n'est envoyé que pour un prospect propriétaire : sinon on ne touche à rien.
+                            ...(form.proprietaire === 'oui' ? {
+                                bien_adresse: form.bien_adresse.trim() || null,
+                                bien_type: form.bien_type || null,
+                                bien_surface: form.bien_surface === '' ? null : parseInt(form.bien_surface, 10),
+                                bien_pieces: form.bien_pieces === '' ? null : parseInt(form.bien_pieces, 10)
+                            } : {}),
                             // Le dossier du locataire n'a de sens que pour une location : on ne l'efface pas si l'agent bascule en achat.
                             ...(form.transaction === 'location' ? {
                                 revenus: form.revenus === '' ? null : parseInt(form.revenus, 10),
@@ -477,6 +538,25 @@
             };
 
             const set = (k, v) => { setForm({ ...form, [k]: v }); setSaved(false); setDoublon(null); };
+
+            // Estimation indicative du bien d'un prospect propriétaire (les valeurs saisies, enregistrées ou non).
+            const estimerBien = async () => {
+                setEstim({ chargement: true, resultat: null, erreur: null });
+                try {
+                    const r = await appel(`/api/v1/leads/${leadId}/estimation`, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            adresse: form.bien_adresse,
+                            type: form.bien_type,
+                            surface: form.bien_surface === '' ? null : parseInt(form.bien_surface, 10),
+                            pieces: form.bien_pieces === '' ? null : parseInt(form.bien_pieces, 10)
+                        })
+                    });
+                    setEstim({ chargement: false, resultat: r, erreur: null });
+                } catch (e) {
+                    setEstim({ chargement: false, resultat: null, erreur: e.message });
+                }
+            };
 
             const apercu = form ? expliquerQualite({
                 financing_status: form.financing_status,
@@ -728,6 +808,45 @@
                                                     </select>
                                                 </div>
                                             </div>
+
+                                            {form.proprietaire === 'oui' && (
+                                                <div className="bloc-estimation">
+                                                    <div className="estim-titre">Estimer son bien</div>
+                                                    <p className="estim-aide">Outil interne, à ne pas montrer au prospect. Estimation indicative d'après les ventes réelles autour du bien (base DVF).</p>
+                                                    <div className="form-row">
+                                                        <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                                                            <label>Adresse du bien</label>
+                                                            <input type="text" maxLength="255" value={form.bien_adresse}
+                                                                onChange={(e) => set('bien_adresse', e.target.value)}
+                                                                placeholder="12 rue Nationale, 59800 Lille" />
+                                                        </div>
+                                                        <div className="form-group">
+                                                            <label>Type de bien</label>
+                                                            <select value={form.bien_type} onChange={(e) => set('bien_type', e.target.value)}>
+                                                                <option value="">Choisir</option>
+                                                                <option value="Appartement">Appartement</option>
+                                                                <option value="Maison">Maison</option>
+                                                            </select>
+                                                        </div>
+                                                        <div className="form-group">
+                                                            <label>Surface habitable (m²)</label>
+                                                            <input type="number" min="9" max="1000" value={form.bien_surface}
+                                                                onChange={(e) => set('bien_surface', e.target.value)} />
+                                                        </div>
+                                                        <div className="form-group">
+                                                            <label>Pièces (facultatif)</label>
+                                                            <input type="number" min="1" max="50" value={form.bien_pieces}
+                                                                onChange={(e) => set('bien_pieces', e.target.value)} />
+                                                        </div>
+                                                    </div>
+                                                    <button type="button" className="btn petit" onClick={estimerBien} disabled={estim.chargement}>
+                                                        {estim.chargement ? 'Calcul en cours…' : 'Estimer la valeur'}
+                                                    </button>
+                                                    <span className="estim-rappel"> Enregistrez la fiche pour garder l'adresse.</span>
+                                                    {estim.erreur && <div className="estim-erreur">{estim.erreur}</div>}
+                                                    {estim.resultat && <ResultatEstimation r={estim.resultat} />}
+                                                </div>
+                                            )}
 
                                             <div className="form-row">
                                                 {!location && (
