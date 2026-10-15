@@ -522,6 +522,10 @@ _DDL_SURFACE = (
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS situation_pro VARCHAR(20)",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS meuble_souhaite BOOLEAN",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS proprietaire BOOLEAN",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS bien_adresse VARCHAR(255)",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS bien_type VARCHAR(20)",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS bien_surface INTEGER",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS bien_pieces INTEGER",
     "ALTER TABLE properties ADD COLUMN IF NOT EXISTS transaction VARCHAR(10) NOT NULL DEFAULT 'vente'",
     "ALTER TABLE properties ADD COLUMN IF NOT EXISTS meuble BOOLEAN",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS surface_min INTEGER",
@@ -2815,7 +2819,7 @@ def get_lead_detail(lead_id):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, user_id, name, email, phone, budget, location, property_type, surface_min, activite, status, financing_status, purchase_urgency, lead_quality, financing_amount, notes, created_at, source, status_changed_at, first_contact_at, consent_at, transaction, revenus, garants, situation_pro, meuble_souhaite, proprietaire, assigned_to FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.agency_id))
+        cur.execute("SELECT id, user_id, name, email, phone, budget, location, property_type, surface_min, activite, status, financing_status, purchase_urgency, lead_quality, financing_amount, notes, created_at, source, status_changed_at, first_contact_at, consent_at, transaction, revenus, garants, situation_pro, meuble_souhaite, proprietaire, bien_adresse, bien_type, bien_surface, bien_pieces, assigned_to FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.agency_id))
         lead = cur.fetchone()
         if lead:
             _charger_engagement(cur, request.agency_id, [lead], lignes=True)
@@ -2884,6 +2888,15 @@ def update_lead_financing(lead_id):
             contact['meuble_souhaite'] = _booleen_souple(data.get('meuble_souhaite'))
         if 'proprietaire' in data:
             contact['proprietaire'] = _booleen_souple(data.get('proprietaire'))
+        # Bien du prospect propriétaire (sert à l'estimation indicative) : seulement si présent.
+        if 'bien_adresse' in data:
+            contact['bien_adresse'] = _texte_court(data.get('bien_adresse'), 255)
+        if 'bien_type' in data:
+            contact['bien_type'] = data.get('bien_type') if data.get('bien_type') in ('Appartement', 'Maison') else None
+        if 'bien_surface' in data:
+            contact['bien_surface'] = _entier_borne(data.get('bien_surface'), 100000)
+        if 'bien_pieces' in data:
+            contact['bien_pieces'] = _entier_borne(data.get('bien_pieces'), 50)
 
         conn = get_db_connection()
         try:
@@ -2942,6 +2955,326 @@ def update_lead_financing(lead_id):
             conn.close()
 
         return jsonify({"message": "Lead updated successfully"}), 200
+    except Exception:
+        return erreur_interne()
+
+
+# ===== ESTIMATION INDICATIVE D'UN BIEN (prospect déjà propriétaire) =====
+#
+# Outil interne : il aide l'agent à préparer l'appel ou le rendez-vous
+# d'estimation. Il n'est jamais montré au prospect et ne remplace ni une visite
+# ni un avis de valeur. Source : DVF (Demandes de valeurs foncières), la base
+# officielle des ventes notariées publiée par l'État (data.gouv.fr). Le calcul
+# est une médiane de prix au m² sur des ventes comparables proches.
+
+DVF_URL = "https://files.data.gouv.fr/geo-dvf/latest/csv/{annee}/communes/{dep}/{insee}.csv"
+GEOCODAGES = ("https://data.geopf.fr/geocodage/search", "https://api-adresse.data.gouv.fr/search/")
+DVF_TYPES = ('Appartement', 'Maison')
+DVF_TTL = 7 * 24 * 3600            # les fichiers DVF changent au plus deux fois par an
+DVF_MAX_COMMUNES = 20              # communes gardées en mémoire (les plus récentes)
+DVF_TAILLE_MAX = 40 * 1024 * 1024  # un fichier communal dépasse rarement quelques Mo
+DVF_ANNEES = 5                     # profondeur d'historique recherchée
+DVF_MIN_COMPARABLES = 8            # seuil d'une estimation correcte
+DVF_MIN_ABSOLU = 4                 # en dessous, on ne donne aucun chiffre
+_dvf_cache = {}
+_dvf_verrou = threading.Lock()
+
+
+class EstimationErreur(Exception):
+    """Erreur présentable à l'agent. statut : code HTTP à renvoyer."""
+    def __init__(self, message, statut=422):
+        super().__init__(message)
+        self.message = message
+        self.statut = statut
+
+
+def _dvf_distance_m(lat1, lon1, lat2, lon2):
+    """Distance à vol d'oiseau en mètres (formule de haversine)."""
+    import math
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(min(1.0, math.sqrt(a)))
+
+
+def _dvf_percentile(valeurs_triees, q):
+    """Percentile q (0 à 1) avec interpolation linéaire, sur une liste triée."""
+    n = len(valeurs_triees)
+    if n == 1:
+        return valeurs_triees[0]
+    pos = (n - 1) * q
+    bas = int(pos)
+    haut = min(bas + 1, n - 1)
+    return valeurs_triees[bas] + (valeurs_triees[haut] - valeurs_triees[bas]) * (pos - bas)
+
+
+def _dvf_nombre(v):
+    try:
+        return float(str(v).replace(',', '.'))
+    except (TypeError, ValueError):
+        return None
+
+
+def _dvf_extraire_ventes(lignes):
+    """Transforme les lignes du CSV DVF en ventes exploitables.
+
+    Une mutation (id_mutation) peut contenir plusieurs lignes : un seul logement
+    plus ses dépendances (cave, garage) est gardé ; les ventes groupées, les
+    locaux d'activité, les VEFA, les échanges et les adjudications sont écartés,
+    car leur prix ne se ramène pas à celui d'un logement ancien.
+    """
+    mutations = {}
+    for ligne in lignes:
+        mutations.setdefault(ligne.get('id_mutation'), []).append(ligne)
+    ventes = []
+    for id_mut, rangs in mutations.items():
+        if not id_mut:
+            continue
+        if any(r.get('nature_mutation') != 'Vente' for r in rangs):
+            continue
+        if len({r.get('numero_disposition') for r in rangs}) > 1:
+            continue
+        locaux = [r for r in rangs if r.get('type_local') in DVF_TYPES]
+        if len(locaux) != 1:
+            continue
+        if any(r.get('type_local') and r.get('type_local') not in DVF_TYPES + ('Dépendance',) for r in rangs):
+            continue
+        loc = locaux[0]
+        prix = _dvf_nombre(loc.get('valeur_fonciere'))
+        surface = _dvf_nombre(loc.get('surface_reelle_bati'))
+        lat, lon = _dvf_nombre(loc.get('latitude')), _dvf_nombre(loc.get('longitude'))
+        if not prix or not surface or lat is None or lon is None:
+            continue
+        if surface < 9 or surface > 1000 or prix < 10000:
+            continue
+        pm2 = prix / surface
+        if not 300 <= pm2 <= 40000:
+            continue
+        try:
+            date_vente = date.fromisoformat(loc.get('date_mutation') or '')
+        except ValueError:
+            continue
+        adresse = ' '.join(x for x in (loc.get('adresse_numero'), loc.get('adresse_suffixe'),
+                                       loc.get('adresse_nom_voie')) if x).strip()
+        ventes.append({
+            'type': loc['type_local'], 'prix': prix, 'surface': surface, 'pm2': pm2,
+            'pieces': int(_dvf_nombre(loc.get('nombre_pieces_principales')) or 0) or None,
+            'date': date_vente, 'lat': lat, 'lon': lon, 'adresse': adresse or None,
+        })
+    return ventes
+
+
+def _dvf_dossier(insee):
+    """Dossier départemental de l'URL : 2 chiffres, 3 pour l'outre-mer."""
+    return insee[:3] if insee.startswith('97') else insee[:2]
+
+
+def _dvf_telecharger(annee, insee):
+    """Ventes d'une commune pour une année, [] si le fichier n'existe pas."""
+    url = DVF_URL.format(annee=annee, dep=_dvf_dossier(insee), insee=insee)
+    try:
+        r = requests.get(url, timeout=(5, 25), stream=True)
+    except requests.RequestException:
+        raise EstimationErreur("La base des ventes (DVF) ne répond pas pour le moment. Réessayez dans quelques minutes.", 502)
+    try:
+        if r.status_code == 404:
+            return []
+        if r.status_code != 200:
+            raise EstimationErreur("La base des ventes (DVF) est momentanément indisponible. Réessayez plus tard.", 502)
+        morceaux, taille = [], 0
+        for bloc in r.iter_content(65536):
+            taille += len(bloc)
+            if taille > DVF_TAILLE_MAX:
+                raise EstimationErreur("Le fichier des ventes de cette commune est trop volumineux.", 502)
+            morceaux.append(bloc)
+    except requests.RequestException:
+        raise EstimationErreur("La base des ventes (DVF) a été interrompue. Réessayez dans quelques minutes.", 502)
+    finally:
+        r.close()
+    texte = b''.join(morceaux).decode('utf-8', errors='replace')
+    return _dvf_extraire_ventes(csv.DictReader(io.StringIO(texte)))
+
+
+def _dvf_ventes_commune(insee):
+    """Ventes des dernières années pour une commune, avec cache mémoire."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    maintenant = time.time()
+    with _dvf_verrou:
+        entree = _dvf_cache.get(insee)
+        if entree and maintenant - entree[0] < DVF_TTL:
+            return entree[1]
+    annee_courante = date.today().year
+    annees = list(range(annee_courante - DVF_ANNEES, annee_courante + 1))
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        resultats = list(pool.map(lambda a: _dvf_telecharger(a, insee), annees))
+    ventes = [v for liste in resultats for v in liste]
+    with _dvf_verrou:
+        _dvf_cache[insee] = (maintenant, ventes)
+        while len(_dvf_cache) > DVF_MAX_COMMUNES:
+            plus_ancienne = min(_dvf_cache, key=lambda k: _dvf_cache[k][0])
+            del _dvf_cache[plus_ancienne]
+    return ventes
+
+
+def _dvf_geocoder(adresse):
+    """Position d'une adresse via la Base adresse nationale (service public)."""
+    dernier = None
+    for url in GEOCODAGES:
+        try:
+            r = requests.get(url, params={'q': adresse, 'limit': 1}, timeout=(4, 8))
+            if r.status_code != 200:
+                dernier = r.status_code
+                continue
+            trouves = (r.json() or {}).get('features') or []
+        except (requests.RequestException, ValueError):
+            dernier = 'réseau'
+            continue
+        if not trouves:
+            raise EstimationErreur("Adresse introuvable. Indiquez le numéro, la rue, le code postal et la ville.")
+        prop = trouves[0].get('properties') or {}
+        lon, lat = trouves[0]['geometry']['coordinates'][:2]
+        if prop.get('type') not in ('housenumber', 'street') or (prop.get('score') or 0) < 0.5:
+            raise EstimationErreur("Adresse trop imprécise. Indiquez le numéro, la rue, le code postal et la ville.")
+        return {'lat': lat, 'lon': lon, 'label': prop.get('label') or adresse, 'insee': prop.get('citycode')}
+    raise EstimationErreur("Le service de localisation des adresses ne répond pas. Réessayez dans quelques minutes.", 502)
+
+
+# Combinaisons essayées de la plus précise à la plus large : écart de surface
+# toléré puis rayon autour du bien (None = toute la commune).
+_DVF_NIVEAUX = ((0.30, 300), (0.30, 600), (0.30, 1000), (0.30, 2000), (0.50, 2000), (0.50, None))
+
+
+def _dvf_choisir(ventes, type_bien, surface, lat, lon, aujourdhui):
+    """Sélectionne les ventes comparables : (liste, rayon, écart de surface, années)."""
+    memes = [v for v in ventes if v['type'] == type_bien]
+    for v in memes:
+        v['_dist'] = _dvf_distance_m(lat, lon, v['lat'], v['lon'])
+    meilleur = None
+    for ecart, rayon in _DVF_NIVEAUX:
+        candidats = [v for v in memes
+                     if abs(v['surface'] - surface) <= ecart * surface
+                     and (rayon is None or v['_dist'] <= rayon)]
+        recents = [v for v in candidats if (aujourdhui - v['date']).days <= 3 * 365]
+        for liste, annees in ((recents, 3), (candidats, DVF_ANNEES)):
+            if len(liste) >= DVF_MIN_COMPARABLES:
+                return liste, rayon, ecart, annees
+            if len(liste) >= DVF_MIN_ABSOLU:
+                meilleur = (liste, rayon, ecart, annees)
+    return meilleur
+
+
+def _dvf_sans_aberrants(liste):
+    """Écarte les prix au m² hors de 1,5 écart interquartile (erreurs de saisie, ventes atypiques)."""
+    if len(liste) < DVF_MIN_COMPARABLES:
+        return liste
+    tries = sorted(v['pm2'] for v in liste)
+    q1, q3 = _dvf_percentile(tries, .25), _dvf_percentile(tries, .75)
+    marge = 1.5 * (q3 - q1)
+    gardees = [v for v in liste if q1 - marge <= v['pm2'] <= q3 + marge]
+    return gardees if len(gardees) >= DVF_MIN_ABSOLU else liste
+
+
+def _dvf_arrondi(valeur):
+    pas = 5000 if valeur >= 300000 else 1000
+    return int(round(valeur / pas) * pas)
+
+
+def estimer_bien(adresse, type_bien, surface, pieces=None, ventes_fn=None, geocodeur=None, aujourdhui=None):
+    """Fourchette de valeur indicative d'un logement d'après les ventes DVF proches.
+
+    ventes_fn(insee) et geocodeur(adresse) sont injectables pour les tests.
+    """
+    aujourdhui = aujourdhui or date.today()
+    pos = (geocodeur or _dvf_geocoder)(adresse)
+    if not pos.get('insee'):
+        raise EstimationErreur("Commune introuvable pour cette adresse.")
+    ventes = (ventes_fn or _dvf_ventes_commune)(pos['insee'])
+    if not ventes:
+        raise EstimationErreur("Aucune vente enregistrée pour cette commune dans la base DVF "
+                               "(l'Alsace-Moselle et Mayotte n'y figurent pas).")
+    choix = _dvf_choisir(ventes, type_bien, surface, pos['lat'], pos['lon'], aujourdhui)
+    if not choix:
+        raise EstimationErreur("Trop peu de ventes comparables autour de ce bien pour donner un chiffre fiable. "
+                               "Une visite ou l'avis d'un confrère reste nécessaire.")
+    liste, rayon, ecart, annees = choix
+    liste = _dvf_sans_aberrants(liste)
+    pm2 = sorted(v['pm2'] for v in liste)
+    mediane, bas, haut = _dvf_percentile(pm2, .5), _dvf_percentile(pm2, .25), _dvf_percentile(pm2, .75)
+    n = len(liste)
+    dispersion = haut / bas if bas else 9
+    if n >= 15 and (rayon or 99999) <= 1000 and dispersion <= 1.35:
+        confiance = 'bonne'
+    elif n >= DVF_MIN_COMPARABLES:
+        confiance = 'moyenne'
+    else:
+        confiance = 'faible'
+    avertissements = []
+    if type_bien == 'Maison':
+        avertissements.append("La surface du terrain, la piscine et l'état de la maison ne sont pas pris en compte.")
+    else:
+        avertissements.append("L'étage, l'extérieur, l'état et le DPE ne sont pas pris en compte.")
+    if rayon is None:
+        avertissements.append("Peu de ventes à proximité : le calcul porte sur toute la commune.")
+    avertissements.append("Les prix de vente publiés ont plusieurs mois de décalage.")
+    plus_proches = sorted(liste, key=lambda v: v['_dist'])[:6]
+    return {
+        'adresse_trouvee': pos['label'],
+        'type': type_bien,
+        'surface': surface,
+        'estimation': {'basse': _dvf_arrondi(bas * surface), 'mediane': _dvf_arrondi(mediane * surface),
+                       'haute': _dvf_arrondi(haut * surface)},
+        'prix_m2': {'bas': round(bas), 'median': round(mediane), 'haut': round(haut)},
+        'nb_ventes': n,
+        'rayon_m': rayon,
+        'ecart_surface_pct': int(ecart * 100),
+        'annees': annees,
+        'confiance': confiance,
+        'avertissements': avertissements,
+        'comparables': [{'adresse': v['adresse'], 'date': v['date'].isoformat(), 'surface': round(v['surface']),
+                         'pieces': v['pieces'], 'prix': int(round(v['prix'])), 'prix_m2': round(v['pm2']),
+                         'distance_m': int(round(v['_dist'] / 10.0) * 10)} for v in plus_proches],
+        'source': "DVF, base officielle des ventes notariées (data.gouv.fr)",
+    }
+
+
+@app.route('/api/v1/leads/<int:lead_id>/estimation', methods=['POST'])
+@limiter.limit("40 per hour", key_func=_cle_utilisateur)
+@token_required
+def estimation_bien_lead(lead_id):
+    """Estimation indicative du bien d'un prospect propriétaire (usage interne).
+
+    Le corps peut contenir adresse, type (Appartement ou Maison), surface et
+    pieces ; à défaut, ceux enregistrés sur la fiche sont utilisés.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        conn = get_db_connection()
+        try:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("SELECT bien_adresse, bien_type, bien_surface, bien_pieces FROM leads WHERE id = %s AND user_id = %s",
+                        (lead_id, request.agency_id))
+            fiche = cur.fetchone()
+        finally:
+            conn.close()
+        if fiche is None:
+            return jsonify({"message": "Lead not found"}), 404
+
+        adresse = _texte_court(data.get('adresse') if 'adresse' in data else fiche['bien_adresse'], 255)
+        type_bien = data.get('type') if 'type' in data else fiche['bien_type']
+        surface = _entier_borne(data.get('surface') if 'surface' in data else fiche['bien_surface'], 100000)
+        pieces = _entier_borne(data.get('pieces') if 'pieces' in data else fiche['bien_pieces'], 50)
+        if not adresse or len(adresse) < 6:
+            return jsonify({"message": "Indiquez l'adresse du bien (numéro, rue, code postal, ville)."}), 400
+        if type_bien not in DVF_TYPES:
+            return jsonify({"message": "Choisissez le type de bien : appartement ou maison."}), 400
+        if not surface or not 9 <= surface <= 1000:
+            return jsonify({"message": "Indiquez la surface habitable, entre 9 et 1000 m²."}), 400
+        try:
+            return jsonify(estimer_bien(adresse, type_bien, surface, pieces)), 200
+        except EstimationErreur as e:
+            return jsonify({"message": e.message}), e.statut
     except Exception:
         return erreur_interne()
 
@@ -6214,7 +6547,8 @@ def _construire_taches(cur, agence_id, user_id, role):
     """, (agence_id,))
     leads = [l for l in cur.fetchall() if role == 'admin' or l['assigned_to'] in (None, user_id)]
     vide = {"date": aujourdhui.isoformat(), "taches": [], "reste": 0,
-            "compteurs": {"total": 0, "urgentes": 0, "appels": 0, "emails": 0, "visites": 0}}
+            "compteurs": {"total": 0, "urgentes": 0, "appels": 0, "emails": 0, "visites": 0},
+            "visites_a_venir": []}
     if not leads:
         return vide
     _charger_engagement(cur, agence_id, leads)
@@ -6248,6 +6582,28 @@ def _construire_taches(cur, agence_id, user_id, role):
             ajouter(r['lead_id'], 74, 'visite', f"Visite demain à {heure}{bien} : confirmez-la au prospect", 'visite')
         rdv_par_lead[r['lead_id']] = {"debut": _iso(r['debut']), "libelle": _libelle_rdv(r['debut']),
                                       "bien": r['bien'], "passe": r['debut'] < maintenant}
+
+    # 1 bis. Visites confirmées plus lointaines : elles n'ont rien d'urgent, mais un rendez-vous pris
+    # par un prospect doit apparaître dans l'onglet « Visites » dès qu'il est fixé, pas 48 h avant.
+    cur.execute("""SELECT r.lead_id, r.debut, r.bien FROM lead_rdv r JOIN leads l ON l.id = r.lead_id
+                   WHERE l.user_id = %s AND r.statut = 'confirme' AND r.debut IS NOT NULL
+                     AND r.debut > %s AND r.debut <= %s ORDER BY r.debut""",
+                (agence_id, maintenant + timedelta(hours=48), maintenant + timedelta(days=180)))
+    visites_a_venir = []
+    for r in cur.fetchall():
+        l = par_id.get(r['lead_id'])
+        if not l:
+            continue
+        libelle = _libelle_rdv(r['debut'])
+        visites_a_venir.append({
+            "lead": {"id": l['id'], "name": l['name'], "phone": l['phone'], "email": l['email'],
+                     "location": l['location'], "status": l['status'] or 'nouveau',
+                     "quality": l['_niveau'], "score": l['_points'], "proprietaire": l.get('proprietaire')},
+            "debut": _iso(r['debut']), "libelle": libelle, "bien": r['bien'],
+            "titre": f"Visite avec {l['name']} — {libelle}",
+            "responsable": ((_nom_membre(l['resp_prenom'], l['resp_email']) if l['assigned_to'] else "Sans responsable")
+                            if role == 'admin' else None),
+        })
 
     # 2. Ce que le prospect a fait depuis la dernière action de l'agence.
     cur.execute("""SELECT lead_id, kind, detail, created_at FROM lead_events
@@ -6400,11 +6756,12 @@ def _construire_taches(cur, agence_id, user_id, role):
     visibles = taches[:TACHES_MAX]
     return {
         "date": aujourdhui.isoformat(), "taches": visibles, "reste": total - len(visibles),
+        "visites_a_venir": visites_a_venir,
         "compteurs": {"total": total,
                       "urgentes": sum(1 for t in taches if t['priorite'] == 'urgent'),
                       "appels": sum(1 for t in taches if t['action'] == 'appeler'),
                       "emails": sum(1 for t in taches if t['action'] == 'email'),
-                      "visites": sum(1 for t in taches if t['action'] == 'visite')},
+                      "visites": sum(1 for t in taches if t['action'] == 'visite') + len(visites_a_venir)},
     }
 
 
