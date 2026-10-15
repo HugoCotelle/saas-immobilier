@@ -49,6 +49,17 @@
             ? (q === 'hot' ? 'p-vert' : q === 'warm' ? 'p-orange' : 'p-gris')
             : score >= 90 ? 'p-go' : score >= 80 ? 'p-vert' : score >= 65 ? 'p-jaune' : score >= 45 ? 'p-orange' : 'p-gris';
 
+        // Catégories de prospects (une par palier de couleur), de la plus chaude à la plus froide.
+        const CATEGORIES = [
+            ['p-go', 'À appeler maintenant (90 et +)'],
+            ['p-vert', 'Très bon prospect (80 à 89)'],
+            ['p-jaune', 'Bon prospect (65 à 79)'],
+            ['p-orange', 'À suivre (45 à 64)'],
+            ['p-gris', 'Premier contact (moins de 45)']
+        ];
+        const rangCategorie = (l) => CATEGORIES.findIndex((c) => c[0] === palier(l.quality_score, l.lead_quality || 'cold'));
+        const scoreDe = (l) => (typeof l.quality_score === 'number' ? l.quality_score : -1);
+
         const BADGES = {
             hot: ['badge-hot', 'Acheteur actif'],
             warm: ['badge-warm', 'Projet en cours'],
@@ -116,6 +127,8 @@
             const [filtreTransaction, setFiltreTransaction] = useState('tout');   // tout | vente | location
             const [membres, setMembres] = useState([]);
             const [filtreResp, setFiltreResp] = useState('tous');                  // tous | mes | sans
+            const [filtreCategorie, setFiltreCategorie] = useState('toutes');      // toutes | p-go | p-vert | ...
+            const [tri, setTri] = useState('nom');                                   // nom | meilleurs | faibles
 
             useEffect(() => {
                 const token = localStorage.getItem('token');
@@ -259,9 +272,14 @@
             const compte = (statut) => parRecherche.filter((l) => statutDe(l) === statut).length;
             const relanceDue = (l) => l.next_reminder && l.next_reminder <= aujourdhui();
             const nbRelances = parRecherche.filter(relanceDue).length;
-            const affiches = parRecherche
-                .filter((l) => filtreStatut === 'all' ? true : filtreStatut === 'relance' ? relanceDue(l) : statutDe(l) === filtreStatut)
-                .sort(parNom);
+            const parStatut = parRecherche
+                .filter((l) => filtreStatut === 'all' ? true : filtreStatut === 'relance' ? relanceDue(l) : statutDe(l) === filtreStatut);
+            const nbCategorie = (cat) => parStatut.filter((l) => palier(l.quality_score, l.lead_quality || 'cold') === cat).length;
+            // Dans une catégorie, le meilleur score passe devant, puis l'ordre alphabétique.
+            const parCategorie = (sens) => (a, b) => (sens * (rangCategorie(a) - rangCategorie(b))) || (scoreDe(b) - scoreDe(a)) || parNom(a, b);
+            const affiches = parStatut
+                .filter((l) => filtreCategorie === 'toutes' || palier(l.quality_score, l.lead_quality || 'cold') === filtreCategorie)
+                .sort(tri === 'meilleurs' ? parCategorie(1) : tri === 'faibles' ? parCategorie(-1) : parNom);
 
             return (
                 <>
@@ -529,9 +547,28 @@
                                 <button className={`filter-button ${filtreStatut === 'relance' ? 'active' : ''}`}
                                     onClick={() => setFiltreStatut('relance')}>À relancer ({nbRelances})</button>
                             </div>
+                            <div className="barre-tri">
+                                <label>
+                                    <span>Catégorie</span>
+                                    <select value={filtreCategorie} onChange={(e) => setFiltreCategorie(e.target.value)} aria-label="Filtrer par catégorie">
+                                        <option value="toutes">Toutes les catégories ({parStatut.length})</option>
+                                        {CATEGORIES.map(([v, l]) => (
+                                            <option key={v} value={v}>{l} ({nbCategorie(v)})</option>
+                                        ))}
+                                    </select>
+                                </label>
+                                <label>
+                                    <span>Trier par</span>
+                                    <select value={tri} onChange={(e) => setTri(e.target.value)} aria-label="Trier les prospects">
+                                        <option value="nom">Nom (A à Z)</option>
+                                        <option value="meilleurs">Catégorie : les meilleurs d'abord</option>
+                                        <option value="faibles">Catégorie : les plus faibles d'abord</option>
+                                    </select>
+                                </label>
+                            </div>
                             {affiches.length === 0 ? (
                                 <div className="panel"><div className="empty-state">
-                                    {recherche.trim() ? `Aucun prospect ne correspond à « ${recherche.trim()} ».` : 'Aucun prospect dans cette étape.'}
+                                    {recherche.trim() ? `Aucun prospect ne correspond à « ${recherche.trim()} ».` : filtreCategorie !== 'toutes' ? 'Aucun prospect dans cette catégorie.' : 'Aucun prospect dans cette étape.'}
                                 </div></div>
                             ) : (
                             <div className="leads-grid">

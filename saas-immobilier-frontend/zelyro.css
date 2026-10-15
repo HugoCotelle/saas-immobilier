@@ -915,3 +915,15 @@ body.auth::before {
 @media (prefers-reduced-motion: reduce) {
     .lead-card.p-go, .pastille-go::before { animation: none; }
 }
+
+
+/* ---------- Leads : filtre et tri par catégorie ---------- */
+.barre-tri {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin: -12px 0 24px;
+}
+.barre-tri label { display: flex; flex-direction: column; gap: 6px; flex: 1 1 240px; max-width: 360px; }
+.barre-tri label span { font-size: 12px; font-weight: 600; color: var(--ink-2); letter-spacing: 0.02em; }
+.barre-tri select { width: 100%; }
