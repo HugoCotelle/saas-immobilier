@@ -61,6 +61,12 @@
         // Local commercial ou bureau : le locataire est un professionnel, on n'affiche aucun garant.
         const estPro = (x) => ['Local commercial', 'Bureau'].includes(x.property_type);
         // Un loyer se lit « 850 € / mois » : sans ça, on prendrait un loyer pour un prix de vente.
+        const Energie = ({ dpe, ges }) => (!dpe && !ges) ? null : (
+            <div className="ener-ligne">
+                {dpe && <span className={`ener ener-dpe-${dpe}`} title={`DPE : classe ${dpe}`}>DPE <b>{dpe}</b></span>}
+                {ges && <span className={`ener ener-ges-${ges}`} title={`GES : classe ${ges}`}>GES <b>{ges}</b></span>}
+            </div>
+        );
         const montant = (v, loc) => `${v.toLocaleString('fr-FR')} €${loc ? ' / mois' : ''}`;
         const SITUATIONS = {
             cdi: 'CDI', fonctionnaire: 'Fonctionnaire', cdd: 'CDD ou intérim',
@@ -356,6 +362,7 @@
                                                             <div className="match-price">
                                                                 {match.price ? montant(match.price, estLocation(match)) : (estLocation(match) ? 'Loyer non renseigné' : 'Prix non renseigné')}
                                                             </div>
+                                                            <Energie dpe={match.dpe} ges={match.ges} />
                                                             {match.reasons && match.reasons.length > 0 && (
                                                                 <div className="raisons" aria-label="Pourquoi ce bien correspond">
                                                                     {match.reasons.map((raison, i) => (

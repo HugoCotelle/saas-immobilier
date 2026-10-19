@@ -954,3 +954,35 @@ body.auth::before {
 .estim-table td { padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); color: var(--ink); white-space: nowrap; }
 .estim-source { margin-top: 12px; font-size: 11px; color: var(--ink-3); line-height: 1.5; }
 .estim-adresse { margin-top: 8px; font-size: 12px; color: var(--ink-3); }
+
+/* ===== Performance énergétique (DPE / GES) et photos des biens ===== */
+.ener-ligne { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 8px; }
+.ener { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--ink-2, #3b4640); }
+.ener b { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; border-radius: 4px; font-size: 13px; padding: 0 4px; color: #1b1b1b; }
+.ener-dpe-A b { background: #319834; color: #fff; }
+.ener-dpe-B b { background: #33cc31; }
+.ener-dpe-C b { background: #cbfc34; }
+.ener-dpe-D b { background: #fbfe06; }
+.ener-dpe-E b { background: #fccc05; }
+.ener-dpe-F b { background: #fc9935; }
+.ener-dpe-G b { background: #fb0107; color: #fff; }
+.ener-ges-A b { background: #f2eff4; box-shadow: inset 0 0 0 1px #cfc6d8; }
+.ener-ges-B b { background: #dfc1f7; }
+.ener-ges-C b { background: #d6a5f6; }
+.ener-ges-D b { background: #cb87f6; }
+.ener-ges-E b { background: #b25fe0; color: #fff; }
+.ener-ges-F b { background: #8e3fc0; color: #fff; }
+.ener-ges-G b { background: #5e2590; color: #fff; }
+.ener-alerte { font-size: 12px; color: #9a5b00; }
+
+.bien-photo { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; border-radius: 8px; display: block; margin-bottom: 10px; background: var(--surface-2, #efe9dc); }
+.bien-photo-vide { display: flex; align-items: center; justify-content: center; color: var(--ink-3, #8a928c); font-size: 12px; }
+.bien-photo-nb { position: relative; }
+.photos-grille { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; margin: 8px 0 6px; }
+.photo-tuile { position: relative; border-radius: 8px; overflow: hidden; border: 1px solid var(--line, #E3DCCC); background: var(--surface-2, #efe9dc); aspect-ratio: 4 / 3; }
+.photo-tuile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-tuile .photo-actions { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-between; gap: 4px; padding: 4px; background: linear-gradient(transparent, rgba(0,0,0,.55)); }
+.photo-tuile button { border: 0; background: rgba(255,255,255,.92); border-radius: 6px; font-size: 11px; padding: 3px 7px; cursor: pointer; font-family: inherit; color: #222; }
+.photo-tuile .photo-principale { position: absolute; top: 5px; left: 5px; background: var(--sage-600, #4F6353); color: #fff; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px; }
+.photo-ajout { margin-top: 4px; }
+.photo-tuile .photo-actions span { white-space: nowrap; font-size: 10px; }

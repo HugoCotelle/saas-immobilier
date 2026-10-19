@@ -151,6 +151,32 @@
                     </select>
                 </div>
             </div>
+            <div class="form-row" id="bloc-energie">
+                <div class="form-group">
+                    <label for="dpe_max">Performance énergétique (DPE) acceptée</label>
+                    <select id="dpe_max" name="dpe_max">
+                        <option value="">Peu importe</option>
+                        <option value="A">A uniquement</option>
+                        <option value="B">B ou mieux</option>
+                        <option value="C">C ou mieux</option>
+                        <option value="D">D ou mieux</option>
+                        <option value="E">E ou mieux</option>
+                        <option value="F">F ou mieux</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="ges_max">Émissions de gaz à effet de serre (GES) acceptées</label>
+                    <select id="ges_max" name="ges_max">
+                        <option value="">Peu importe</option>
+                        <option value="A">A uniquement</option>
+                        <option value="B">B ou mieux</option>
+                        <option value="C">C ou mieux</option>
+                        <option value="D">D ou mieux</option>
+                        <option value="E">E ou mieux</option>
+                        <option value="F">F ou mieux</option>
+                    </select>
+                </div>
+            </div>
                 <div class="form-group" id="bloc-proprio">
                     <label for="proprietaire">Êtes-vous déjà propriétaire ?</label>
                     <select id="proprietaire" name="proprietaire">
@@ -288,6 +314,8 @@
                         situation_pro: enLocation() && $('situation_pro').value ? $('situation_pro').value : null,
                         meuble_souhaite: enLocation() && !typePro() && $('meuble_souhaite').value ? $('meuble_souhaite').value === 'oui' : null,
                         proprietaire: !enLocation() && $('proprietaire').value ? $('proprietaire').value === 'oui' : null,
+                        dpe_max: $('dpe_max').value || null,
+                        ges_max: $('ges_max').value || null,
                         message: $('message-libre').value.trim() || null,
                         website: $('website').value,
                         consent: true

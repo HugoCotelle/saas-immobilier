@@ -62,12 +62,14 @@
             revenus: ['revenus', 'revenu', 'revenus mensuels', 'revenu mensuel', 'revenus nets', 'salaire', 'salaire net'],
             garants: ['garants', 'garant', 'nombre de garants'],
             situation_pro: ['situation professionnelle', 'situation pro', 'situation', 'profession', 'statut professionnel', 'contrat'],
-            meuble_souhaite: ['meuble', 'meublee', 'meuble souhaite', 'logement meuble']
+            meuble_souhaite: ['meuble', 'meublee', 'meuble souhaite', 'logement meuble'],
+            dpe_max: ['dpe', 'dpe max', 'dpe accepte', 'dpe minimum', 'classe dpe', 'classe energie', 'classe energetique', 'performance energetique'],
+            ges_max: ['ges', 'ges max', 'ges accepte', 'ges minimum', 'classe ges', 'classe climat']
         };
         const NOMS_COLONNES = {
             name: 'Nom', email: 'E-mail', phone: 'Téléphone', budget: 'Budget', location: 'Secteur',
             surface_min: 'Surface min.', activite: 'Activité', property_type: 'Type de bien', financing_status: 'Financement', purchase_urgency: 'Échéance',
-            transaction: 'Achat ou location', revenus: 'Revenus', garants: 'Garants', situation_pro: 'Situation professionnelle', meuble_souhaite: 'Meublé'
+            transaction: 'Achat ou location', revenus: 'Revenus', garants: 'Garants', situation_pro: 'Situation professionnelle', dpe_max: 'DPE accepté', ges_max: 'GES accepté', meuble_souhaite: 'Meublé'
         };
         const TYPES = ['Appartement', 'Maison', 'Villa', 'Studio', 'Penthouse', 'Terrain', 'Local commercial', 'Bureau'];
 
@@ -172,11 +174,13 @@
                     revenus: lu(ligne, 'revenus') || null,
                     garants: lu(ligne, 'garants') || null,
                     situation_pro: lu(ligne, 'situation_pro') || null,
-                    meuble_souhaite: lu(ligne, 'meuble_souhaite') || null
+                    meuble_souhaite: lu(ligne, 'meuble_souhaite') || null,
+                    dpe_max: lu(ligne, 'dpe_max') || null,        // « D », « Classe C » : lu par le serveur
+                    ges_max: lu(ligne, 'ges_max') || null
                 };
             });
             const reconnues = ['name', 'email', 'phone', 'budget', 'location', 'property_type', 'surface_min', 'activite', 'financing_status', 'purchase_urgency',
-                'transaction', 'revenus', 'garants', 'situation_pro', 'meuble_souhaite']
+                'transaction', 'revenus', 'garants', 'situation_pro', 'meuble_souhaite', 'dpe_max', 'ges_max']
                 .filter((c) => (c === 'name' ? (indice.name !== undefined || deuxColonnes) : indice[c] !== undefined));
             return { prospects, reconnues, nomTrouve: indice.name !== undefined || deuxColonnes };
         }
@@ -186,10 +190,10 @@
             catch (e) { return new TextDecoder('windows-1252').decode(buffer); }   // Excel français
         }
 
-        const MODELE = 'Nom;E-mail;Téléphone;Achat ou location;Budget ou loyer max;Secteur;Type de bien;Financement;Échéance;Revenus;Garants;Situation professionnelle;Meublé\r\n' +
-            'Marie Le Gall;marie@exemple.fr;0612345678;achat;280000;Lille;Appartement;accord obtenu;immédiate;;;;\r\n' +
-            'Thomas Martin;thomas@exemple.fr;0698765432;achat;350000;Lyon;Maison;en cours;3 à 6 mois;;;;\r\n' +
-            'Camille Durand;camille@exemple.fr;0611223344;location;850;Senlis;Appartement;;1 à 3 mois;2700;1;CDI;oui\r\n';
+        const MODELE = 'Nom;E-mail;Téléphone;Achat ou location;Budget ou loyer max;Secteur;Type de bien;Financement;Échéance;Revenus;Garants;Situation professionnelle;Meublé;DPE accepté;GES accepté\r\n' +
+            'Marie Le Gall;marie@exemple.fr;0612345678;achat;280000;Lille;Appartement;accord obtenu;immédiate;;;;;D;\r\n' +
+            'Thomas Martin;thomas@exemple.fr;0698765432;achat;350000;Lyon;Maison;en cours;3 à 6 mois;;;;;C;C\r\n' +
+            'Camille Durand;camille@exemple.fr;0611223344;location;850;Senlis;Appartement;;1 à 3 mois;2700;1;CDI;oui;E;\r\n';
 
         function ImportApp() {
             const [user, setUser] = useState(null);
@@ -353,7 +357,7 @@
                                 <div className="panel-note">
                                     Un fichier Excel (.xlsx) ou CSV avec une ligne de titres : Nom, E-mail, Téléphone, Achat ou
                                     location, Budget (ou loyer maximum), Secteur, Type de bien, Financement, Échéance et, pour
-                                    les locataires, Revenus mensuels, Garants (ignorés pour les locaux commerciaux et les bureaux), Situation professionnelle, Meublé. Seul le nom
+                                    les locataires, Revenus mensuels, Garants (ignorés pour les locaux commerciaux et les bureaux), Situation professionnelle, Meublé, DPE accepté et GES accepté (une lettre de A à F). Seul le nom
                                     est indispensable ; les colonnes absentes sont simplement laissées vides. Si le classeur Excel a
                                     plusieurs feuilles, la première feuille qui contient des données est lue.
                                     Maximum {MAX_LIGNES} prospects et 2 Mo par fichier.

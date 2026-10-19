@@ -50,8 +50,57 @@
         const VIDE = {
             reference: '', title: '', address: '', zip: '', city: '', price: '', size: '', rooms: '',
             property_type: '', description: '', activites_autorisees: [], extraction_air: '',
-            transaction: 'vente', meuble: ''
+            transaction: 'vente', meuble: '', dpe: '', ges: ''
         };
+
+        const CLASSES = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+        const Energie = ({ dpe, ges }) => (!dpe && !ges) ? null : (
+            <div className="ener-ligne">
+                {dpe && <span className={`ener ener-dpe-${dpe}`} title={`DPE : classe ${dpe}`}>DPE <b>{dpe}</b></span>}
+                {ges && <span className={`ener ener-ges-${ges}`} title={`GES : classe ${ges}`}>GES <b>{ges}</b></span>}
+            </div>
+        );
+
+        // Photos : réduites dans le navigateur avant l'envoi (1000 px, JPEG), pour rester légères.
+        const PHOTOS_MAX = 10;
+        const lireFichier = (fichier) => new Promise((ok, ko) => {
+            const r = new FileReader();
+            r.onload = () => ok(r.result);
+            r.onerror = () => ko(new Error('lecture'));
+            r.readAsDataURL(fichier);
+        });
+        const chargerImage = (src) => new Promise((ok, ko) => {
+            const im = new Image();
+            im.onload = () => ok(im);
+            im.onerror = () => ko(new Error('image'));
+            im.src = src;
+        });
+        function reduire(im, cote, qualite) {
+            const k = Math.min(1, cote / Math.max(im.width, im.height));
+            const c = document.createElement('canvas');
+            c.width = Math.max(1, Math.round(im.width * k));
+            c.height = Math.max(1, Math.round(im.height * k));
+            const g = c.getContext('2d');
+            g.fillStyle = '#fff';
+            g.fillRect(0, 0, c.width, c.height);
+            g.drawImage(im, 0, 0, c.width, c.height);
+            return c.toDataURL('image/jpeg', qualite);
+        }
+        const octets = (dataUrl) => Math.floor((dataUrl.length - dataUrl.indexOf(',') - 1) * 3 / 4);
+        async function preparerPhoto(fichier) {
+            if (!/^image\//.test(fichier.type)) throw new Error(`${fichier.name} n'est pas une image.`);
+            if (fichier.size > 25 * 1024 * 1024) throw new Error(`${fichier.name} est trop lourde (25 Mo au maximum).`);
+            let im;
+            try { im = await chargerImage(await lireFichier(fichier)); }
+            catch (e) { throw new Error(`${fichier.name} ne peut pas être lue (format non pris en charge par ce navigateur).`); }
+            let image = null;
+            for (const [cote, q] of [[1000, 0.72], [1000, 0.6], [800, 0.6], [640, 0.55]]) {
+                image = reduire(im, cote, q);
+                if (octets(image) <= 300000) break;
+            }
+            if (octets(image) > 340000) throw new Error(`${fichier.name} reste trop lourde après réduction.`);
+            return { image, miniature: reduire(im, 360, 0.7) };
+        }
 
         // Le rapprochement avec les prospects compare l'adresse enregistrée au secteur recherché
         // (« Paris 15 », « Lille »...) : elle doit donc contenir le code postal et la ville.
@@ -137,14 +186,16 @@
             activites_autorisees: ['activites autorisees', 'activite autorisee', 'activites', 'destination', 'usage'],
             extraction_air: ['extraction', 'extraction d air', 'extraction air', 'conduit d extraction', 'hotte', 'ventilation'],
             transaction: ['transaction', 'type de transaction', 'vente ou location', 'vente location', 'location vente', 'nature de l operation', 'operation'],
-            meuble: ['meuble', 'meublee', 'bien meuble', 'ameublement']
+            meuble: ['meuble', 'meublee', 'bien meuble', 'ameublement'],
+            dpe: ['dpe', 'classe dpe', 'classe energie', 'classe energetique', 'diagnostic de performance energetique', 'etiquette energie', 'etiquette dpe', 'consommation energetique'],
+            ges: ['ges', 'classe ges', 'classe climat', 'etiquette climat', 'etiquette ges', 'emissions de ges', 'gaz a effet de serre']
         };
 
         const NOMS_CHAMPS = {
             reference: 'Référence', title: 'Titre', address: 'Adresse', city: 'Ville', zip: 'Code postal',
             price: 'Prix ou loyer', size: 'Surface', rooms: 'Pièces', property_type: 'Type de bien', description: 'Description',
             activites_autorisees: 'Activités autorisées', extraction_air: "Extraction d'air",
-            transaction: 'Vente ou location', meuble: 'Meublé'
+            transaction: 'Vente ou location', meuble: 'Meublé', dpe: 'DPE', ges: 'GES'
         };
 
         // Pour chaque champ, la colonne dont le titre ressemble le plus (le synonyme le plus long gagne).
@@ -207,7 +258,9 @@
                     activites_autorisees: valeur(l, 'activites_autorisees'),
                     extraction_air: valeur(l, 'extraction_air'),
                     transaction: valeur(l, 'transaction'),
-                    meuble: valeur(l, 'meuble')
+                    meuble: valeur(l, 'meuble'),
+                    dpe: valeur(l, 'dpe'),
+                    ges: valeur(l, 'ges')
                 };
             });
             const utilisees = Object.keys(colonnes).map((c) => colonnes[c].index);
@@ -224,10 +277,10 @@
 
         // Modèle de fichier : séparateur point-virgule et BOM, pour s'ouvrir correctement dans Excel en français.
         const MODELE_CSV = '﻿' + [
-            'reference;titre;adresse;code postal;ville;vente ou location;prix ou loyer;surface;pieces;type;meuble;description',
-            'DP-1042;Maison familiale avec jardin;12 rue des Tilleuls;60300;Senlis;vente;395000;120;5;Maison;;Jardin de 420 m², garage',
-            'DP-1038;Appartement T3 lumineux;8 avenue du Maréchal Foch;60500;Chantilly;vente;245000;68;3;Appartement;;Balcon, cave',
-            'DP-2007;Studio proche gare;4 rue de la Gare;60300;Senlis;location;640;22;1;Studio;oui;Loyer mensuel charges comprises'
+            'reference;titre;adresse;code postal;ville;vente ou location;prix ou loyer;surface;pieces;type;meuble;dpe;ges;description',
+            'DP-1042;Maison familiale avec jardin;12 rue des Tilleuls;60300;Senlis;vente;395000;120;5;Maison;;D;C;Jardin de 420 m², garage',
+            'DP-1038;Appartement T3 lumineux;8 avenue du Maréchal Foch;60500;Chantilly;vente;245000;68;3;Appartement;;C;B;Balcon, cave',
+            'DP-2007;Studio proche gare;4 rue de la Gare;60300;Senlis;location;640;22;1;Studio;oui;E;D;Loyer mensuel charges comprises'
         ].join('\r\n') + '\r\n';
 
         function telechargerModele() {
@@ -278,6 +331,10 @@
             const [bilan, setBilan] = useState(null);
             const [onglet, setOnglet] = useState('tout');                // tout | vente | location
             const [transactionImport, setTransactionImport] = useState('vente');   // vente | location : pour les lignes qui ne le précisent pas
+            const [photos, setPhotos] = useState([]);              // photos déjà enregistrées du bien en cours de modification
+            const [photosAjout, setPhotosAjout] = useState([]);    // photos choisies, envoyées à l'enregistrement
+            const [photoEnCours, setPhotoEnCours] = useState(false);
+            const [couvertures, setCouvertures] = useState({ miniatures: {}, nombres: {} });
 
             useEffect(() => {
                 const token = localStorage.getItem('token');
@@ -309,11 +366,56 @@
                     const data = await response.json();
                     setBiens(data);
                     setError(null);
+                    chargerCouvertures(token);
                 } catch (err) {
                     setError(err.message);
                 } finally {
                     setLoading(false);
                 }
+            };
+
+            // Les miniatures arrivent après la liste : l'affichage des biens n'attend pas les photos.
+            const chargerCouvertures = async (token) => {
+                try {
+                    const r = await fetch(`${API_URL}/api/v1/properties/photos-couverture`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (r.ok) setCouvertures(await r.json());
+                } catch (e) { /* les biens s'affichent sans photo */ }
+            };
+            const appel = (chemin, options = {}) => fetch(`${API_URL}${chemin}`, {
+                ...options,
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+            });
+            const choisirPhotos = async (e) => {
+                const fichiers = Array.from(e.target.files || []);
+                e.target.value = '';
+                if (!fichiers.length) return;
+                const place = PHOTOS_MAX - photos.length - photosAjout.length;
+                if (place <= 0) { setError(`${PHOTOS_MAX} photos au maximum par bien.`); return; }
+                setPhotoEnCours(true);
+                setError(null);
+                const prises = [];
+                try {
+                    for (const fichier of fichiers.slice(0, place)) prises.push(await preparerPhoto(fichier));
+                    if (fichiers.length > place) setError(`${PHOTOS_MAX} photos au maximum par bien : les photos en trop n'ont pas été ajoutées.`);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setPhotosAjout((anciennes) => [...anciennes, ...prises]);
+                    setPhotoEnCours(false);
+                }
+            };
+            const supprimerPhoto = async (photo) => {
+                if (!window.confirm('Supprimer cette photo ?')) return;
+                const r = await appel(`/api/v1/properties/${editionId}/photos/${photo.id}`, { method: 'DELETE' });
+                if (r.ok) setPhotos((l) => l.filter((p) => p.id !== photo.id));
+                else setError('La photo n\'a pas pu être supprimée.');
+            };
+            const photoEnPremier = async (photo) => {
+                const r = await appel(`/api/v1/properties/${editionId}/photos/${photo.id}/principale`, { method: 'POST' });
+                if (r.ok) setPhotos((l) => [photo, ...l.filter((p) => p.id !== photo.id)]);
+                else setError('La photo n\'a pas pu être déplacée.');
             };
 
             const enregistrerBien = async () => {
@@ -348,6 +450,8 @@
                             property_type: form.property_type || null,
                             description: form.description.trim() || null,
                             transaction: form.transaction,
+                            dpe: form.dpe || null,
+                            ges: form.ges || null,
                             // Le meublé ne concerne que les logements à louer.
                             ...(form.transaction === 'location' && !TYPES_PRO.includes(form.property_type) ? {
                                 meuble: form.meuble === '' ? null : form.meuble === 'oui'
@@ -364,9 +468,20 @@
                         if (response.status === 401) { localStorage.removeItem('token'); localStorage.removeItem('user'); window.location.replace('/login.html'); return; }
                         throw new Error(d.message || `${modification ? 'Modification' : 'Création'} impossible (${response.status})`);
                     }
-                    setMessage(modification
+                    const enregistre = await response.json().catch(() => ({}));
+                    let echecsPhotos = 0;
+                    for (const ph of photosAjout) {
+                        const r = enregistre.id ? await appel(`/api/v1/properties/${enregistre.id}/photos`, {
+                            method: 'POST', body: JSON.stringify(ph)
+                        }).catch(() => null) : null;
+                        if (!r || !r.ok) echecsPhotos += 1;
+                    }
+                    setMessage((modification
                         ? `${form.title.trim()} a été mis à jour.`
-                        : `${form.title.trim()} a été ajouté au portefeuille.`);
+                        : `${form.title.trim()} a été ajouté au portefeuille.`)
+                        + (echecsPhotos ? ` ${echecsPhotos} photo(s) n'ont pas pu être envoyées : rouvrez le bien pour les ajouter de nouveau.` : ''));
+                    setPhotos([]);
+                    setPhotosAjout([]);
                     setForm(VIDE);
                     setEditionId(null);
                     setFormOuvert(false);
@@ -472,13 +587,14 @@
 
             const ouvrirNouveau = () => {
                 setEditionId(null); setForm(VIDE); setFormOuvert(true);
+                setPhotos([]); setPhotosAjout([]);
                 setImportOuvert(false); setMessage(null); setError(null);
             };
             const basculerActivite = (code) => {
                 const actuelles = form.activites_autorisees;
                 set('activites_autorisees', actuelles.includes(code) ? actuelles.filter((c) => c !== code) : [...actuelles, code]);
             };
-            const fermerFormulaire = () => { setFormOuvert(false); setEditionId(null); setForm(VIDE); setError(null); };
+            const fermerFormulaire = () => { setFormOuvert(false); setEditionId(null); setForm(VIDE); setPhotos([]); setPhotosAjout([]); setError(null); };
             const modifierBien = (b) => {
                 const adr = separerAdresse(b.address);
                 setForm({
@@ -488,8 +604,11 @@
                     activites_autorisees: b.activites_autorisees ?? [],
                     extraction_air: b.extraction_air === true ? 'oui' : b.extraction_air === false ? 'non' : '',
                     transaction: b.transaction === 'location' ? 'location' : 'vente',
-                    meuble: b.meuble === true ? 'oui' : b.meuble === false ? 'non' : ''
+                    meuble: b.meuble === true ? 'oui' : b.meuble === false ? 'non' : '',
+                    dpe: b.dpe ?? '', ges: b.ges ?? ''
                 });
+                setPhotos([]); setPhotosAjout([]);
+                appel(`/api/v1/properties/${b.id}/photos`).then((r) => r.ok ? r.json() : []).then(setPhotos).catch(() => {});
                 setEditionId(b.id); setFormOuvert(true);
                 setImportOuvert(false); setMessage(null); setError(null);
                 window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -568,7 +687,7 @@
                                         <div className="panel-note" style={{ marginBottom: '12px' }}>
                                             La première ligne contient les titres des colonnes. Colonnes
                                             reconnues : référence, titre, adresse, code postal, ville, prix (ou loyer),
-                                            vente ou location, surface, pièces, type de bien, description, meublé (oui ou non)
+                                            vente ou location, surface, pièces, type de bien, description, DPE et GES (une lettre de A à G), meublé (oui ou non)
                                             et, pour les locaux commerciaux et bureaux, activités autorisées et extraction
                                             d'air (oui ou non). Pour une location, la colonne prix contient le loyer
                                             mensuel. Seul le titre est
@@ -817,6 +936,28 @@
                                     </div>
                                 </div>
 
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>DPE (classe énergie)</label>
+                                        <select value={form.dpe} onChange={(e) => set('dpe', e.target.value)}>
+                                            <option value="">Non renseigné</option>
+                                            {CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="form-group">
+                                        <label>GES (classe climat)</label>
+                                        <select value={form.ges} onChange={(e) => set('ges', e.target.value)}>
+                                            <option value="">Non renseigné</option>
+                                            {CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+                                {form.transaction === 'location' && form.dpe === 'G' && (
+                                    <div className="ener-alerte" style={{ marginBottom: 10 }}>
+                                        Un logement classé G ne peut plus être mis en location (nouveau bail) : à vérifier avant de le proposer.
+                                    </div>
+                                )}
+
                                 {form.transaction === 'location' && !TYPES_PRO.includes(form.property_type) && (
                                     <div className="form-row">
                                         <div className="form-group">
@@ -863,6 +1004,41 @@
                                         </div>
                                     </>
                                 )}
+
+                                <div className="form-group">
+                                    <label>Photos ({photos.length + photosAjout.length}/{PHOTOS_MAX})</label>
+                                    {(photos.length + photosAjout.length) > 0 && (
+                                        <div className="photos-grille">
+                                            {photos.map((p, i) => (
+                                                <div className="photo-tuile" key={'p' + p.id}>
+                                                    <img src={p.image} alt={`Photo ${i + 1} du bien`} />
+                                                    {i === 0 && <span className="photo-principale">Principale</span>}
+                                                    <div className="photo-actions">
+                                                        {i > 0 ? <button type="button" onClick={() => photoEnPremier(p)}>En premier</button> : <span></span>}
+                                                        <button type="button" onClick={() => supprimerPhoto(p)}>Supprimer</button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {photosAjout.map((p, i) => (
+                                                <div className="photo-tuile" key={'n' + i}>
+                                                    <img src={p.miniature} alt={`Nouvelle photo ${i + 1}`} />
+                                                    {photos.length === 0 && i === 0 && <span className="photo-principale">Principale</span>}
+                                                    <div className="photo-actions">
+                                                        <span style={{ fontSize: 11, color: '#fff' }}>à envoyer</span>
+                                                        <button type="button" onClick={() => setPhotosAjout((l) => l.filter((_, k) => k !== i))}>Retirer</button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    <div className="photo-ajout">
+                                        <input type="file" accept="image/*" multiple onChange={choisirPhotos}
+                                            disabled={photoEnCours || (photos.length + photosAjout.length) >= PHOTOS_MAX} />
+                                    </div>
+                                    <div className="panel-note" style={{ marginTop: '6px' }}>
+                                        {photoEnCours ? 'Préparation des photos...' : 'Les photos sont réduites automatiquement. Les nouvelles photos sont envoyées quand vous enregistrez le bien.'}
+                                    </div>
+                                </div>
 
                                 <div className="form-group">
                                     <label>Description</label>
@@ -918,6 +1094,9 @@
                             <div className="biens-grid">
                                 {biensFiltres.map((b) => (
                                     <div key={b.id} className="bien-card">
+                                        {couvertures.miniatures[String(b.id)] ? (
+                                            <img className="bien-photo" src={couvertures.miniatures[String(b.id)]} alt={`Photo de ${b.title}`} />
+                                        ) : null}
                                         <div className="bien-header">
                                             <div className="bien-titre">{b.title}</div>
                                             <div className="bien-prix">
@@ -934,6 +1113,13 @@
                                             </div>
                                         )}
                                         {b.reference && <div className="ref-bien">Réf. {b.reference}</div>}
+                                        <Energie dpe={b.dpe} ges={b.ges} />
+                                        {estLocation(b) && b.dpe === 'G' && (
+                                            <div className="ener-alerte">Classé G : location interdite pour un nouveau bail.</div>
+                                        )}
+                                        {couvertures.nombres[String(b.id)] > 1 && (
+                                            <div className="ref-bien">{couvertures.nombres[String(b.id)]} photos</div>
+                                        )}
                                         <div className="bien-field">
                                             <span className="bien-label">Surface :</span>
                                             <span className="bien-value">{b.size ? `${b.size} m²` : 'N/A'}</span>

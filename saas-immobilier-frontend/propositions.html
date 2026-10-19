@@ -49,6 +49,7 @@
             b.type,
             b.rooms ? `${b.rooms} pièce${b.rooms > 1 ? "s" : ""}` : null,
             b.size ? `${b.size} m²` : null,
+            b.dpe ? `DPE ${b.dpe}` : null,
         ].filter(Boolean).join(', ');
 
         // Le message d'origine : simple, à relire et à corriger par l'agent.

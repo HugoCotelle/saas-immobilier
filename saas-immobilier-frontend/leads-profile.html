@@ -147,6 +147,9 @@
             return { quality, points, lignes };
         }
 
+        // Classe la moins bonne que le prospect accepte : « C ou mieux » = A, B ou C.
+        const LIMITES_ENERGIE = [['', 'Indifférent'], ['A', 'A uniquement'], ['B', 'B ou mieux'], ['C', 'C ou mieux'],
+            ['D', 'D ou mieux'], ['E', 'E ou mieux'], ['F', 'F ou mieux']];
         const SITUATIONS = [
             ['cdi', 'CDI'], ['fonctionnaire', 'Fonctionnaire'], ['cdd', 'CDD ou intérim'],
             ['independant', "Indépendant ou chef d'entreprise"], ['retraite', 'Retraité'],
@@ -451,6 +454,8 @@
                         situation_pro: data.situation_pro ?? '',
                         meuble_souhaite: data.meuble_souhaite === true ? 'oui' : data.meuble_souhaite === false ? 'non' : '',
                         proprietaire: data.proprietaire === true ? 'oui' : data.proprietaire === false ? 'non' : '',
+                        dpe_max: data.dpe_max ?? '',
+                        ges_max: data.ges_max ?? '',
                         bien_adresse: data.bien_adresse ?? '',
                         bien_code_postal: data.bien_code_postal ?? '',
                         bien_ville: data.bien_ville ?? '',
@@ -494,6 +499,8 @@
                             purchase_urgency: form.purchase_urgency,
                             financing_amount: form.financing_amount === '' ? null : parseInt(form.financing_amount, 10),
                             transaction: form.transaction,
+                            dpe_max: form.dpe_max || null,
+                            ges_max: form.ges_max || null,
                             proprietaire: form.proprietaire === '' ? null : form.proprietaire === 'oui',
                             // Le bien n'est envoyé que pour un prospect propriétaire : sinon on ne touche à rien.
                             ...(form.proprietaire === 'oui' ? {
@@ -804,6 +811,21 @@
                                                     </div>
                                                 </>
                                             )}
+
+                                            <div className="form-row">
+                                                <div className="form-group">
+                                                    <label>DPE accepté</label>
+                                                    <select value={form.dpe_max} onChange={(e) => set('dpe_max', e.target.value)}>
+                                                        {LIMITES_ENERGIE.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                                                    </select>
+                                                </div>
+                                                <div className="form-group">
+                                                    <label>GES accepté</label>
+                                                    <select value={form.ges_max} onChange={(e) => set('ges_max', e.target.value)}>
+                                                        {LIMITES_ENERGIE.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                                                    </select>
+                                                </div>
+                                            </div>
 
                                             <div className="form-row">
                                                 <div className="form-group">

@@ -112,10 +112,28 @@
 
             function carte(b) {
                 var a = element('article', 'annonce');
+                // La photo vient de l'agence, en data URL : on ne l'affiche que si c'est bien une image.
+                if (typeof b.photo === 'string' && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+\/=]+$/.test(b.photo)) {
+                    var img = document.createElement('img');
+                    img.className = 'bien-photo';
+                    img.alt = 'Photo : ' + (b.title || 'bien');
+                    img.src = b.photo;
+                    a.appendChild(img);
+                }
                 a.appendChild(element('h2', '', b.title));
                 var p = prix(b.price, b.transaction === 'location');
                 if (p) a.appendChild(element('p', 'prix', p));
                 if (b.address) a.appendChild(element('p', 'adresse', b.address));
+                if (/^[A-G]$/.test(b.dpe || '') || /^[A-G]$/.test(b.ges || '')) {
+                    var ener = element('div', 'ener-ligne');
+                    [['dpe', 'DPE', b.dpe], ['ges', 'GES', b.ges]].forEach(function (e) {
+                        if (!/^[A-G]$/.test(e[2] || '')) return;
+                        var sp = element('span', 'ener ener-' + e[0] + '-' + e[2], e[1] + ' ');
+                        sp.appendChild(element('b', '', e[2]));
+                        ener.appendChild(sp);
+                    });
+                    a.appendChild(ener);
+                }
                 var ul = element('ul', 'caracteristiques');
                 [b.property_type,
                  b.rooms ? b.rooms + (b.rooms > 1 ? ' pièces' : ' pièce') : null,

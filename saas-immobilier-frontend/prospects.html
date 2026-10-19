@@ -109,8 +109,12 @@
             name: '', email: '', phone: '', budget: '',
             location: '', property_type: '', surface_min: '', activite: '',
             financing_status: 'unknown', purchase_urgency: 'unknown',
-            transaction: 'vente', revenus: '', garants: '', situation_pro: '', meuble_souhaite: '', proprietaire: ''
+            transaction: 'vente', revenus: '', garants: '', situation_pro: '', meuble_souhaite: '', proprietaire: '', dpe_max: '', ges_max: ''
         };
+
+        // Classe la moins bonne que le prospect accepte : « C ou mieux » = A, B ou C.
+        const LIMITES_ENERGIE = [['', 'Indifférent'], ['A', 'A uniquement'], ['B', 'B ou mieux'], ['C', 'C ou mieux'],
+            ['D', 'D ou mieux'], ['E', 'E ou mieux'], ['F', 'F ou mieux']];
 
         function App() {
             const [leads, setLeads] = useState([]);
@@ -195,6 +199,8 @@
                             // Un locataire n'a pas de financement à valider : on n'envoie que son dossier.
                             financing_status: form.transaction === 'location' ? 'unknown' : form.financing_status,
                             purchase_urgency: form.purchase_urgency,
+                            dpe_max: form.dpe_max || null,
+                            ges_max: form.ges_max || null,
                             ...(form.transaction === 'location' ? {
                                 revenus: form.revenus === '' ? null : parseInt(form.revenus, 10),
                                 garants: form.garants === '' || ['Local commercial', 'Bureau'].includes(form.property_type) ? null : parseInt(form.garants, 10),
@@ -456,6 +462,21 @@
                                         </div>
                                     </div>
                                 )}
+
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>DPE accepté</label>
+                                        <select value={form.dpe_max} onChange={(e) => set('dpe_max', e.target.value)}>
+                                            {LIMITES_ENERGIE.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="form-group">
+                                        <label>GES accepté</label>
+                                        <select value={form.ges_max} onChange={(e) => set('ges_max', e.target.value)}>
+                                            {LIMITES_ENERGIE.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
 
                                 <div className="form-row">
                                     <div className="form-group">
