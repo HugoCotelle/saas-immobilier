@@ -855,10 +855,10 @@ body.auth::before {
 .lead-badge.p-gris, .badge.p-gris { background: var(--gris-bg); color: var(--gris); }
 
 /* Cartes prospects */
-.lead-card.p-vert, .lead-card.p-vert:hover { border-left-color: var(--vert); border-left-width: 4px; }
-.lead-card.p-jaune, .lead-card.p-jaune:hover { border-left-color: var(--jaune-bord); }
-.lead-card.p-orange, .lead-card.p-orange:hover { border-left-color: var(--orange-bord); }
-.lead-card.p-gris, .lead-card.p-gris:hover { border-left-color: var(--gris-bord); }
+.lead-card.p-vert, .lead-card.p-vert:hover, .lead-item.p-vert, .lead-item.p-vert:hover { border-left-color: var(--vert); border-left-width: 4px; }
+.lead-card.p-jaune, .lead-card.p-jaune:hover, .lead-item.p-jaune, .lead-item.p-jaune:hover { border-left-color: var(--jaune-bord); }
+.lead-card.p-orange, .lead-card.p-orange:hover, .lead-item.p-orange, .lead-item.p-orange:hover { border-left-color: var(--orange-bord); }
+.lead-card.p-gris, .lead-card.p-gris:hover, .lead-item.p-gris, .lead-item.p-gris:hover { border-left-color: var(--gris-bord); }
 .lead-card.p-go, .lead-card.p-go:hover {
     border-left: 6px solid var(--go);
     border-color: rgba(57, 255, 20, 0.7);
@@ -1004,3 +1004,10 @@ body.auth::before {
 .photos-mail { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin: 4px 0 10px; }
 .photos-mail .carrousel { margin-bottom: 4px; }
 .photos-mail-titre { font-size: 12px; color: var(--ink-3, #6A7168); line-height: 1.35; }
+
+/* Prospects des pages Propositions et Matching : mêmes paliers que la page Prospects */
+.lead-item.p-go, .lead-item.p-go:hover { border-left: 6px solid var(--go); border-left-color: var(--go); box-shadow: 0 0 0 1px rgba(57, 255, 20, 0.45), 0 0 18px rgba(57, 255, 20, 0.3); }
+.lead-item.p-go:not(.selected) { background: linear-gradient(90deg, rgba(57, 255, 20, 0.10), var(--surface) 38%); }
+.lead-item.p-vert.selected, .lead-item.p-jaune.selected, .lead-item.p-orange.selected, .lead-item.p-gris.selected { background: var(--sage-50); }
+.lead-item .lead-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.lead-item .lead-footer .lead-badge { margin-top: 0; }

@@ -146,11 +146,19 @@
                 window.location.replace('/login.html');
             };
 
-            const qualityBadge = (quality, lead) => {
+            // Palier de couleur selon le score /100 : le même que sur la page Prospects (voir zelyro.css).
+            const palier = (score, q) => typeof score !== 'number'
+                ? (q === 'hot' ? 'p-vert' : q === 'warm' ? 'p-orange' : 'p-gris')
+                : score >= 90 ? 'p-go' : score >= 80 ? 'p-vert' : score >= 65 ? 'p-jaune' : score >= 45 ? 'p-orange' : 'p-gris';
+
+            const qualityBadge = (quality, lead, score) => {
                 const classes = { hot: 'badge-hot', warm: 'badge-warm', cold: 'badge-cold' };
                 const labels = { hot: lead && estLocation(lead) ? 'Locataire actif' : 'Acheteur actif', warm: 'Projet en cours', cold: 'Premier contact' };
                 if (!labels[quality]) return null;
-                return <span className={`lead-badge ${classes[quality]}`}>{labels[quality]}</span>;
+                return <span className={`lead-badge ${classes[quality]} ${palier(score, quality)}`}
+                    title="Score de qualité du prospect. Le détail est sur sa fiche.">
+                    {labels[quality]}{typeof score === 'number' ? ` · ${score}/100` : ''}
+                </span>;
             };
 
             const financingLabel = (status) => ({
@@ -274,8 +282,9 @@
                                             filteredLeads.map(lead => (
                                                 <div
                                                     key={lead.id}
-                                                    className={`lead-item ${lead.lead_quality || ''} ${idAffiche === lead.id ? 'selected' : ''}`}
+                                                    className={`lead-item ${lead.lead_quality || ''} ${palier(lead.quality_score, lead.lead_quality)} ${idAffiche === lead.id ? 'selected' : ''}`}
                                                     onClick={() => setSelectedLeadId(lead.id)}>
+                                                    {palier(lead.quality_score, lead.lead_quality) === 'p-go' && <div className="pastille-go">À appeler maintenant</div>}
                                                     <div className="lead-name">{lead.name}</div>
                                                     <div className="lead-field">
                                                         <span className="lead-label">Email :</span>
@@ -295,7 +304,7 @@
                                                         <span className="lead-label">Secteur :</span>
                                                         <span className="lead-value">{lead.location || 'N/A'}</span>
                                                     </div>
-                                                    {qualityBadge(lead.lead_quality, lead)}
+                                                    {qualityBadge(lead.lead_quality, lead, lead.quality_score)}
                                                 </div>
                                             ))
                                         )}

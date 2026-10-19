@@ -46,6 +46,11 @@
             lecteur.readAsDataURL(fichier);
         });
 
+        // Palier de couleur selon le score /100 : le même que sur la page Prospects (voir zelyro.css).
+        const palier = (score, q) => typeof score !== 'number'
+            ? (q === 'hot' ? 'p-vert' : q === 'warm' ? 'p-orange' : 'p-gris')
+            : score >= 90 ? 'p-go' : score >= 80 ? 'p-vert' : score >= 65 ? 'p-jaune' : score >= 45 ? 'p-orange' : 'p-gris';
+
         const caracteristiques = (b) => [
             b.type,
             b.rooms ? `${b.rooms} pièce${b.rooms > 1 ? "s" : ""}` : null,
@@ -130,19 +135,37 @@
                 return corps;
             };
 
-            const charger = async () => {
+            const dernierChargement = useRef(0);
+            const envoiRef = useRef(false);
+            // silencieux : rafraîchissement en arrière-plan, sans effacer la page en cas d'erreur passagère.
+            const charger = async (silencieux = false) => {
                 try {
                     const d = await appel('/api/v1/proposals');
+                    dernierChargement.current = Date.now();
                     setData(d);
                     setError(null);
                     return d;
                 } catch (e) {
-                    setError(e.message);
+                    if (!silencieux) setError(e.message);
                     return null;
                 } finally {
                     setLoading(false);
                 }
             };
+            // Les scores et les prospects évoluent pendant que la page reste ouverte : on recharge au retour sur l'onglet.
+            useEffect(() => {
+                const actualiser = () => {
+                    if (document.visibilityState !== 'visible' || envoiRef.current) return;
+                    if (Date.now() - dernierChargement.current < 15000) return;
+                    charger(true);
+                };
+                document.addEventListener('visibilitychange', actualiser);
+                window.addEventListener('focus', actualiser);
+                return () => {
+                    document.removeEventListener('visibilitychange', actualiser);
+                    window.removeEventListener('focus', actualiser);
+                };
+            }, []);
 
             useEffect(() => {
                 if (!localStorage.getItem('token')) { window.location.replace('/login.html'); return; }
@@ -256,6 +279,7 @@
             };
 
             const envoyer = async () => {
+                envoiRef.current = true;
                 setEnvoi(true);
                 setMessage(null);
                 setBilan(null);
@@ -280,14 +304,19 @@
                     setConfirmer(false);
                     setMessage({ type: 'error', text: e.message });
                 } finally {
+                    envoiRef.current = false;
                     setEnvoi(false);
                 }
             };
 
-            const badge = (q, lead) => {
+            const badge = (q, lead, score) => {
                 const classes = { hot: 'badge-hot', warm: 'badge-warm', cold: 'badge-cold' };
                 const libelles = { hot: enLocation(lead) ? 'Locataire actif' : 'Acheteur actif', warm: 'Projet en cours', cold: 'Premier contact' };
-                return libelles[q] ? <span className={`lead-badge ${classes[q]}`}>{libelles[q]}</span> : null;
+                if (!libelles[q]) return null;
+                return <span className={`lead-badge ${classes[q]} ${palier(score, q)}`}
+                    title="Score de qualité du prospect. Le détail est sur sa fiche.">
+                    {libelles[q]}{typeof score === 'number' ? ` · ${score}/100` : ''}
+                </span>;
             };
 
             const pret = brouillon && brouillon.ids.length > 0 && brouillon.objet.trim().length >= 3 && brouillon.corps.trim().length >= 20;
@@ -364,11 +393,15 @@
                                 ) : (
                                     <div className="content-wrapper">
                                         <div className="panel">
-                                            <div className="panel-title">Prospects prêts</div>
+                                            <div className="panel-title">Prospects prêts
+                                                <button type="button" className="lien-discret" style={{ float: 'right', fontSize: 13, fontWeight: 400 }}
+                                                    onClick={() => charger(true)} title="Recharger la liste, les scores et les biens">Actualiser</button>
+                                            </div>
                                             {liste.map((x) => (
                                                 <div key={x.lead.id}
-                                                    className={`lead-item ${x.lead_quality || ''} ${idAffiche === x.lead.id ? 'selected' : ''}`}
+                                                    className={`lead-item ${x.lead_quality || ''} ${palier(x.quality_score, x.lead_quality)} ${idAffiche === x.lead.id ? 'selected' : ''}`}
                                                     onClick={() => choisir(x.lead.id)}>
+                                                    {palier(x.quality_score, x.lead_quality) === 'p-go' && <div className="pastille-go">À appeler maintenant</div>}
                                                     <div className="lead-name">{x.lead.name}</div>
                                                     <div className="lead-field">
                                                         <span className="lead-label">Biens :</span>
@@ -384,7 +417,11 @@
                                                         <span className="lead-label">Secteur :</span>
                                                         <span className="lead-value">{x.lead.location || 'N/A'}</span>
                                                     </div>
-                                                    {badge(x.lead_quality, x.lead)}
+                                                    <div className="lead-footer">
+                                                        {badge(x.lead_quality, x.lead, x.quality_score)}
+                                                        <a className="lien-fiche" href={`/leads-profile.html?id=${x.lead.id}`}
+                                                            onClick={(e) => e.stopPropagation()}>Ouvrir la fiche →</a>
+                                                    </div>
                                                 </div>
                                             ))}
                                         </div>
