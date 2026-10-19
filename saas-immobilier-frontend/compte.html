@@ -1329,6 +1329,12 @@
                                                 listing_title, listing_ref, transaction, budget, location, property_type, external_id (pour ne pas créer
                                                 deux fois le même prospect). Un GET sur {API_URL}/api/v1/inbound/ping permet de tester la clé.
                                             </p>
+                                            <p className="field-hint" style={{ marginTop: '8px' }}>
+                                                Pour envoyer des biens avec la même clé : un POST JSON à {API_URL}/api/v1/inbound/properties, de la forme
+                                                {'{'}"properties": [ ... ]{'}'} (300 biens au plus par appel). Champs : reference (conseillé : un bien déjà
+                                                connu est mis à jour, jamais dupliqué), title, address (ou address, zip et city), price (le loyer pour une
+                                                location), size, rooms, property_type, transaction, meuble, dpe, ges, description.
+                                            </p>
                                         </>
                                     ) : !messageCles && <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}
                                 </div>

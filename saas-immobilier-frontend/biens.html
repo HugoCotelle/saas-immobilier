@@ -335,6 +335,24 @@
             const [photosAjout, setPhotosAjout] = useState([]);    // photos choisies, envoyées à l'enregistrement
             const [photoEnCours, setPhotoEnCours] = useState(false);
             const [couvertures, setCouvertures] = useState({ miniatures: {}, nombres: {} });
+            const [adresseReception, setAdresseReception] = useState(null);   // adresse e-mail de l'agence pour recevoir un export
+            const [adresseCopiee, setAdresseCopiee] = useState(false);
+
+            useEffect(() => {
+                if (!importOuvert || adresseReception) return;
+                fetch(`${API_URL}/api/v1/mail-capture`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } })
+                    .then((r) => (r.ok ? r.json() : null))
+                    .then((d) => { if (d && d.address) setAdresseReception(d.address); })
+                    .catch(() => {});
+            }, [importOuvert]);
+
+            const copierAdresse = async () => {
+                try {
+                    await navigator.clipboard.writeText(adresseReception);
+                    setAdresseCopiee(true);
+                    setTimeout(() => setAdresseCopiee(false), 2000);
+                } catch (e) { /* le navigateur refuse : l'adresse reste affichée, on la copie à la main */ }
+            };
 
             useEffect(() => {
                 const token = localStorage.getItem('token');
@@ -679,6 +697,27 @@
                                     ajoutés au portefeuille et proposés aux prospects qui correspondent.
                                     Vous pouvez réimporter le même fichier plus tard : les biens qui ont
                                     la même référence sont mis à jour, pas dupliqués.
+                                </div>
+
+                                <div className="import-avertissement" style={{ background: 'var(--surface-2, #F4F1EA)', color: 'var(--ink)', border: '1px solid var(--line, #E3DED3)' }}>
+                                    <strong style={{ fontWeight: 600 }}>Pour ne plus importer à la main.</strong>{' '}
+                                    Réglez votre logiciel pour qu'il envoie son export (CSV ou Excel) chaque semaine à cette
+                                    adresse, ou transférez-le vous-même par e-mail : les biens sont ajoutés ou mis à jour
+                                    par référence, sans doublon. Le résultat de chaque envoi apparaît dans le journal de
+                                    réception, sur la page Compte.
+                                    {adresseReception && (
+                                        <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
+                                            <code id="adresse-reception" style={{ fontSize: '13px', wordBreak: 'break-all' }}>{adresseReception}</code>
+                                            <button className="btn secondary petit" onClick={copierAdresse}>
+                                                {adresseCopiee ? 'Adresse copiée' : "Copier l'adresse"}
+                                            </button>
+                                        </div>
+                                    )}
+                                    <div className="petit-texte" style={{ marginTop: '8px' }}>
+                                        Votre éditeur de logiciel ou votre passerelle de diffusion peut aussi envoyer vos biens
+                                        directement à l'API de Zelyro (adresse /api/v1/inbound/properties) avec une clé créée
+                                        sur la page Compte.
+                                    </div>
                                 </div>
 
                                 <div className="import-etapes">
