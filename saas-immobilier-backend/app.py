@@ -3673,10 +3673,10 @@ def get_improved_matches():
                 if score > 30:
                     matches.append({"property_id": prop['id'], "address": prop['address'], "title": prop['title'], "type": prop['property_type'], "price": prop['price'], "rooms": prop['rooms'], "size": prop['size'], "transaction": prop['transaction'], "dpe": prop['dpe'], "ges": prop['ges'], "score": score, "reasons": raisons})
             matches.sort(key=lambda x: x['score'], reverse=True)
-            result.append({"id": lead['id'], "name": lead['name'], "email": lead['email'], "phone": lead['phone'], "budget": lead['budget'], "location": lead['location'], "property_type": lead['property_type'], "financing_status": lead['financing_status'], "purchase_urgency": lead['purchase_urgency'], "transaction": lead['transaction'], "revenus": lead['revenus'], "garants": lead['garants'], "situation_pro": lead['situation_pro'], "meuble_souhaite": lead['meuble_souhaite'], "dpe_max": lead['dpe_max'], "ges_max": lead['ges_max'], "lead_quality": derive_lead_quality(lead), "matches": matches})
+            result.append({"id": lead['id'], "name": lead['name'], "email": lead['email'], "phone": lead['phone'], "budget": lead['budget'], "location": lead['location'], "property_type": lead['property_type'], "financing_status": lead['financing_status'], "purchase_urgency": lead['purchase_urgency'], "transaction": lead['transaction'], "revenus": lead['revenus'], "garants": lead['garants'], "situation_pro": lead['situation_pro'], "meuble_souhaite": lead['meuble_souhaite'], "dpe_max": lead['dpe_max'], "ges_max": lead['ges_max'], "lead_quality": derive_lead_quality(lead), "quality_score": points_qualite(lead), "matches": matches})
         # Les leads les plus chauds d'abord.
         ordre = {'hot': 0, 'warm': 1, 'cold': 2}
-        result.sort(key=lambda x: ordre.get(x['lead_quality'], 3))
+        result.sort(key=lambda x: (ordre.get(x['lead_quality'], 3), -x['quality_score']))
         return jsonify(result), 200
     except Exception:
         return erreur_interne()
@@ -5362,16 +5362,17 @@ def get_proposals():
             if not candidats:
                 continue
             candidats.sort(key=lambda c: -c['score'])
+            points = points_qualite(l)
             a_envoyer.append({
                 "lead": {"id": l['id'], "name": l['name'], "email": l['email'], "phone": l['phone'],
                          "budget": l['budget'], "location": l['location'], "property_type": l['property_type'],
                          "transaction": l['transaction']},
-                "lead_quality": derive_lead_quality(l),
+                "lead_quality": _niveau_qualite(points), "quality_score": points,
                 "biens": candidats[:5],
                 "deja_proposes": len(deja.get(l['id'], ())),
             })
-        ordre = {'hot': 0, 'warm': 1, 'cold': 2}
-        a_envoyer.sort(key=lambda x: (ordre.get(x['lead_quality'], 3), -x['biens'][0]['score']))
+        # Même classement que la page Prospects : le score /100 d'abord, puis le meilleur bien.
+        a_envoyer.sort(key=lambda x: (-x['quality_score'], -x['biens'][0]['score']))
 
         envoyes = [{"lead_id": m['lead_id'], "name": m['name'], "email": m['email'], "subject": m['subject'],
                     "biens": len(m['property_ids'] or []), "sent_at": _iso(m['sent_at'])} for m in mails[:20]]
