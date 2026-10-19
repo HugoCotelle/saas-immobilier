@@ -3010,10 +3010,13 @@ def liste_photos(property_id):
             cur.execute("SELECT 1 FROM properties WHERE id = %s AND user_id = %s", (property_id, request.agency_id))
             if cur.fetchone() is None:
                 return jsonify({"message": "Property not found"}), 404
-            cur.execute("""SELECT id, mime, data FROM property_photos
+            # ?miniature=1 : les petites versions (défilement des cartes), bien plus légères.
+            mini = request.args.get('miniature') == '1'
+            cur.execute(f"""SELECT id, mime, {'miniature' if mini else 'data'} AS img FROM property_photos
                            WHERE property_id = %s AND user_id = %s ORDER BY position, id""",
                         (property_id, request.agency_id))
-            photos = [{"id": r['id'], "image": _data_url(r['data'], r['mime'])} for r in cur.fetchall()]
+            photos = [{"id": r['id'], "image": _data_url(r['img'], 'image/jpeg' if mini else r['mime'])}
+                      for r in cur.fetchall()]
         return jsonify(photos), 200
     except Exception:
         return erreur_interne()
@@ -5253,13 +5256,40 @@ def _nom_affiche(texte, defaut):
     return propre or defaut
 
 
-def _corps_html(texte, pied, bouton=None):
+def _galerie_html(galerie, lien=None):
+    """Les photos des biens proposés, sous le message : un titre par bien puis
+    ses photos côte à côte (1 à 3). galerie = [(titre, [adresses des images])].
+    Chaque photo ouvre la page des annonces quand on dispose du lien."""
+    if not galerie:
+        return ''
+    sortie = ''
+    for titre, urls in galerie:
+        n = len(urls)
+        if not n:
+            continue
+        largeur = {1: 512, 2: 250, 3: 165}.get(n, 165)
+        cellules = ''
+        for u in urls:
+            img = (f'<img src="{_html.escape(u)}" width="{largeur}" alt="Photo : {_html.escape(titre)}" '
+                   f'style="display:block;width:{largeur}px;max-width:100%;height:auto;border:0;border-radius:6px">')
+            if lien:
+                img = f'<a href="{_html.escape(lien)}" style="text-decoration:none">{img}</a>'
+            cellules += f'<td style="padding:0 6px 0 0;vertical-align:top" width="{largeur}">{img}</td>'
+        sortie += (f'<p style="margin:18px 0 6px;font-size:14px;font-weight:bold">{_html.escape(titre)}</p>'
+                   '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">'
+                   f'<tr>{cellules}</tr></table>')
+    return f'<div style="margin:6px 0 10px">{sortie}</div>' if sortie else ''
+
+
+def _corps_html(texte, pied, bouton=None, galerie=None):
     """Le message de l'agent en HTML simple : un paragraphe par bloc, un
     saut de ligne à chaque retour à la ligne, puis le pied de message.
     bouton=(libellé, adresse) ajoute un bouton après le message."""
     blocs = [b.strip() for b in re.split(r"\n\s*\n", texte.strip()) if b.strip()]
     corps = "".join('<p style="margin:0 0 16px;line-height:1.6">'
                     + _html.escape(b).replace("\n", "<br>") + "</p>" for b in blocs)
+    if galerie:
+        corps += _galerie_html(galerie, bouton[1] if bouton else None)
     if bouton:
         corps += (f'<p style="margin:24px 0"><a href="{_html.escape(bouton[1])}" '
                   'style="background:#4F6353;color:#ffffff;text-decoration:none;padding:12px 22px;'
@@ -5299,6 +5329,9 @@ def get_proposals():
                                   activites_autorisees, extraction_air, transaction, meuble, dpe, ges
                            FROM properties WHERE user_id = %s""", (request.agency_id,))
             biens = cur.fetchall()
+            cur.execute("SELECT property_id, COUNT(*) AS n FROM property_photos WHERE user_id = %s GROUP BY property_id",
+                        (request.agency_id,))
+            nb_photos = {r['property_id']: r['n'] for r in cur.fetchall()}
             cur.execute("""SELECT m.lead_id, l.name, l.email, m.subject, m.property_ids, m.sent_at
                            FROM lead_mails m JOIN leads l ON l.id = m.lead_id
                            WHERE l.user_id = %s ORDER BY m.sent_at DESC, m.id DESC""", (request.agency_id,))
@@ -5324,6 +5357,7 @@ def get_proposals():
                                       "type": b['property_type'], "price": b['price'], "rooms": b['rooms'],
                                       "size": b['size'], "transaction": b['transaction'],
                                       "dpe": b.get('dpe'), "ges": b.get('ges'),
+                                      "photos": nb_photos.get(b['id'], 0),
                                       "score": score, "reasons": raisons})
             if not candidats:
                 continue
@@ -5357,6 +5391,15 @@ PJ_MAX_FICHIERS = 5
 PJ_MAX_OCTETS = 3 * 1024 * 1024          # par fichier
 PJ_MAX_TOTAL = 8 * 1024 * 1024           # pour l'ensemble d'un e-mail
 PJ_REQUETE_MAX = 12 * 1024 * 1024        # corps JSON : le base64 pèse un tiers de plus
+
+# Photos des biens dans l'e-mail : 3 par bien et 15 au total (un message reste lisible).
+MAIL_PHOTOS_PAR_BIEN = 3
+MAIL_PHOTOS_TOTAL = 15
+
+
+def _api_publique():
+    """Adresse publique de ce serveur, là où les messageries vont chercher les images."""
+    return (os.getenv("API_PUBLIC_URL") or _BASE_PUBLIQUE_RENDER or "").strip().rstrip("/")
 
 
 def _lire_pieces_jointes(brut):
@@ -5463,13 +5506,37 @@ def send_lead_mail(lead_id):
             # ouverture que l'agent verra sur son tableau de bord. Le PDF reste
             # en pièce jointe, mais une pièce jointe ne dit pas si elle est lue.
             suivi_jeton, lien_suivi = None, None
-            if data.get('tracked_link') is not False and _site_url():
+            veut_lien = data.get('tracked_link') is not False
+            # Photos des biens sous le message : chaque image est servie par une adresse propre à ce
+            # message (celle du jeton de suivi), donc le jeton existe même si l'agent retire le lien.
+            veut_photos = data.get('include_photos') is not False and bool(_api_publique())
+            if (veut_lien or veut_photos) and _site_url():
                 suivi_jeton = secrets.token_urlsafe(24)
-                lien_suivi = f"{_site_url()}/annonces.html?t={suivi_jeton}"
+                if veut_lien:
+                    lien_suivi = f"{_site_url()}/annonces.html?t={suivi_jeton}"
+            galerie = []
+            if suivi_jeton and veut_photos:
+                cur.execute("""SELECT property_id, COUNT(*) AS n FROM property_photos
+                               WHERE user_id = %s AND property_id = ANY(%s) GROUP BY property_id""",
+                            (request.agency_id, ids))
+                nb = {r['property_id']: r['n'] for r in cur.fetchall()}
+                titre_de = {b['id']: b['title'] for b in biens}
+                restant = MAIL_PHOTOS_TOTAL
+                for rang_bien, pid in enumerate(ids):
+                    n = min(nb.get(pid, 0), MAIL_PHOTOS_PAR_BIEN, restant)
+                    if n <= 0:
+                        continue
+                    restant -= n
+                    suffixe = '?t=m' if n > 1 else ''
+                    galerie.append((titre_de.get(pid) or 'Bien',
+                                    [f"{_api_publique()}/public/annonces/{suivi_jeton}/photo/{rang_bien}/{k}{suffixe}"
+                                     for k in range(n)]))
+            nb_photos_mail = sum(len(u) for _, u in galerie)
             texte = (corps + (f"\n\nVoir les annonces en ligne : {lien_suivi}" if lien_suivi else "")
                      + "\n\n--\n" + pied)
             if not _envoyer_email(destinataire, sujet, texte,
-                                  _corps_html(corps, pied, ("Voir les annonces en ligne", lien_suivi) if lien_suivi else None),
+                                  _corps_html(corps, pied, ("Voir les annonces en ligne", lien_suivi) if lien_suivi else None,
+                                              galerie=galerie),
                                   nom_expediteur=agence,
                                   repondre_a=(agent['email'], _nom_affiche(agent['first_name'] or agence, agence)),
                                   pieces_jointes=pieces):
@@ -5485,7 +5552,8 @@ def send_lead_mail(lead_id):
                         (lead_id, request.user_id,
                          (f"E-mail envoyé à {destinataire} : « {sujet} ». Biens proposés : {titres}"
                           + (f". PDF joints : {', '.join(n for n, _ in pieces)}" if pieces else "")
-                          + (". Lien de suivi des annonces joint" if lien_suivi else ""))[:2000],
+                          + (". Lien de suivi des annonces joint" if lien_suivi else "")
+                          + (f". Photos incluses : {nb_photos_mail}" if nb_photos_mail else ""))[:2000],
                          maintenant))
             if statut == 'nouveau':
                 cur.execute("""UPDATE leads SET status = 'contacte', status_changed_at = NOW(),
@@ -5497,7 +5565,8 @@ def send_lead_mail(lead_id):
                              f"{STATUTS_LIBELLES['nouveau']} → {STATUTS_LIBELLES['contacte']}", maintenant))
             conn.commit()
         return jsonify({"sent_at": _iso(maintenant), "status": 'contacte' if statut == 'nouveau' else statut,
-                        "attachments": len(pieces), "tracked_link": bool(lien_suivi)}), 200
+                        "attachments": len(pieces), "tracked_link": bool(lien_suivi),
+                        "photos": nb_photos_mail}), 200
     except Exception:
         return erreur_interne()
 
@@ -5589,6 +5658,43 @@ def annonces_publiques(token):
 
 def _cle_jeton_public():
     return "pub:" + str((request.view_args or {}).get('token', ''))[:64]
+
+
+@app.route('/public/annonces/<token>/photo/<int:ref>/<int:rang>', methods=['GET'])
+@limiter.limit("900 per hour", key_func=_cle_jeton_public)
+def photo_annonce_publique(token, ref, rang):
+    """Une photo d'un bien d'un e-mail de proposition (ref : rang du bien dans le
+    message, rang : rang de la photo). Les messageries chargent ces images : on
+    n'enregistre donc aucun événement ici (seule la page des annonces compte comme une ouverture).
+    ?t=m donne la petite version."""
+    try:
+        if not COMPLETION_JETON_RE.match(token) or ref >= 10 or rang >= PHOTOS_MAX_PAR_BIEN:
+            return jsonify({"message": "Not found"}), 404
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("""
+                SELECT m.property_ids, m.sent_at, l.user_id
+                FROM lead_mails m
+                JOIN leads l ON l.id = m.lead_id
+                JOIN users u ON u.id = l.user_id AND u.is_active
+                WHERE m.suivi_token = %s
+            """, (token,))
+            mail = cur.fetchone()
+            ids = (mail['property_ids'] or []) if mail else []
+            if not mail or ref >= len(ids) or mail['sent_at'] < _maintenant() - timedelta(days=ANNONCES_VALIDITE_JOURS):
+                return jsonify({"message": "Not found"}), 404
+            petite = request.args.get('t') == 'm'
+            cur.execute(f"""SELECT mime, {'miniature' if petite else 'data'} AS img FROM property_photos
+                            WHERE property_id = %s AND user_id = %s ORDER BY position, id OFFSET %s LIMIT 1""",
+                        (ids[ref], mail['user_id'], rang))
+            photo = cur.fetchone()
+        if not photo:
+            return jsonify({"message": "Not found"}), 404
+        reponse = Response(bytes(photo['img']), mimetype='image/jpeg' if petite else photo['mime'])
+        reponse.headers['Cache-Control'] = 'public, max-age=86400'
+        return reponse
+    except Exception:
+        return erreur_interne()
 
 
 @app.route('/public/annonces/<token>/interet', methods=['POST'])
