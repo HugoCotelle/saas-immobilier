@@ -1654,9 +1654,11 @@ def _niveau_qualite(points):
 # prospect qui ouvre, remplit et demande une visite est plus chaud qu'un autre
 # au dossier identique. Chaque type d'événement compte une seule fois, et
 # l'ensemble est plafonné.
-ENGAGEMENT_POINTS = {'formulaire_ouvert': 2, 'formulaire_rempli': 4, 'annonces_ouvertes': 3, 'interet_bien': 6}
+ENGAGEMENT_POINTS = {'formulaire_ouvert': 2, 'formulaire_rempli': 4, 'annonces_ouvertes': 3, 'interet_bien': 6,
+                     'rdv_confirme': 8}
 ENGAGEMENT_LIBELLES = {'formulaire_ouvert': "A ouvert son formulaire", 'formulaire_rempli': "A rempli son formulaire",
-                       'annonces_ouvertes': "A ouvert les annonces reçues", 'interet_bien': "A demandé une visite"}
+                       'annonces_ouvertes': "A ouvert les annonces reçues", 'interet_bien': "A demandé une visite",
+                       'rdv_confirme': "A fixé un rendez-vous de visite"}
 ENGAGEMENT_MAX = 12
 
 
@@ -1671,6 +1673,11 @@ def _charger_engagement(cur, user_id, leads, lignes=False):
                        WHERE user_id = %s AND lead_id = ANY(%s) GROUP BY lead_id, kind""", (user_id, ids))
         for r in cur.fetchall():
             par_lead.setdefault(r['lead_id'], set()).add(r['kind'])
+        # Un rendez-vous de visite fixé (et non annulé) est le signal le plus fort :
+        # il compte tant qu'il est confirmé, et disparaît s'il est annulé.
+        cur.execute("SELECT DISTINCT lead_id FROM lead_rdv WHERE lead_id = ANY(%s) AND statut = 'confirme'", (ids,))
+        for r in cur.fetchall():
+            par_lead.setdefault(r['lead_id'], set()).add('rdv_confirme')
     for l in leads:
         genres = par_lead.get(l.get('id'), set())
         l['engagement'] = min(ENGAGEMENT_MAX, sum(ENGAGEMENT_POINTS.get(k, 0) for k in genres))
