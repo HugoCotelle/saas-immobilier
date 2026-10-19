@@ -7,6 +7,7 @@
     <meta name="robots" content="noindex">
     <script src="vendor/react.production.min.js"></script>
     <script src="vendor/react-dom.production.min.js"></script>
+    <script src="carrousel.js"></script>
     <script src="vendor/babel.min.js"></script>
     <script src="vendor/lecteur-excel.js"></script>
     <meta name="theme-color" content="#F6F2EA">
@@ -400,6 +401,14 @@
                     });
                     if (r.ok) setCouvertures(await r.json());
                 } catch (e) { /* les biens s'affichent sans photo */ }
+            };
+            // Toutes les photos d'un bien (petites versions), chargées quand on fait défiler la carte.
+            const photosDuBien = async (id) => {
+                const r = await fetch(`${API_URL}/api/v1/properties/${id}/photos?miniature=1`, {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                });
+                if (!r.ok) throw new Error('photos');
+                return (await r.json()).map((p) => p.image);
             };
             const appel = (chemin, options = {}) => fetch(`${API_URL}${chemin}`, {
                 ...options,
@@ -1134,7 +1143,11 @@
                                 {biensFiltres.map((b) => (
                                     <div key={b.id} className="bien-card">
                                         {couvertures.miniatures[String(b.id)] ? (
-                                            <img className="bien-photo" src={couvertures.miniatures[String(b.id)]} alt={`Photo de ${b.title}`} />
+                                            <Carrousel key={`${b.id}-${couvertures.nombres[String(b.id)]}-${couvertures.miniatures[String(b.id)].length}`}
+                                                couverture={couvertures.miniatures[String(b.id)]}
+                                                nombre={couvertures.nombres[String(b.id)] || 1}
+                                                charger={() => photosDuBien(b.id)}
+                                                alt={`Photos de ${b.title}`} />
                                         ) : null}
                                         <div className="bien-header">
                                             <div className="bien-titre">{b.title}</div>
@@ -1155,9 +1168,6 @@
                                         <Energie dpe={b.dpe} ges={b.ges} />
                                         {estLocation(b) && b.dpe === 'G' && (
                                             <div className="ener-alerte">Classé G : location interdite pour un nouveau bail.</div>
-                                        )}
-                                        {couvertures.nombres[String(b.id)] > 1 && (
-                                            <div className="ref-bien">{couvertures.nombres[String(b.id)]} photos</div>
                                         )}
                                         <div className="bien-field">
                                             <span className="bien-label">Surface :</span>

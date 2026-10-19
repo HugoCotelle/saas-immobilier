@@ -7,6 +7,7 @@
     <meta name="robots" content="noindex">
     <script src="vendor/react.production.min.js"></script>
     <script src="vendor/react-dom.production.min.js"></script>
+    <script src="carrousel.js"></script>
     <script src="vendor/babel.min.js"></script>
     <meta name="theme-color" content="#F6F2EA">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
@@ -79,6 +80,7 @@
             const [qualityFilter, setQualityFilter] = useState('all');
             const [recherche, setRecherche] = useState('');
             const [filtreTransaction, setFiltreTransaction] = useState('tout');   // tout | vente | location
+            const [couvertures, setCouvertures] = useState({ miniatures: {}, nombres: {} });
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
             const [user, setUser] = useState(null);
@@ -93,6 +95,23 @@
                 if (userData) setUser(JSON.parse(userData));
                 fetchMatches(token);
             }, []);
+
+            // Photos des biens : couverture et nombre, puis les autres photos à la demande (défilement).
+            const chargerCouvertures = async (token) => {
+                try {
+                    const r = await fetch(`${API_URL}/api/v1/properties/photos-couverture`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (r.ok) setCouvertures(await r.json());
+                } catch (e) { /* les biens s'affichent sans photo */ }
+            };
+            const photosDuBien = async (id) => {
+                const r = await fetch(`${API_URL}/api/v1/properties/${id}/photos?miniature=1`, {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                });
+                if (!r.ok) throw new Error('photos');
+                return (await r.json()).map((p) => p.image);
+            };
 
             const fetchMatches = async (token) => {
                 try {
@@ -111,6 +130,7 @@
                     }
                     const data = await response.json();
                     setLeads(data);
+                    chargerCouvertures(token);
                     if (data.length > 0) setSelectedLeadId([...data].sort(parNom)[0].id);
                     setError(null);
                 } catch (err) {
@@ -347,6 +367,14 @@
                                                 {selectedLead.matches && selectedLead.matches.length > 0 ? (
                                                     selectedLead.matches.map((match, idx) => (
                                                         <div key={idx} className="match-card">
+                                                            {couvertures.miniatures[String(match.property_id)] && (
+                                                                <Carrousel key={`${match.property_id}-${couvertures.nombres[String(match.property_id)]}`}
+                                                                    couverture={couvertures.miniatures[String(match.property_id)]}
+                                                                    nombre={couvertures.nombres[String(match.property_id)] || 1}
+                                                                    charger={() => photosDuBien(match.property_id)}
+                                                                    className="carrousel-large"
+                                                                    alt={`Photos de ${match.title || match.name || 'ce bien'}`} />
+                                                            )}
                                                             <div className="match-header">
                                                                 <div>
                                                                     <div className="match-title">{match.title || match.name}</div>

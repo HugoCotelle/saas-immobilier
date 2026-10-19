@@ -7,6 +7,7 @@
     <meta name="robots" content="noindex">
     <script src="vendor/react.production.min.js"></script>
     <script src="vendor/react-dom.production.min.js"></script>
+    <script src="carrousel.js"></script>
     <script src="vendor/babel.min.js"></script>
     <meta name="theme-color" content="#F6F2EA">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
@@ -82,6 +83,21 @@
             return isNaN(d) ? '' : d.toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
         };
 
+        const MAIL_PHOTOS_PAR_BIEN = 3;   // comme le serveur
+
+        // Aperçu des photos d'un bien : la première tout de suite, les autres au défilement.
+        function PhotoBien({ bien, charger }) {
+            const [premiere, setPremiere] = useState(null);
+            useEffect(() => {
+                let actif = true;
+                charger(bien.property_id).then((l) => { if (actif && l[0]) setPremiere(l[0]); }).catch(() => {});
+                return () => { actif = false; };
+            }, [bien.property_id]);
+            if (!premiere) return <div className="carrousel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'var(--ink-3)' }}>Chargement…</div>;
+            return <Carrousel couverture={premiere} nombre={bien.photos} max={MAIL_PHOTOS_PAR_BIEN}
+                charger={() => charger(bien.property_id)} alt={`Photos de ${bien.title}`} />;
+        }
+
         function PropositionsApp() {
             const [data, setData] = useState(null);
             const [loading, setLoading] = useState(true);
@@ -139,6 +155,15 @@
                 });
             }, []);
 
+            // Photos des biens (petites versions), chargées une fois pour l'aperçu de l'e-mail.
+            const [photosBiens, setPhotosBiens] = useState({});
+            const chargerPhotos = async (idBien) => {
+                if (photosBiens[idBien]) return photosBiens[idBien];
+                const l = (await appel(`/api/v1/properties/${idBien}/photos?miniature=1`)).map((p) => p.image);
+                setPhotosBiens((a) => ({ ...a, [idBien]: l }));
+                return l;
+            };
+
             const liste = data ? data.a_envoyer : [];
             const idAffiche = liste.some((x) => x.lead.id === selectedId) ? selectedId : (liste[0] ? liste[0].lead.id : null);
             const item = liste.find((x) => x.lead.id === idAffiche) || null;
@@ -147,7 +172,7 @@
             // Brouillon du prospect affiché : celui que l'agent a commencé, sinon le message d'origine.
             const parDefaut = (it) => {
                 const ids = it.biens.slice(0, 3).map((b) => b.property_id);
-                return { ids, objet: objetPar(it.lead), corps: composer(it, ids, agent), pieces: [] };
+                return { ids, objet: objetPar(it.lead), corps: composer(it, ids, agent), pieces: [], photos: true };
             };
             const brouillon = item ? (brouillons[item.lead.id] || parDefaut(item)) : null;
             const maj = (patch) => {
@@ -240,6 +265,7 @@
                         method: 'POST',
                         body: JSON.stringify({ subject: brouillon.objet, body: brouillon.corps, property_ids: brouillon.ids,
                             tracked_link: brouillon.lien !== false,
+                            include_photos: brouillon.photos !== false,
                             attachments: (brouillon.pieces || []).map((p) => ({ name: p.name, content: p.content })) })
                     });
                     const reste = { ...brouillons };
@@ -446,6 +472,37 @@
                                                             </button>
                                                         </p>
                                                     </div>
+                                                    {(() => {
+                                                        const avecPhotos = item.biens.filter((b) => brouillon.ids.includes(b.property_id) && b.photos > 0);
+                                                        const actives = brouillon.photos !== false && avecPhotos.length > 0;
+                                                        return (
+                                                            <div className="form-group">
+                                                                <label htmlFor="photos-mail" style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', textTransform: 'none', letterSpacing: 0, fontSize: '14px', fontWeight: 400, cursor: avecPhotos.length ? 'pointer' : 'default', lineHeight: 1.5 }}>
+                                                                    <input id="photos-mail" type="checkbox" checked={actives}
+                                                                        onChange={(e) => maj({ photos: e.target.checked })} disabled={envoi || avecPhotos.length === 0}
+                                                                        style={{ width: '18px', height: '18px', marginTop: '2px', flex: 'none', padding: 0 }} />
+                                                                    <span>
+                                                                        {avecPhotos.length > 0
+                                                                            ? `Ajouter les photos des biens sous le message (${MAIL_PHOTOS_PAR_BIEN} par bien au maximum, les premières).`
+                                                                            : "Aucun des biens choisis n'a de photo : ajoutez-en depuis la page Biens pour les voir dans le message."}
+                                                                    </span>
+                                                                </label>
+                                                                {actives && (
+                                                                    <>
+                                                                        <div className="photos-mail">
+                                                                            {avecPhotos.map((b) => (
+                                                                                <div key={b.property_id}>
+                                                                                    <PhotoBien bien={b} charger={chargerPhotos} />
+                                                                                    <div className="photos-mail-titre">{b.title} · {Math.min(b.photos, MAIL_PHOTOS_PAR_BIEN)} photo{Math.min(b.photos, MAIL_PHOTOS_PAR_BIEN) > 1 ? 's' : ''} dans le message</div>
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                        <p className="field-hint">Elles s'affichent sous votre texte, avant le bouton des annonces. Certaines messageries demandent au prospect d'autoriser l'affichage des images.</p>
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })()}
                                                     <div className="form-group">
                                                         <label htmlFor="lien-suivi" style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', textTransform: 'none', letterSpacing: 0, fontSize: '14px', fontWeight: 400, cursor: 'pointer', lineHeight: 1.5 }}>
                                                             <input id="lien-suivi" type="checkbox" checked={brouillon.lien !== false}
