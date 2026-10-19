@@ -21,7 +21,7 @@ from functools import wraps
 import psycopg2
 import psycopg2.errors
 from psycopg2.extras import RealDictCursor, Json
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote as urlquote
 from cryptography.fernet import Fernet
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.exceptions import HTTPException
@@ -2794,6 +2794,117 @@ def _titre_bien(titre, type_bien, pieces, adresse):
     return base or adresse or None
 
 
+def _importer_biens(agence_id, lignes, decalage=0, transaction_defaut=None):
+    """Cœur de l'import de biens, commun au fichier envoyé depuis la page Biens, à l'API
+    partenaire et à l'e-mail d'export : met à jour par référence, ajoute le reste dans la
+    limite du forfait, relance le matching. Renvoie le bilan (dictionnaire)."""
+    ajoutes, maj, doublons, hors_forfait = 0, 0, 0, 0
+    invalides, ids_nouveaux, ids_maj = [], [], []
+    types_inconnus, sans_adresse, sans_type = set(), 0, 0
+    with _base() as (conn, cur):
+        reste, forfait = _reste(cur, agence_id, 'properties')
+        cur.execute("""SELECT id, lower(reference) AS ref, lower(title) AS t,
+                              lower(coalesce(address, '')) AS a
+                       FROM properties WHERE user_id = %s""", (agence_id,))
+        par_ref, par_cle = {}, {}
+        for r in cur.fetchall():
+            if r['ref']:
+                par_ref[r['ref']] = r['id']
+            par_cle.setdefault((r['t'], r['a']), (r['id'], bool(r['ref'])))
+
+        for i, ligne in enumerate(lignes):
+            numero = decalage + i + 1
+            if not isinstance(ligne, dict):
+                invalides.append({"ligne": numero, "raison": "Ligne illisible"})
+                continue
+            reference = _texte_court(ligne.get('reference'), 60)
+            adresse = _texte_court(ligne.get('address'), 255)
+            prix = _entier_souple(ligne.get('price'))
+            surface = _entier_souple(ligne.get('size'), 1_000_000)
+            pieces = _entier_souple(ligne.get('rooms'), 1000)
+            type_brut = _texte_court(ligne.get('property_type'), 100)
+            type_bien = _type_bien(type_brut)
+            if type_brut and not type_bien:
+                types_inconnus.add(type_brut[:40])
+            description = _texte_court(ligne.get('description'), 5000)
+            titre_saisi = _texte_court(ligne.get('title'), 255)
+            activites = _activites_liste(ligne.get('activites_autorisees'))
+            extraction = _booleen_souple(ligne.get('extraction_air'))
+            transaction = _transaction(ligne.get('transaction')) or transaction_defaut
+            meuble = _booleen_souple(ligne.get('meuble'))
+            dpe = _classe_energie(ligne.get('dpe'))
+            ges = _classe_energie(ligne.get('ges'))
+
+            cible = par_ref.get(reference.lower()) if reference else None
+            if cible is None:
+                titre = _titre_bien(titre_saisi, type_bien, pieces, adresse)
+                existant = par_cle.get((titre.lower(), (adresse or '').lower())) if titre else None
+                if existant:
+                    if reference and not existant[1]:
+                        cible = existant[0]      # bien saisi à la main : on lui donne sa référence
+                    elif not reference:
+                        doublons += 1
+                        continue
+
+            if cible is not None:
+                cur.execute("""
+                    UPDATE properties SET
+                        reference = COALESCE(%s, reference), title = COALESCE(%s, title),
+                        address = COALESCE(%s, address), price = COALESCE(%s, price),
+                        size = COALESCE(%s, size), rooms = COALESCE(%s, rooms),
+                        property_type = COALESCE(%s, property_type),
+                        description = COALESCE(%s, description),
+                        activites_autorisees = COALESCE(%s, activites_autorisees),
+                        extraction_air = COALESCE(%s, extraction_air),
+                        transaction = COALESCE(%s, transaction),
+                        meuble = COALESCE(%s, meuble),
+                        dpe = COALESCE(%s, dpe),
+                        ges = COALESCE(%s, ges)
+                    WHERE id = %s AND user_id = %s
+                """, (reference, titre_saisi, adresse, prix, surface, pieces, type_bien,
+                      description, activites, extraction, transaction, meuble, dpe, ges, cible, agence_id))
+                if cible not in ids_maj and cible not in ids_nouveaux:
+                    maj += 1
+                ids_maj.append(cible)
+            else:
+                if not titre:
+                    invalides.append({"ligne": numero, "raison": "Titre manquant (ni type ni adresse pour en composer un)"})
+                    continue
+                if reste is not None and ajoutes >= reste:
+                    hors_forfait += 1
+                    continue
+                cur.execute("""
+                    INSERT INTO properties (user_id, reference, title, address, price, size, rooms,
+                                            property_type, description, activites_autorisees, extraction_air,
+                                            transaction, meuble, dpe, ges)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                """, (agence_id, reference, titre, adresse, prix, surface, pieces, type_bien, description,
+                      activites, extraction, transaction or 'vente', meuble, dpe, ges))
+                nouvel_id = cur.fetchone()['id']
+                ids_nouveaux.append(nouvel_id)
+                ajoutes += 1
+                if reference:
+                    par_ref[reference.lower()] = nouvel_id
+                par_cle.setdefault((titre.lower(), (adresse or '').lower()), (nouvel_id, bool(reference)))
+            if not adresse:
+                sans_adresse += 1
+            if not type_bien:
+                sans_type += 1
+        conn.commit()
+
+    if ids_nouveaux or ids_maj:
+        _lancer_en_arriere_plan(_alertes_matching, agence_id, None, list(dict.fromkeys(ids_nouveaux + ids_maj)))
+    return {
+        "imported": ajoutes, "updated": maj, "duplicates": doublons,
+        "invalid": invalides[:50], "invalid_count": len(invalides),
+        "over_quota": hors_forfait,
+        "quota_message": (f"Limite du forfait {forfait['label']} atteinte ({_nombre(forfait['limits']['properties'])} biens) : "
+                          f"{hors_forfait} ligne(s) n'ont pas été importées.") if hors_forfait else None,
+        "unknown_types": sorted(types_inconnus)[:10],
+        "without_address": sans_adresse, "without_type": sans_type}
+
+
+
 @app.route('/api/v1/properties/import', methods=['POST'])
 @limiter.limit("20 per hour", key_func=_cle_utilisateur)
 @token_required
@@ -2816,110 +2927,7 @@ def import_properties():
         # Choix fait sur la page quand tout le fichier est de la vente ou de la location.
         transaction_defaut = _transaction(data.get('default_transaction'))
 
-        ajoutes, maj, doublons, hors_forfait = 0, 0, 0, 0
-        invalides, ids_nouveaux, ids_maj = [], [], []
-        types_inconnus, sans_adresse, sans_type = set(), 0, 0
-        with _base() as (conn, cur):
-            reste, forfait = _reste(cur, request.agency_id, 'properties')
-            cur.execute("""SELECT id, lower(reference) AS ref, lower(title) AS t,
-                                  lower(coalesce(address, '')) AS a
-                           FROM properties WHERE user_id = %s""", (request.agency_id,))
-            par_ref, par_cle = {}, {}
-            for r in cur.fetchall():
-                if r['ref']:
-                    par_ref[r['ref']] = r['id']
-                par_cle.setdefault((r['t'], r['a']), (r['id'], bool(r['ref'])))
-
-            for i, ligne in enumerate(lignes):
-                numero = decalage + i + 1
-                if not isinstance(ligne, dict):
-                    invalides.append({"ligne": numero, "raison": "Ligne illisible"})
-                    continue
-                reference = _texte_court(ligne.get('reference'), 60)
-                adresse = _texte_court(ligne.get('address'), 255)
-                prix = _entier_souple(ligne.get('price'))
-                surface = _entier_souple(ligne.get('size'), 1_000_000)
-                pieces = _entier_souple(ligne.get('rooms'), 1000)
-                type_brut = _texte_court(ligne.get('property_type'), 100)
-                type_bien = _type_bien(type_brut)
-                if type_brut and not type_bien:
-                    types_inconnus.add(type_brut[:40])
-                description = _texte_court(ligne.get('description'), 5000)
-                titre_saisi = _texte_court(ligne.get('title'), 255)
-                activites = _activites_liste(ligne.get('activites_autorisees'))
-                extraction = _booleen_souple(ligne.get('extraction_air'))
-                transaction = _transaction(ligne.get('transaction')) or transaction_defaut
-                meuble = _booleen_souple(ligne.get('meuble'))
-                dpe = _classe_energie(ligne.get('dpe'))
-                ges = _classe_energie(ligne.get('ges'))
-
-                cible = par_ref.get(reference.lower()) if reference else None
-                if cible is None:
-                    titre = _titre_bien(titre_saisi, type_bien, pieces, adresse)
-                    existant = par_cle.get((titre.lower(), (adresse or '').lower())) if titre else None
-                    if existant:
-                        if reference and not existant[1]:
-                            cible = existant[0]      # bien saisi à la main : on lui donne sa référence
-                        elif not reference:
-                            doublons += 1
-                            continue
-
-                if cible is not None:
-                    cur.execute("""
-                        UPDATE properties SET
-                            reference = COALESCE(%s, reference), title = COALESCE(%s, title),
-                            address = COALESCE(%s, address), price = COALESCE(%s, price),
-                            size = COALESCE(%s, size), rooms = COALESCE(%s, rooms),
-                            property_type = COALESCE(%s, property_type),
-                            description = COALESCE(%s, description),
-                            activites_autorisees = COALESCE(%s, activites_autorisees),
-                            extraction_air = COALESCE(%s, extraction_air),
-                            transaction = COALESCE(%s, transaction),
-                            meuble = COALESCE(%s, meuble),
-                            dpe = COALESCE(%s, dpe),
-                            ges = COALESCE(%s, ges)
-                        WHERE id = %s AND user_id = %s
-                    """, (reference, titre_saisi, adresse, prix, surface, pieces, type_bien,
-                          description, activites, extraction, transaction, meuble, dpe, ges, cible, request.agency_id))
-                    if cible not in ids_maj and cible not in ids_nouveaux:
-                        maj += 1
-                    ids_maj.append(cible)
-                else:
-                    if not titre:
-                        invalides.append({"ligne": numero, "raison": "Titre manquant (ni type ni adresse pour en composer un)"})
-                        continue
-                    if reste is not None and ajoutes >= reste:
-                        hors_forfait += 1
-                        continue
-                    cur.execute("""
-                        INSERT INTO properties (user_id, reference, title, address, price, size, rooms,
-                                                property_type, description, activites_autorisees, extraction_air,
-                                                transaction, meuble, dpe, ges)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
-                    """, (request.agency_id, reference, titre, adresse, prix, surface, pieces, type_bien, description,
-                          activites, extraction, transaction or 'vente', meuble, dpe, ges))
-                    nouvel_id = cur.fetchone()['id']
-                    ids_nouveaux.append(nouvel_id)
-                    ajoutes += 1
-                    if reference:
-                        par_ref[reference.lower()] = nouvel_id
-                    par_cle.setdefault((titre.lower(), (adresse or '').lower()), (nouvel_id, bool(reference)))
-                if not adresse:
-                    sans_adresse += 1
-                if not type_bien:
-                    sans_type += 1
-            conn.commit()
-
-        if ids_nouveaux or ids_maj:
-            _lancer_en_arriere_plan(_alertes_matching, request.agency_id, None, list(dict.fromkeys(ids_nouveaux + ids_maj)))
-        return jsonify({
-            "imported": ajoutes, "updated": maj, "duplicates": doublons,
-            "invalid": invalides[:50], "invalid_count": len(invalides),
-            "over_quota": hors_forfait,
-            "quota_message": (f"Limite du forfait {forfait['label']} atteinte ({_nombre(forfait['limits']['properties'])} biens) : "
-                              f"{hors_forfait} ligne(s) n'ont pas été importées.") if hors_forfait else None,
-            "unknown_types": sorted(types_inconnus)[:10],
-            "without_address": sans_adresse, "without_type": sans_type}), 200
+        return jsonify(_importer_biens(request.agency_id, lignes, decalage, transaction_defaut)), 200
     except Exception:
         return erreur_interne()
 
@@ -8023,6 +8031,10 @@ def _traiter_email_entrant(item):
         if portail_test:
             portail = portail_test
             mode_test = True
+    if portail == 'portail' and _pieces_tableur(item):
+        # Un tableau CSV ou Excel en pièce jointe : c'est un export de biens, pas une demande de prospect.
+        _importer_biens_depuis_mail(user_id, item, message_id, sujet)
+        return
     corps = _corps_texte_email(item)[:6000]
     confirmation = _confirmation_gmail(expediteur, sujet, corps)
     if confirmation:
@@ -8737,7 +8749,7 @@ _ANALYSES_RECEPTION = {
     'quota': "Quota d'analyses de votre forfait atteint : coordonnées lues par des règles simples seulement",
 }
 _ORIGINES_RECEPTION = {'leboncoin': 'LeBonCoin', 'seloger': 'SeLoger', 'portail': 'E-mail transféré',
-                       'api': 'API partenaire'}
+                       'api': 'API partenaire', 'biens': 'Export de biens'}
 
 
 @app.route('/api/v1/reception/journal', methods=['GET'])
@@ -8777,7 +8789,9 @@ def journal_reception():
                 except ValueError:
                     pass
             cree = r['lead_id'] is not None
-            if cree:
+            if r['source'] == 'biens':
+                resultat = r['detail'] or "Export de biens reçu"
+            elif cree:
                 resultat = "Prospect créé"
             else:
                 resultat = _ISSUES_RECEPTION.get(r['source'], "Ignoré")
@@ -9075,6 +9089,360 @@ def inbound_lead():
         return jsonify({"status": "created", "id": lead_id}), 201
     except Exception:
         return erreur_interne()
+
+
+# ===== IMPORT DES BIENS PAR API ET PAR E-MAIL =====
+# Deux portes de plus que le fichier envoyé depuis la page Biens, qui aboutissent
+# au même import (_importer_biens) : mise à jour par référence, ajouts dans la
+# limite du forfait, relance du matching.
+#   - l'API : un CRM, une passerelle de diffusion, Zapier ou Make envoie les
+#     biens en JSON avec la clé d'API de l'agence ;
+#   - l'e-mail : l'agent (ou son CRM, par un export programmé) envoie un
+#     fichier CSV ou Excel en pièce jointe à l'adresse de réception Zelyro.
+# Le fichier est lu ici de la même façon que dans le navigateur : mêmes titres
+# de colonnes reconnus, mêmes règles pour l'adresse.
+
+_SYNONYMES_COLONNES_BIENS = {
+    'reference': ('reference', 'ref', 'reference bien', 'numero mandat', 'n mandat', 'no mandat', 'mandat',
+                  'code bien', 'id annonce', 'reference annonce', 'numero'),
+    'title': ('titre', 'titre annonce', 'intitule', 'libelle', 'designation', 'annonce'),
+    'address': ('adresse', 'adresse du bien', 'localisation', 'secteur'),
+    'city': ('ville', 'commune'),
+    'zip': ('code postal', 'cp'),
+    'price': ('prix', 'prix de vente', 'prix fai', 'prix net vendeur', 'montant', 'loyer', 'loyer mensuel'),
+    'size': ('surface', 'surface habitable', 'superficie', 'm2'),
+    'rooms': ('pieces', 'nb pieces', 'nombre de pieces', 'nombre pieces', 'nb de pieces'),
+    'property_type': ('type de bien', 'type bien', 'nature', 'categorie', 'type'),
+    'description': ('description', 'descriptif', 'texte annonce', 'texte', 'commentaire'),
+    'activites_autorisees': ('activites autorisees', 'activite autorisee', 'activites', 'destination', 'usage'),
+    'extraction_air': ('extraction', 'extraction d air', 'extraction air', 'conduit d extraction', 'hotte',
+                       'ventilation'),
+    'transaction': ('transaction', 'type de transaction', 'vente ou location', 'vente location', 'location vente',
+                    'nature de l operation', 'operation'),
+    'meuble': ('meuble', 'meublee', 'bien meuble', 'ameublement'),
+    'dpe': ('dpe', 'classe dpe', 'classe energie', 'classe energetique', 'diagnostic de performance energetique',
+            'etiquette energie', 'etiquette dpe', 'consommation energetique'),
+    'ges': ('ges', 'classe ges', 'classe climat', 'etiquette climat', 'etiquette ges', 'emissions de ges',
+            'gaz a effet de serre'),
+}
+_CHAMPS_BIEN_IMPORT = ('reference', 'title', 'address', 'price', 'size', 'rooms', 'property_type', 'description',
+                       'activites_autorisees', 'extraction_air', 'transaction', 'meuble', 'dpe', 'ges')
+_TABLEUR_MAX_OCTETS = 6_000_000
+_TABLEUR_MAX_LIGNES = 3000
+_XLSX_MAX_OCTETS_DECOMPRESSES = 40_000_000
+
+
+def _titre_colonne(brut):
+    """Titre de colonne comparable : sans accents, en minuscules, sans ponctuation."""
+    t = ''.join(c for c in unicodedata.normalize('NFKD', str(brut or '')) if not unicodedata.combining(c)).lower()
+    return re.sub(r'[^a-z0-9]+', ' ', t).strip()
+
+
+def _reconnaitre_colonnes_biens(entetes):
+    """{champ: indice de colonne}. Pour chaque champ, la colonne dont le titre
+    ressemble le plus (le synonyme le plus long gagne) ; une colonne ne sert
+    qu'à un seul champ. Même règle que sur la page Biens."""
+    meilleur = {}
+    for indice, brut in enumerate(entetes):
+        h = _titre_colonne(brut)
+        if not h:
+            continue
+        for champ, synonymes in _SYNONYMES_COLONNES_BIENS.items():
+            for syn in synonymes:
+                if h == syn or h.startswith(syn + ' '):
+                    if champ not in meilleur or len(syn) > meilleur[champ][1]:
+                        meilleur[champ] = (indice, len(syn))
+    prises = {}
+    for champ, (indice, force) in meilleur.items():
+        if indice not in prises or prises[indice][1] < force:
+            prises[indice] = (champ, force)
+    return {champ: indice for champ, (indice, force) in meilleur.items() if prises[indice][0] == champ}
+
+
+def _adresse_complete(adresse, code_postal, ville):
+    """L'adresse, suivie du code postal et de la ville s'ils n'y figurent pas
+    déjà. Excel enregistre le code postal 01000 comme le nombre 1000 : on rend
+    son 0 au code à 4 chiffres."""
+    adresse = str(adresse or '').strip()
+    cp = re.sub(r'^(\d{4})$', r'0\1', str(code_postal or '').strip())
+    ville = str(ville or '').strip()
+    morceaux = [adresse]
+    if cp and cp not in adresse:
+        morceaux.append(cp)
+    if ville and ville.lower() not in adresse.lower():
+        morceaux.append(ville)
+    return ' '.join(m for m in morceaux if m)
+
+
+def _biens_depuis_tableau(lignes):
+    """(biens, None) ou (None, message) : les lignes d'un tableau (la première
+    porte les titres de colonnes) transformées en biens prêts pour l'import."""
+    if len(lignes) < 2:
+        return None, "Le fichier est vide, ou ne contient que la ligne des titres de colonnes."
+    colonnes = _reconnaitre_colonnes_biens(lignes[0])
+    if not any(c in colonnes for c in ('title', 'reference', 'address', 'property_type')):
+        return None, ("Aucune colonne reconnue : la première ligne du fichier doit porter les titres des "
+                      "colonnes (titre, adresse, prix...).")
+    if len(lignes) - 1 > _TABLEUR_MAX_LIGNES:
+        return None, f"Plus de {_TABLEUR_MAX_LIGNES} biens dans le fichier : découpez-le en plusieurs envois."
+
+    def valeur(ligne, champ):
+        i = colonnes.get(champ)
+        return str(ligne[i]).strip() if i is not None and i < len(ligne) and ligne[i] is not None else ''
+
+    biens = []
+    for ligne in lignes[1:]:
+        if not any(str(c or '').strip() for c in ligne):
+            continue
+        bien = {champ: valeur(ligne, champ) for champ in _CHAMPS_BIEN_IMPORT if champ != 'address'}
+        bien['address'] = _adresse_complete(valeur(ligne, 'address'), valeur(ligne, 'zip'), valeur(ligne, 'city'))
+        biens.append(bien)
+    return biens, None
+
+
+def _decoder_texte_fichier(octets):
+    for codage in ('utf-8-sig', 'cp1252'):
+        try:
+            return octets.decode(codage)
+        except UnicodeDecodeError:
+            continue
+    return octets.decode('latin-1', errors='replace')
+
+
+def _lire_csv_octets(octets):
+    texte = _decoder_texte_fichier(octets)
+    premiere = texte.split('\n', 1)[0]
+    separateur = max((';', ',', '\t'), key=premiere.count)
+    return [ligne for ligne in csv.reader(io.StringIO(texte), delimiter=separateur)]
+
+
+def _lettres_vers_indice(ref):
+    lettres = re.match(r'[A-Za-z]+', ref or '')
+    if not lettres:
+        return None
+    n = 0
+    for c in lettres.group(0).upper():
+        n = n * 26 + (ord(c) - 64)
+    return n - 1
+
+
+def _lire_xlsx_octets(octets):
+    """Les lignes de la première feuille d'un classeur .xlsx (texte des cellules).
+    Lecture minimale du format, sans bibliothèque : un .xlsx est une archive
+    d'XML. Refuse les archives trop grosses et tout XML qui déclare des entités."""
+    import zipfile
+    import xml.etree.ElementTree as ET
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(octets))
+    except zipfile.BadZipFile:
+        raise ValueError("Fichier Excel illisible.")
+    if sum(i.file_size for i in archive.infolist()) > _XLSX_MAX_OCTETS_DECOMPRESSES:
+        raise ValueError("Classeur Excel trop volumineux.")
+
+    def xml(nom):
+        brut = archive.read(nom)
+        if b'<!DOCTYPE' in brut[:2000] or b'<!ENTITY' in brut[:2000]:
+            raise ValueError("Fichier Excel non conforme.")
+        return ET.fromstring(brut)
+
+    def balise(e):
+        return e.tag.rsplit('}', 1)[-1]
+
+    noms = set(archive.namelist())
+    partages = []
+    if 'xl/sharedStrings.xml' in noms:
+        for si in xml('xl/sharedStrings.xml'):
+            partages.append(''.join(t.text or '' for t in si.iter() if balise(t) == 't'))
+    feuilles = sorted(n for n in noms if re.match(r'xl/worksheets/sheet\d+\.xml$', n))
+    if not feuilles:
+        raise ValueError("Aucune feuille dans le classeur Excel.")
+    feuille = 'xl/worksheets/sheet1.xml' if 'xl/worksheets/sheet1.xml' in noms else feuilles[0]
+    lignes = []
+    for ligne in xml(feuille).iter():
+        if balise(ligne) != 'row':
+            continue
+        cellules = {}
+        suivante = 0
+        for c in ligne:
+            if balise(c) != 'c':
+                continue
+            indice = _lettres_vers_indice(c.get('r'))
+            if indice is None:
+                indice = suivante
+            suivante = indice + 1
+            type_cellule = c.get('t')
+            texte = ''
+            if type_cellule == 'inlineStr':
+                texte = ''.join(t.text or '' for t in c.iter() if balise(t) == 't')
+            else:
+                v = next((x.text for x in c if balise(x) == 'v'), None)
+                if v is not None:
+                    if type_cellule == 's':
+                        try:
+                            texte = partages[int(v)]
+                        except (ValueError, IndexError):
+                            texte = ''
+                    else:
+                        texte = v
+                        if re.fullmatch(r'-?\d+\.0+', v):
+                            texte = v.split('.', 1)[0]
+            if indice < 200:
+                cellules[indice] = texte
+        if cellules:
+            lignes.append([cellules.get(i, '') for i in range(max(cellules) + 1)])
+        if len(lignes) > _TABLEUR_MAX_LIGNES + 2:
+            break
+    return lignes
+
+
+def _biens_depuis_fichier(octets, nom):
+    """(biens, None) ou (None, message) pour un fichier CSV ou Excel reçu tel quel."""
+    nom = (nom or '').lower()
+    if len(octets) > _TABLEUR_MAX_OCTETS:
+        return None, "Fichier trop volumineux (6 Mo au plus)."
+    try:
+        if nom.endswith(('.xlsx', '.xlsm')):
+            lignes = _lire_xlsx_octets(octets)
+        elif nom.endswith('.xls'):
+            return None, "Le format .xls n'est pas pris en charge : enregistrez le fichier en .xlsx ou en .csv."
+        else:
+            lignes = _lire_csv_octets(octets)
+    except ValueError as e:
+        return None, str(e)
+    except Exception:
+        app.logger.exception("Lecture d'un fichier de biens")
+        return None, "Fichier illisible."
+    return _biens_depuis_tableau(lignes)
+
+
+def _importer_biens_en_paquets(agence_id, biens):
+    """Importe une liste de biens par paquets et en additionne les bilans."""
+    total = {"imported": 0, "updated": 0, "duplicates": 0, "invalid_count": 0, "over_quota": 0}
+    for debut in range(0, len(biens), MAX_LIGNES_IMPORT):
+        bilan = _importer_biens(agence_id, biens[debut:debut + MAX_LIGNES_IMPORT], decalage=debut)
+        for cle in total:
+            total[cle] += bilan.get(cle, 0)
+    return total
+
+
+def _resume_import(nom_fichier, bilan):
+    morceaux = []
+    if bilan['imported']:
+        morceaux.append(f"{bilan['imported']} ajouté{'s' if bilan['imported'] > 1 else ''}")
+    if bilan['updated']:
+        morceaux.append(f"{bilan['updated']} mis à jour")
+    if bilan['duplicates']:
+        morceaux.append(f"{bilan['duplicates']} déjà présent{'s' if bilan['duplicates'] > 1 else ''}")
+    if bilan['invalid_count']:
+        morceaux.append(f"{bilan['invalid_count']} ligne{'s' if bilan['invalid_count'] > 1 else ''} refusée"
+                        f"{'s' if bilan['invalid_count'] > 1 else ''}")
+    if bilan['over_quota']:
+        morceaux.append(f"{bilan['over_quota']} non importé{'s' if bilan['over_quota'] > 1 else ''} (forfait atteint)")
+    return f"{nom_fichier} : " + (', '.join(morceaux) or "aucun bien")
+
+
+@app.route('/api/v1/inbound/properties', methods=['POST'])
+@limiter.limit("600 per hour", key_func=_cle_api_limite)
+def inbound_properties():
+    """Un partenaire (CRM, passerelle, Zapier, Make...) envoie des biens à
+    l'agence propriétaire de la clé d'API.
+
+    JSON : {"properties": [ {...}, ... ]}, 300 biens au plus par appel. Chaque
+    bien : reference (conseillé : un bien déjà connu est mis à jour, jamais
+    dupliqué), title, address (ou address + zip + city), price (le loyer
+    mensuel pour une location), size, rooms, property_type, transaction
+    (vente ou location), meuble, dpe, ges, description, activites_autorisees,
+    extraction_air. Renvoie le bilan : imported, updated, duplicates, invalid,
+    over_quota."""
+    try:
+        agence = _agence_par_cle_api()
+        if not agence:
+            return jsonify(_NON_AUTORISE[0]), _NON_AUTORISE[1]
+        data = request.get_json(silent=True)
+        biens = data.get('properties') if isinstance(data, dict) else None
+        if not isinstance(biens, list) or not biens:
+            return jsonify({"message": "Corps JSON attendu : {\"properties\": [ ... ]}."}), 400
+        if len(biens) > MAX_LIGNES_IMPORT:
+            return jsonify({"message": f"{MAX_LIGNES_IMPORT} biens au plus par appel."}), 400
+        lignes = []
+        for b in biens:
+            if not isinstance(b, dict):
+                lignes.append(None)
+                continue
+            ligne = dict(b)
+            if any(b.get(k) for k in ('zip', 'postal_code', 'city')):
+                ligne['address'] = _adresse_complete(b.get('address'), b.get('zip') or b.get('postal_code'),
+                                                     b.get('city'))
+            lignes.append(ligne)
+        return jsonify(_importer_biens(agence['user_id'], lignes,
+                                       transaction_defaut=_transaction(data.get('default_transaction')))), 200
+    except Exception:
+        return erreur_interne()
+
+
+_TABLEUR_EXTENSIONS = ('.csv', '.xlsx', '.xlsm', '.xls')
+
+
+def _pieces_tableur(item):
+    """Les pièces jointes d'un e-mail entrant qui sont un tableau (CSV ou Excel)."""
+    pieces = []
+    for a in (item.get('Attachments') or []):
+        if isinstance(a, dict) and a.get('DownloadToken') and str(a.get('Name') or '').lower().endswith(_TABLEUR_EXTENSIONS):
+            pieces.append(a)
+    return pieces
+
+
+def _telecharger_piece_jointe(jeton):
+    """Les octets d'une pièce jointe d'e-mail entrant (API Brevo), ou None."""
+    cle = (os.getenv('BREVO_API_KEY') or '').strip()
+    if not cle or not jeton:
+        return None
+    try:
+        r = requests.get("https://api.brevo.com/v3/inbound/attachments/" + urlquote(str(jeton), safe=''),
+                         headers={"api-key": cle, "accept": "application/octet-stream"}, timeout=25, stream=True)
+        if r.status_code != 200:
+            app.logger.warning("Pièce jointe entrante : Brevo répond %s", r.status_code)
+            return None
+        octets = b''
+        for morceau in r.iter_content(65536):
+            octets += morceau
+            if len(octets) > _TABLEUR_MAX_OCTETS:
+                return None
+        return octets
+    except requests.RequestException:
+        app.logger.exception("Pièce jointe entrante : téléchargement impossible")
+        return None
+
+
+def _importer_biens_depuis_mail(user_id, item, message_id, sujet):
+    """Un e-mail porteur d'un tableau CSV ou Excel, envoyé à l'adresse de
+    réception de l'agence : les biens du fichier sont importés (mise à jour par
+    référence). Le résultat est retenu dans le journal de réception. Ne lève jamais."""
+    try:
+        _assurer_schema()
+        if message_id:
+            with _base() as (conn, cur):
+                cur.execute("SELECT id FROM inbound_emails WHERE message_id = %s", (message_id,))
+                if cur.fetchone():
+                    return
+        comptes = []
+        for piece in _pieces_tableur(item)[:3]:
+            nom = _texte_court(piece.get('Name'), 80) or 'fichier'
+            octets = _telecharger_piece_jointe(piece.get('DownloadToken'))
+            if octets is None:
+                comptes.append(f"{nom} : fichier non récupéré")
+                continue
+            biens, erreur = _biens_depuis_fichier(octets, nom)
+            if erreur:
+                comptes.append(f"{nom} : {erreur}")
+                continue
+            comptes.append(_resume_import(nom, _importer_biens_en_paquets(user_id, biens)))
+        with _base() as (conn, cur):
+            _noter_message(cur, message_id or f"biens:{user_id}:{secrets.token_hex(8)}", user_id, 'biens',
+                           sujet=sujet, detail=' · '.join(comptes))
+            conn.commit()
+    except Exception:
+        app.logger.exception("Import de biens par e-mail : échec")
 
 
 # ===== STATISTIQUES DU SITE (réservées aux administrateurs) =====
