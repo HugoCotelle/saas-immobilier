@@ -534,6 +534,24 @@ _DDL_SURFACE = (
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS activite VARCHAR(30)",
     "ALTER TABLE properties ADD COLUMN IF NOT EXISTS activites_autorisees TEXT[]",
     "ALTER TABLE properties ADD COLUMN IF NOT EXISTS extraction_air BOOLEAN",
+    # Performance énergétique : classe A à G du bien, et classe la moins bonne
+    # que le prospect accepte.
+    "ALTER TABLE properties ADD COLUMN IF NOT EXISTS dpe CHAR(1)",
+    "ALTER TABLE properties ADD COLUMN IF NOT EXISTS ges CHAR(1)",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS dpe_max CHAR(1)",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS ges_max CHAR(1)",
+    # Photos des biens : stockées en base (le disque de l'hébergeur est éphémère).
+    """CREATE TABLE IF NOT EXISTS property_photos (
+        id SERIAL PRIMARY KEY,
+        property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL DEFAULT 0,
+        mime VARCHAR(30) NOT NULL,
+        data BYTEA NOT NULL,
+        miniature BYTEA NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS property_photos_bien_idx ON property_photos (property_id, position)",
 )
 
 # Les forfaits : code, nom, prospects, biens, e-mails par mois, extractions IA
@@ -795,7 +813,16 @@ def _assurer_schema():
                        EXISTS (SELECT 1 FROM information_schema.columns
                                WHERE table_name = 'leads' AND column_name = 'bien_adresse'),
                        EXISTS (SELECT 1 FROM information_schema.columns
-                               WHERE table_name = 'leads' AND column_name = 'bien_ville')
+                               WHERE table_name = 'leads' AND column_name = 'bien_ville'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'properties' AND column_name = 'dpe'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'properties' AND column_name = 'ges'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'leads' AND column_name = 'dpe_max'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'leads' AND column_name = 'ges_max'),
+                       to_regclass('property_photos') IS NOT NULL
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
@@ -1909,6 +1936,68 @@ def _booleen_souple(valeur):
     if n in ('non', 'n', 'no', 'false', '0', 'absent', 'absente', 'impossible'):
         return False
     return None
+# ===== PERFORMANCE ÉNERGÉTIQUE (DPE / GES) =====
+# Le bien porte une classe de A (la meilleure) à G ; le prospect indique la
+# classe la moins bonne qu'il accepte (« D » = D ou mieux). Pas de critère ou
+# pas de classe sur le bien : aucun effet sur le score, seulement une
+# remarque. Une classe moins bonne que celle acceptée retire des points ;
+# deux classes d'écart ou plus sur le DPE sortent le bien des alertes.
+CLASSES_ENERGIE = "ABCDEFG"
+PLAFOND_ENERGIE_ECART = 59
+MALUS_DPE = {1: 10, 2: 20}
+MALUS_DPE_MAX = 30
+MALUS_GES = {1: 5, 2: 10}
+MALUS_GES_MAX = 15
+
+
+def _classe_energie(valeur):
+    """Lettre A à G lue dans un formulaire ou un fichier (« d », « Classe D »,
+    « D (230) »). Tout le reste est « non renseigné » (None)."""
+    if valeur is None:
+        return None
+    t = normaliser(str(valeur)).upper()
+    for mot in ('CLASSE', 'DPE', 'GES'):
+        t = t.replace(mot, ' ')
+    t = t.strip()
+    if t and t[0] in CLASSES_ENERGIE and (len(t) == 1 or not t[1].isalpha()):
+        return t[0]
+    return None
+
+
+def _ecart_energie(classe_bien, classe_max):
+    """Nombre de classes entre le bien et la limite du prospect (0 si le bien
+    convient, None si l'un des deux est inconnu)."""
+    if classe_bien not in CLASSES_ENERGIE or classe_max not in CLASSES_ENERGIE or not classe_bien or not classe_max:
+        return None
+    return max(0, CLASSES_ENERGIE.index(classe_bien) - CLASSES_ENERGIE.index(classe_max))
+
+
+def _ajustement_energie(lead, property_item):
+    """(points à retirer, raisons, plafond ou None)."""
+    malus = 0
+    raisons = []
+    plafond = None
+    for nom, cle_lead, cle_bien, table, maxi in (
+            ("DPE", 'dpe_max', 'dpe', MALUS_DPE, MALUS_DPE_MAX),
+            ("GES", 'ges_max', 'ges', MALUS_GES, MALUS_GES_MAX)):
+        limite = _classe_energie(lead.get(cle_lead))
+        if not limite:
+            continue
+        classe = _classe_energie(property_item.get(cle_bien))
+        if not classe:
+            raisons.append(f"{nom} non renseigné : à vérifier (le prospect veut {limite} ou mieux)")
+            continue
+        ecart = _ecart_energie(classe, limite)
+        if ecart == 0:
+            raisons.append(f"{nom} {classe} : conforme (le prospect accepte {limite} ou mieux)")
+            continue
+        malus += table.get(ecart, maxi)
+        raisons.append(f"{nom} {classe} : moins bon que {limite}, le maximum accepté par le prospect")
+        if nom == "DPE" and ecart >= 2:
+            plafond = PLAFOND_ENERGIE_ECART
+    return malus, raisons, plafond
+
+
 PLAFOND_TYPE_DIFFERENT = 45        # sous les seuils d'alerte (70) et de proposition (50)
 PLAFOND_ACTIVITE_INCOMPATIBLE = 45
 BONUS_ACTIVITE_CONFIRMEE = 6       # activité confirmée possible : le bien passe devant ceux dont on ne sait rien
@@ -2061,7 +2150,7 @@ def _detail_score_pro(lead, property_item):
     return score, raisons
 
 
-def _detail_score(lead, property_item):
+def _detail_score_base(lead, property_item):
     """Renvoie (score, raisons) : le score de correspondance entre un
     prospect et un bien, et les phrases qui expliquent d'où il vient.
 
@@ -2206,6 +2295,21 @@ def _detail_score_location(lead, property_item):
     return score, raisons
 
 
+def _detail_score(lead, property_item):
+    """Score de correspondance prospect / bien, avec ses raisons : le calcul
+    de base (vente, location ou local professionnel), puis l'ajustement DPE /
+    GES quand le prospect a posé une limite."""
+    score, raisons = _detail_score_base(lead, property_item)
+    if score <= 0:
+        return score, raisons
+    malus, raisons_energie, plafond = _ajustement_energie(lead, property_item)
+    raisons = list(raisons) + raisons_energie
+    score = max(0, score - malus)
+    if plafond is not None:
+        score = min(score, plafond)
+    return score, raisons
+
+
 def calculate_lead_score(lead, property_item):
     return _detail_score(lead, property_item)[0]
 
@@ -2281,6 +2385,7 @@ def get_leads():
             SELECT id, name, email, phone, budget, location, property_type, surface_min, activite, status,
                    financing_status, purchase_urgency, source, created_at,
                    transaction, revenus, garants, situation_pro, meuble_souhaite, proprietaire, assigned_to,
+                   dpe_max, ges_max,
                    (SELECT MIN(r.due_date) FROM lead_reminders r
                      WHERE r.lead_id = leads.id AND r.done_at IS NULL) AS next_reminder
             FROM leads WHERE user_id = %s ORDER BY id
@@ -2403,11 +2508,13 @@ def create_lead():
             INSERT INTO leads
                 (user_id, name, email, phone, budget, location, property_type, surface_min, activite,
                  status, financing_status, purchase_urgency, source,
-                 transaction, revenus, garants, situation_pro, meuble_souhaite, proprietaire, assigned_to)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 transaction, revenus, garants, situation_pro, meuble_souhaite, proprietaire, assigned_to,
+                 dpe_max, ges_max)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id, name, email, phone, budget, location, property_type, surface_min, activite,
                       status, financing_status, purchase_urgency, source,
-                      transaction, revenus, garants, situation_pro, meuble_souhaite, proprietaire, assigned_to
+                      transaction, revenus, garants, situation_pro, meuble_souhaite, proprietaire, assigned_to,
+                      dpe_max, ges_max
         """, (
             request.agency_id,
             nom[:255],
@@ -2429,7 +2536,9 @@ def create_lead():
             _booleen_souple(data.get('proprietaire')),
             # Un collaborateur qui saisit un prospect en devient le responsable ;
             # le directeur, lui, répartit après coup.
-            request.user_id if request.role == 'employe' else None
+            request.user_id if request.role == 'employe' else None,
+            _classe_energie(data.get('dpe_max')),
+            _classe_energie(data.get('ges_max'))
         ))
         lead = cur.fetchone()
         conn.commit()
@@ -2445,7 +2554,7 @@ def create_lead():
 
 # Colonnes d'un bien renvoyées par l'API (liste, création, modification).
 COLONNES_BIEN = ("id, reference, title, address, price, size, rooms, property_type, description, "
-                 "activites_autorisees, extraction_air, transaction, meuble")
+                 "activites_autorisees, extraction_air, transaction, meuble, dpe, ges")
 
 
 @app.route('/api/v1/properties', methods=['GET'])
@@ -2502,8 +2611,8 @@ def create_property():
         cur.execute(f"""
             INSERT INTO properties
                 (user_id, reference, title, address, price, size, rooms, property_type, description,
-                 activites_autorisees, extraction_air, transaction, meuble)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 activites_autorisees, extraction_air, transaction, meuble, dpe, ges)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING {COLONNES_BIEN}
         """, (
             request.agency_id,
@@ -2518,7 +2627,9 @@ def create_property():
             _activites_liste(data.get('activites_autorisees')),
             _booleen_souple(data.get('extraction_air')),
             _transaction(data.get('transaction'), 'vente'),
-            _booleen_souple(data.get('meuble'))
+            _booleen_souple(data.get('meuble')),
+            _classe_energie(data.get('dpe')),
+            _classe_energie(data.get('ges'))
         ))
         bien = cur.fetchone()
         conn.commit()
@@ -2574,6 +2685,10 @@ def update_property(property_id):
             champs['transaction'] = _transaction(data.get('transaction'), 'vente')
         if 'meuble' in data:
             champs['meuble'] = _booleen_souple(data.get('meuble'))
+        if 'dpe' in data:
+            champs['dpe'] = _classe_energie(data.get('dpe'))
+        if 'ges' in data:
+            champs['ges'] = _classe_energie(data.get('ges'))
         if not champs:
             return jsonify({"message": "Aucune modification à enregistrer"}), 400
 
@@ -2728,6 +2843,8 @@ def import_properties():
                 extraction = _booleen_souple(ligne.get('extraction_air'))
                 transaction = _transaction(ligne.get('transaction')) or transaction_defaut
                 meuble = _booleen_souple(ligne.get('meuble'))
+                dpe = _classe_energie(ligne.get('dpe'))
+                ges = _classe_energie(ligne.get('ges'))
 
                 cible = par_ref.get(reference.lower()) if reference else None
                 if cible is None:
@@ -2751,10 +2868,12 @@ def import_properties():
                             activites_autorisees = COALESCE(%s, activites_autorisees),
                             extraction_air = COALESCE(%s, extraction_air),
                             transaction = COALESCE(%s, transaction),
-                            meuble = COALESCE(%s, meuble)
+                            meuble = COALESCE(%s, meuble),
+                            dpe = COALESCE(%s, dpe),
+                            ges = COALESCE(%s, ges)
                         WHERE id = %s AND user_id = %s
                     """, (reference, titre_saisi, adresse, prix, surface, pieces, type_bien,
-                          description, activites, extraction, transaction, meuble, cible, request.agency_id))
+                          description, activites, extraction, transaction, meuble, dpe, ges, cible, request.agency_id))
                     if cible not in ids_maj and cible not in ids_nouveaux:
                         maj += 1
                     ids_maj.append(cible)
@@ -2768,10 +2887,10 @@ def import_properties():
                     cur.execute("""
                         INSERT INTO properties (user_id, reference, title, address, price, size, rooms,
                                                 property_type, description, activites_autorisees, extraction_air,
-                                                transaction, meuble)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                                                transaction, meuble, dpe, ges)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
                     """, (request.agency_id, reference, titre, adresse, prix, surface, pieces, type_bien, description,
-                          activites, extraction, transaction or 'vente', meuble))
+                          activites, extraction, transaction or 'vente', meuble, dpe, ges))
                     nouvel_id = cur.fetchone()['id']
                     ids_nouveaux.append(nouvel_id)
                     ajoutes += 1
@@ -2794,6 +2913,164 @@ def import_properties():
                               f"{hors_forfait} ligne(s) n'ont pas été importées.") if hors_forfait else None,
             "unknown_types": sorted(types_inconnus)[:10],
             "without_address": sans_adresse, "without_type": sans_type}), 200
+    except Exception:
+        return erreur_interne()
+
+
+# ===== PHOTOS DES BIENS =====
+# Le navigateur réduit chaque photo (1000 px de large au plus, JPEG) et en
+# prépare une miniature avant l'envoi : le serveur ne stocke que des images
+# légères, dans la base (le disque de l'hébergeur est effacé à chaque
+# déploiement). Tout est relu ici : le type est reconnu à l'en-tête du
+# fichier, jamais à ce que le navigateur annonce.
+PHOTOS_MAX_PAR_BIEN = 10
+PHOTOS_MAX_PAR_AGENCE = 3000
+PHOTO_MAX_OCTETS = 350_000
+MINIATURE_MAX_OCTETS = 60_000
+PHOTO_ENVOI_MAX = 600_000          # taille maximale du corps d'un envoi (JSON)
+
+
+def _type_image(octets):
+    """'image/jpeg', 'image/png' ou 'image/webp' d'après l'en-tête, sinon None."""
+    if octets[:3] == b'\xff\xd8\xff':
+        return 'image/jpeg'
+    if octets[:8] == b'\x89PNG\r\n\x1a\n':
+        return 'image/png'
+    if octets[:4] == b'RIFF' and octets[8:12] == b'WEBP':
+        return 'image/webp'
+    return None
+
+
+def _lire_image_data_url(valeur, maxi):
+    """(octets, type) d'une image reçue en « data:image/...;base64,... », ou None."""
+    if not isinstance(valeur, str) or not valeur.startswith('data:image/') or ';base64,' not in valeur[:60]:
+        return None
+    try:
+        octets = base64.b64decode(valeur.split(';base64,', 1)[1], validate=True)
+    except Exception:
+        return None
+    if not octets or len(octets) > maxi:
+        return None
+    mime = _type_image(octets)
+    return (octets, mime) if mime else None
+
+
+def _data_url(octets, mime):
+    return f"data:{mime};base64," + base64.b64encode(bytes(octets)).decode('ascii')
+
+
+def _couvertures(cur, agence_id, ids_biens, miniature=True):
+    """{id du bien: image en data URL} : la première photo de chaque bien."""
+    if not ids_biens:
+        return {}
+    colonne = 'miniature' if miniature else 'data'
+    cur.execute(f"""SELECT DISTINCT ON (property_id) property_id, mime, {colonne} AS img
+                    FROM property_photos WHERE user_id = %s AND property_id = ANY(%s)
+                    ORDER BY property_id, position, id""", (agence_id, list(ids_biens)))
+    return {r['property_id']: _data_url(r['img'], 'image/jpeg' if miniature else r['mime']) for r in cur.fetchall()}
+
+
+@app.route('/api/v1/properties/photos-couverture', methods=['GET'])
+@token_required
+def photos_couverture():
+    """Miniature de la première photo de chaque bien de l'agence, et le nombre
+    de photos : de quoi dessiner le portefeuille sans tout télécharger."""
+    try:
+        with _base() as (conn, cur):
+            cur.execute("SELECT property_id, COUNT(*) AS n FROM property_photos WHERE user_id = %s GROUP BY property_id",
+                        (request.agency_id,))
+            nombres = {r['property_id']: r['n'] for r in cur.fetchall()}
+            miniatures = _couvertures(cur, request.agency_id, list(nombres))
+        return jsonify({"miniatures": {str(k): v for k, v in miniatures.items()},
+                        "nombres": {str(k): v for k, v in nombres.items()}}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/properties/<int:property_id>/photos', methods=['GET'])
+@token_required
+def liste_photos(property_id):
+    try:
+        with _base() as (conn, cur):
+            cur.execute("SELECT 1 FROM properties WHERE id = %s AND user_id = %s", (property_id, request.agency_id))
+            if cur.fetchone() is None:
+                return jsonify({"message": "Property not found"}), 404
+            cur.execute("""SELECT id, mime, data FROM property_photos
+                           WHERE property_id = %s AND user_id = %s ORDER BY position, id""",
+                        (property_id, request.agency_id))
+            photos = [{"id": r['id'], "image": _data_url(r['data'], r['mime'])} for r in cur.fetchall()]
+        return jsonify(photos), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/properties/<int:property_id>/photos', methods=['POST'])
+@limiter.limit("120 per hour", key_func=_cle_utilisateur)
+@token_required
+def ajouter_photo(property_id):
+    """Ajoute une photo au bien : {"image": "data:image/jpeg;base64,...",
+    "miniature": "data:image/jpeg;base64,..."}."""
+    try:
+        request.max_content_length = PHOTO_ENVOI_MAX      # la limite générale (128 Ko) est trop basse pour une photo
+        data = request.get_json(silent=True) or {}
+        image = _lire_image_data_url(data.get('image'), PHOTO_MAX_OCTETS)
+        mini = _lire_image_data_url(data.get('miniature'), MINIATURE_MAX_OCTETS)
+        if image is None or mini is None:
+            return jsonify({"message": "Image illisible ou trop lourde (JPEG, PNG ou WebP)."}), 400
+        with _base() as (conn, cur):
+            cur.execute("SELECT 1 FROM properties WHERE id = %s AND user_id = %s", (property_id, request.agency_id))
+            if cur.fetchone() is None:
+                return jsonify({"message": "Property not found"}), 404
+            cur.execute("""SELECT COUNT(*) FILTER (WHERE property_id = %s) AS ici, COUNT(*) AS total,
+                                  COALESCE(MAX(position) FILTER (WHERE property_id = %s), -1) AS derniere
+                           FROM property_photos WHERE user_id = %s""", (property_id, property_id, request.agency_id))
+            c = cur.fetchone()
+            if c['ici'] >= PHOTOS_MAX_PAR_BIEN:
+                return jsonify({"message": f"{PHOTOS_MAX_PAR_BIEN} photos au maximum par bien."}), 409
+            if c['total'] >= PHOTOS_MAX_PAR_AGENCE:
+                return jsonify({"message": "Limite de photos atteinte pour votre agence."}), 409
+            cur.execute("""INSERT INTO property_photos (property_id, user_id, position, mime, data, miniature)
+                           VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+                        (property_id, request.agency_id, c['derniere'] + 1, image[1],
+                         psycopg2.Binary(image[0]), psycopg2.Binary(mini[0])))
+            nouvelle = cur.fetchone()['id']
+            conn.commit()
+        return jsonify({"id": nouvelle}), 201
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/properties/<int:property_id>/photos/<int:photo_id>', methods=['DELETE'])
+@token_required
+def supprimer_photo(property_id, photo_id):
+    try:
+        with _base() as (conn, cur):
+            cur.execute("DELETE FROM property_photos WHERE id = %s AND property_id = %s AND user_id = %s",
+                        (photo_id, property_id, request.agency_id))
+            if cur.rowcount == 0:
+                return jsonify({"message": "Photo not found"}), 404
+            conn.commit()
+        return jsonify({"message": "Photo supprimée"}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/properties/<int:property_id>/photos/<int:photo_id>/principale', methods=['POST'])
+@token_required
+def photo_principale(property_id, photo_id):
+    """Place la photo en tête : c'est celle qui illustre le bien partout."""
+    try:
+        with _base() as (conn, cur):
+            cur.execute("""SELECT id FROM property_photos WHERE property_id = %s AND user_id = %s
+                           ORDER BY position, id""", (property_id, request.agency_id))
+            ids = [r['id'] for r in cur.fetchall()]
+            if photo_id not in ids:
+                return jsonify({"message": "Photo not found"}), 404
+            ids.remove(photo_id)
+            for rang, pid in enumerate([photo_id] + ids):
+                cur.execute("UPDATE property_photos SET position = %s WHERE id = %s", (rang, pid))
+            conn.commit()
+        return jsonify({"message": "Photo principale mise à jour"}), 200
     except Exception:
         return erreur_interne()
 
@@ -2825,7 +3102,7 @@ def get_lead_detail(lead_id):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, user_id, name, email, phone, budget, location, property_type, surface_min, activite, status, financing_status, purchase_urgency, lead_quality, financing_amount, notes, created_at, source, status_changed_at, first_contact_at, consent_at, transaction, revenus, garants, situation_pro, meuble_souhaite, proprietaire, bien_adresse, bien_code_postal, bien_ville, bien_type, bien_surface, bien_pieces, assigned_to FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.agency_id))
+        cur.execute("SELECT id, user_id, name, email, phone, budget, location, property_type, surface_min, activite, status, financing_status, purchase_urgency, lead_quality, financing_amount, notes, created_at, source, status_changed_at, first_contact_at, consent_at, transaction, revenus, garants, situation_pro, meuble_souhaite, proprietaire, bien_adresse, bien_code_postal, bien_ville, bien_type, bien_surface, bien_pieces, assigned_to, dpe_max, ges_max FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.agency_id))
         lead = cur.fetchone()
         if lead:
             _charger_engagement(cur, request.agency_id, [lead], lignes=True)
@@ -2894,6 +3171,11 @@ def update_lead_financing(lead_id):
             contact['meuble_souhaite'] = _booleen_souple(data.get('meuble_souhaite'))
         if 'proprietaire' in data:
             contact['proprietaire'] = _booleen_souple(data.get('proprietaire'))
+        # Classe énergétique la moins bonne acceptée (DPE, GES) : seulement si présente.
+        if 'dpe_max' in data:
+            contact['dpe_max'] = _classe_energie(data.get('dpe_max'))
+        if 'ges_max' in data:
+            contact['ges_max'] = _classe_energie(data.get('ges_max'))
         # Bien du prospect propriétaire (sert à l'estimation indicative) : seulement si présent.
         if 'bien_adresse' in data:
             contact['bien_adresse'] = _texte_court(data.get('bien_adresse'), 255)
@@ -3358,10 +3640,10 @@ def get_improved_matches():
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, name, email, phone, budget, location, property_type, surface_min, activite, financing_status, purchase_urgency, transaction, revenus, garants, situation_pro, meuble_souhaite FROM leads WHERE user_id = %s ORDER BY created_at DESC", (request.agency_id,))
+        cur.execute("SELECT id, name, email, phone, budget, location, property_type, surface_min, activite, financing_status, purchase_urgency, transaction, revenus, garants, situation_pro, meuble_souhaite, dpe_max, ges_max FROM leads WHERE user_id = %s ORDER BY created_at DESC", (request.agency_id,))
         leads = cur.fetchall()
         _charger_engagement(cur, request.agency_id, leads)
-        cur.execute("SELECT id, title, address, price, rooms, size, property_type, description, activites_autorisees, extraction_air, transaction, meuble FROM properties WHERE user_id = %s", (request.agency_id,))
+        cur.execute("SELECT id, title, address, price, rooms, size, property_type, description, activites_autorisees, extraction_air, transaction, meuble, dpe, ges FROM properties WHERE user_id = %s", (request.agency_id,))
         properties = cur.fetchall()
         cur.close()
         conn.close()
@@ -3371,9 +3653,9 @@ def get_improved_matches():
             for prop in properties:
                 score, raisons = _detail_score(lead, prop)
                 if score > 30:
-                    matches.append({"property_id": prop['id'], "address": prop['address'], "title": prop['title'], "type": prop['property_type'], "price": prop['price'], "rooms": prop['rooms'], "size": prop['size'], "transaction": prop['transaction'], "score": score, "reasons": raisons})
+                    matches.append({"property_id": prop['id'], "address": prop['address'], "title": prop['title'], "type": prop['property_type'], "price": prop['price'], "rooms": prop['rooms'], "size": prop['size'], "transaction": prop['transaction'], "dpe": prop['dpe'], "ges": prop['ges'], "score": score, "reasons": raisons})
             matches.sort(key=lambda x: x['score'], reverse=True)
-            result.append({"id": lead['id'], "name": lead['name'], "email": lead['email'], "phone": lead['phone'], "budget": lead['budget'], "location": lead['location'], "property_type": lead['property_type'], "financing_status": lead['financing_status'], "purchase_urgency": lead['purchase_urgency'], "transaction": lead['transaction'], "revenus": lead['revenus'], "garants": lead['garants'], "situation_pro": lead['situation_pro'], "meuble_souhaite": lead['meuble_souhaite'], "lead_quality": derive_lead_quality(lead), "matches": matches})
+            result.append({"id": lead['id'], "name": lead['name'], "email": lead['email'], "phone": lead['phone'], "budget": lead['budget'], "location": lead['location'], "property_type": lead['property_type'], "financing_status": lead['financing_status'], "purchase_urgency": lead['purchase_urgency'], "transaction": lead['transaction'], "revenus": lead['revenus'], "garants": lead['garants'], "situation_pro": lead['situation_pro'], "meuble_souhaite": lead['meuble_souhaite'], "dpe_max": lead['dpe_max'], "ges_max": lead['ges_max'], "lead_quality": derive_lead_quality(lead), "matches": matches})
         # Les leads les plus chauds d'abord.
         ordre = {'hot': 0, 'warm': 1, 'cold': 2}
         result.sort(key=lambda x: ordre.get(x['lead_quality'], 3))
@@ -3766,8 +4048,9 @@ def import_leads():
                 cur.execute("""
                     INSERT INTO leads (user_id, name, email, phone, budget, location, property_type, surface_min,
                                        activite, status, financing_status, purchase_urgency, source,
-                                       transaction, revenus, garants, situation_pro, meuble_souhaite)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, 'import', %s, %s, %s, %s, %s)
+                                       transaction, revenus, garants, situation_pro, meuble_souhaite,
+                                       dpe_max, ges_max)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, 'import', %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                 """, (request.agency_id, nom, email, tel,
                       _entier_borne(ligne.get('budget')),
@@ -3781,7 +4064,9 @@ def import_leads():
                       _entier_souple(ligne.get('revenus')),
                       _garants_pour(_texte_court(ligne.get('property_type'), 100), ligne.get('garants'), souple=True),
                       _situation_pro(ligne.get('situation_pro')),
-                      _booleen_souple(ligne.get('meuble_souhaite'))))
+                      _booleen_souple(ligne.get('meuble_souhaite')),
+                      _classe_energie(ligne.get('dpe_max')),
+                      _classe_energie(ligne.get('ges_max'))))
                 ids.append(cur.fetchone()['id'])
                 importes += 1
                 if email:
@@ -3981,8 +4266,9 @@ def capture_lead(token):
             cur.execute("""
                 INSERT INTO leads (user_id, name, email, phone, budget, location, property_type, surface_min,
                                    activite, status, financing_status, purchase_urgency, source, consent_at,
-                                   transaction, revenus, garants, situation_pro, meuble_souhaite)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, 'formulaire', %s, %s, %s, %s, %s, %s)
+                                   transaction, revenus, garants, situation_pro, meuble_souhaite,
+                                   dpe_max, ges_max)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'nouveau', %s, %s, 'formulaire', %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (agence['id'], nom, email, tel,
                   _entier_borne(data.get('budget')),
@@ -3997,7 +4283,9 @@ def capture_lead(token):
                   _entier_souple(data.get('revenus')),
                   _garants_pour(_texte_court(data.get('property_type'), 100), data.get('garants')),
                   _situation_pro(data.get('situation_pro')),
-                  _booleen_souple(data.get('meuble_souhaite'))))
+                  _booleen_souple(data.get('meuble_souhaite')),
+                  _classe_energie(data.get('dpe_max')),
+                  _classe_energie(data.get('ges_max'))))
             lead_id = cur.fetchone()['id']
             if message:
                 cur.execute("""
@@ -4185,7 +4473,9 @@ def completer_lead(token):
                     garants = COALESCE(%s, garants),
                     situation_pro = COALESCE(%s, situation_pro),
                     meuble_souhaite = COALESCE(%s, meuble_souhaite),
-                    proprietaire = COALESCE(%s, proprietaire)
+                    proprietaire = COALESCE(%s, proprietaire),
+                    dpe_max = COALESCE(%s, dpe_max),
+                    ges_max = COALESCE(%s, ges_max)
                 WHERE id = %s
             """, (
                 _entier_borne(data.get('budget')),
@@ -4202,6 +4492,8 @@ def completer_lead(token):
                 _situation_pro(data.get('situation_pro')),
                 _booleen_souple(data.get('meuble_souhaite')),
                 _booleen_souple(data.get('proprietaire')),
+                _classe_energie(data.get('dpe_max')),
+                _classe_energie(data.get('ges_max')),
                 lead['id'],
             ))
             # Local commercial ou bureau : aucun garant personnel n'est conservé.
@@ -4256,10 +4548,11 @@ def _alertes_matching(user_id, lead_ids=None, property_ids=None, origine=None):
                 return
             cur.execute("""SELECT id, name, email, phone, budget, location, property_type, surface_min, activite,
                                   financing_status, purchase_urgency, status,
-                                  transaction, revenus, garants, situation_pro, meuble_souhaite
+                                  transaction, revenus, garants, situation_pro, meuble_souhaite,
+                                  dpe_max, ges_max
                            FROM leads WHERE user_id = %s""", (user_id,))
             prospects = [l for l in cur.fetchall() if (l['status'] or 'nouveau') not in STATUTS_CLOS]
-            cur.execute("SELECT id, title, address, price, size, property_type, activites_autorisees, extraction_air, transaction, meuble FROM properties WHERE user_id = %s", (user_id,))
+            cur.execute("SELECT id, title, address, price, size, property_type, activites_autorisees, extraction_air, transaction, meuble, dpe, ges FROM properties WHERE user_id = %s", (user_id,))
             biens = cur.fetchall()
 
             ids_prospects, ids_biens = set(lead_ids or []), set(property_ids or [])
@@ -4981,13 +5274,14 @@ def get_proposals():
             agence = cur.fetchone() or {}
             cur.execute("""SELECT id, name, email, phone, budget, location, property_type, surface_min, activite,
                                   financing_status, purchase_urgency, status,
-                                  transaction, revenus, garants, situation_pro, meuble_souhaite
+                                  transaction, revenus, garants, situation_pro, meuble_souhaite,
+                                  dpe_max, ges_max
                            FROM leads WHERE user_id = %s""", (request.agency_id,))
             prospects = [l for l in cur.fetchall()
                          if (l['status'] or 'nouveau') not in STATUTS_CLOS and _prospect_complet(l)]
             _charger_engagement(cur, request.agency_id, prospects)
             cur.execute("""SELECT id, title, address, price, rooms, size, property_type,
-                                  activites_autorisees, extraction_air, transaction, meuble
+                                  activites_autorisees, extraction_air, transaction, meuble, dpe, ges
                            FROM properties WHERE user_id = %s""", (request.agency_id,))
             biens = cur.fetchall()
             cur.execute("""SELECT m.lead_id, l.name, l.email, m.subject, m.property_ids, m.sent_at
@@ -5014,6 +5308,7 @@ def get_proposals():
                     candidats.append({"property_id": b['id'], "title": b['title'], "address": b['address'],
                                       "type": b['property_type'], "price": b['price'], "rooms": b['rooms'],
                                       "size": b['size'], "transaction": b['transaction'],
+                                      "dpe": b.get('dpe'), "ges": b.get('ges'),
                                       "score": score, "reasons": raisons})
             if not candidats:
                 continue
@@ -5240,7 +5535,7 @@ def annonces_publiques(token):
                 return jsonify({"message": "Not found"}), 404
             if mail['sent_at'] < _maintenant() - timedelta(days=ANNONCES_VALIDITE_JOURS):
                 return jsonify({"message": "Ce lien a expiré. Contactez votre agence pour recevoir les annonces."}), 410
-            cur.execute("""SELECT id, title, address, price, size, rooms, property_type, description, transaction, meuble
+            cur.execute("""SELECT id, title, address, price, size, rooms, property_type, description, transaction, meuble, dpe, ges
                            FROM properties WHERE user_id = %s AND id = ANY(%s)""",
                         (mail['user_id'], list(mail['property_ids'] or [])))
             par_id = {r['id']: r for r in cur.fetchall()}
@@ -5250,10 +5545,12 @@ def annonces_publiques(token):
             # « ref » : rang du bien dans le message. C'est ce que renvoie le bouton « Je souhaite visiter »,
             # jamais un numéro interne.
             biens = []
+            couvertures = _couvertures(cur, mail['user_id'], list(par_id), miniature=False)
             for ref, pid in enumerate(mail['property_ids'] or []):
                 r = par_id.get(pid)
                 if r:
                     biens.append({"ref": ref, "interesse": (r['title'] or '')[:120] in deja_interesse,
+                                  "photo": couvertures.get(pid),
                                   **{k: v for k, v in r.items() if k != 'id'}})
             if biens and not _est_robot():
                 pluriel = 's' if len(biens) > 1 else ''
@@ -6437,7 +6734,7 @@ def _prospects_dormants(cur, agence_id, jours):
     cur.execute("""
         SELECT l.id, l.name, l.email, l.phone, l.budget, l.location, l.property_type, l.surface_min, l.activite,
                l.financing_status, l.purchase_urgency, l.status, l.transaction, l.revenus, l.garants,
-               l.situation_pro, l.meuble_souhaite, l.assigned_to,
+               l.situation_pro, l.meuble_souhaite, l.assigned_to, l.dpe_max, l.ges_max,
                GREATEST(l.created_at,
                         COALESCE(l.status_changed_at, l.created_at),
                         COALESCE((SELECT MAX(n.created_at) FROM lead_notes n WHERE n.lead_id = l.id), l.created_at),
@@ -6453,7 +6750,7 @@ def _prospects_dormants(cur, agence_id, jours):
         return []
     _charger_engagement(cur, agence_id, prospects)
     cur.execute("""SELECT id, title, address, price, rooms, size, property_type,
-                          activites_autorisees, extraction_air, transaction, meuble
+                          activites_autorisees, extraction_air, transaction, meuble, dpe, ges
                    FROM properties WHERE user_id = %s""", (agence_id,))
     biens = cur.fetchall()
     cur.execute("""SELECT m.lead_id, m.property_ids FROM lead_mails m JOIN leads l ON l.id = m.lead_id
@@ -6588,6 +6885,7 @@ def _construire_taches(cur, agence_id, user_id, role):
         SELECT l.id, l.name, l.email, l.phone, l.budget, l.location, l.property_type, l.surface_min, l.activite,
                l.status, l.financing_status, l.purchase_urgency, l.transaction, l.revenus, l.garants,
                l.situation_pro, l.meuble_souhaite, l.proprietaire, l.source, l.created_at, l.assigned_to,
+               l.dpe_max, l.ges_max,
                u.first_name AS resp_prenom, u.email AS resp_email,
                GREATEST(COALESCE(l.status_changed_at, l.created_at),
                         COALESCE((SELECT MAX(n.created_at) FROM lead_notes n WHERE n.lead_id = l.id), l.created_at),
@@ -6714,7 +7012,7 @@ def _construire_taches(cur, agence_id, user_id, role):
 
     # 5. Un bien du catalogue correspond et n'a pas encore été proposé.
     cur.execute("""SELECT id, title, address, price, rooms, size, property_type,
-                          activites_autorisees, extraction_air, transaction, meuble
+                          activites_autorisees, extraction_air, transaction, meuble, dpe, ges
                    FROM properties WHERE user_id = %s""", (agence_id,))
     biens = cur.fetchall()
     cur.execute("""SELECT m.lead_id, m.property_ids, m.sent_at FROM lead_mails m JOIN leads l ON l.id = m.lead_id
