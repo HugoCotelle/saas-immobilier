@@ -67,6 +67,43 @@
 
         // Une ligne par catégorie : le nom, une barre proportionnelle au plus grand
         // effectif, et le nombre.
+        // Courbe des nouveaux prospects par semaine (chiffres réels de l'agence, SVG dessiné ici : aucun script externe).
+        function Tendance({ valeurs }) {
+            const L = 600, H = 150, bas = 130, haut = 14, marge = 10;
+            const maxi = Math.max(1, ...valeurs);
+            const x = (i) => marge + (i * (L - 2 * marge)) / Math.max(1, valeurs.length - 1);
+            const y = (v) => bas - ((bas - haut) * v) / maxi;
+            const points = valeurs.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+            const aire = `M${x(0).toFixed(1)},${bas} L${points.join(' L')} L${x(valeurs.length - 1).toFixed(1)},${bas} Z`;
+            const total = valeurs.reduce((a, b) => a + b, 0);
+            return (
+                <div>
+                    <svg className="tendance" viewBox={`0 0 ${L} ${H}`} role="img"
+                        aria-label={`Nouveaux prospects par semaine sur ${valeurs.length} semaines : ${valeurs.join(', ')}`}>
+                        <defs>
+                            <linearGradient id="tendance-aire" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="#4F6353" stopOpacity="0.28" />
+                                <stop offset="100%" stopColor="#4F6353" stopOpacity="0" />
+                            </linearGradient>
+                        </defs>
+                        {[0, 0.5, 1].map((f) => (
+                            <line key={f} x1={marge} x2={L - marge} y1={bas - (bas - haut) * f} y2={bas - (bas - haut) * f} className="tendance-grille" />
+                        ))}
+                        <path d={aire} fill="url(#tendance-aire)" />
+                        <polyline points={points.join(' ')} className="tendance-ligne" />
+                        {valeurs.map((v, i) => (
+                            <circle key={i} cx={x(i)} cy={y(v)} r={i === valeurs.length - 1 ? 4.5 : 2.5} className={i === valeurs.length - 1 ? 'tendance-point actif' : 'tendance-point'} />
+                        ))}
+                    </svg>
+                    <div className="tendance-legende">
+                        <span>Il y a {valeurs.length} semaines</span>
+                        <span>{total} au total</span>
+                        <span>Cette semaine : {valeurs[valeurs.length - 1]}</span>
+                    </div>
+                </div>
+            );
+        }
+
         function Barres({ lignes, classe }) {
             const maxi = Math.max(1, ...lignes.map((l) => l[2]));
             return (
@@ -429,6 +466,14 @@
                                             <Barres lignes={STATUTS.map(([c, n]) => [c, n, stats.pipeline[c] || 0])} />
                                         </div>
                                     </div>
+
+                                    {Array.isArray(stats.weekly_new) && stats.weekly_new.length > 1 && stats.weekly_new.some((n) => n > 0) && (
+                                        <div className="panel" style={{ marginBottom: '20px' }}>
+                                            <div className="panel-title">Nouveaux prospects par semaine</div>
+                                            <div className="panel-note">Les arrivées des {stats.weekly_new.length} dernières semaines, tous canaux confondus.</div>
+                                            <Tendance valeurs={stats.weekly_new} />
+                                        </div>
+                                    )}
 
                                     <div className="content-grid">
                                         <div className="panel">

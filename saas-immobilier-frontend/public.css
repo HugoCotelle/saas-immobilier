@@ -665,3 +665,130 @@ body.pub {
 .demo { background: var(--bg); }
 .demo-frame { margin: 0 auto; max-width: 960px; border: 1px solid var(--line-strong); border-radius: 16px; overflow: hidden; background: var(--surface-2); box-shadow: 0 18px 50px rgba(35, 43, 38, .10); }
 .demo-frame video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: #F6F2EA; }
+
+/* ==========================================================================
+   Refonte visuelle — lot 1 : première impression de la page d'accueil.
+   Aucun texte ni comportement modifié ; tout est local (CSS, SVG intégré).
+   ========================================================================== */
+
+/* Fond du hero : trame de points qui s'estompe + halo derrière l'écran */
+.hero::after {
+    background: radial-gradient(rgba(31, 42, 36, .17) 1px, transparent 1.4px) 0 0 / 22px 22px;
+    -webkit-mask-image: radial-gradient(ellipse 72% 62% at 72% 42%, #000 0%, transparent 78%);
+    mask-image: radial-gradient(ellipse 72% 62% at 72% 42%, #000 0%, transparent 78%);
+}
+.hero-visual::before {
+    content: ""; position: absolute; z-index: -1; inset: -8% -12% 4% -8%; pointer-events: none;
+    background:
+        radial-gradient(closest-side, rgba(207, 224, 199, .9), rgba(207, 224, 199, 0)),
+        radial-gradient(280px 200px at 28% 74%, rgba(57, 255, 20, .07), transparent 70%);
+}
+
+/* Accroche : pastille, soulignement qui se trace, chiffres alignés */
+.hero .eyebrow { background: var(--surface); border: 1px solid var(--line-strong); padding: 7px 16px 7px 12px; border-radius: 999px; }
+.hero h1 em { background: linear-gradient(var(--laiton), var(--laiton)) no-repeat 0 100% / 100% 3px; padding-bottom: 4px; }
+.hero .btn-lg { min-height: 54px; display: inline-flex; align-items: center; justify-content: center; }
+.hero .cta-row .btn:first-child::after { content: "\2192"; margin-left: 10px; transition: transform .2s ease; }
+.hero .cta-row .btn:first-child:hover::after { transform: translateX(4px); }
+.hero-points li { font-size: 16px; }
+
+/* Écran d'ordinateur */
+.laptop { position: relative; margin-bottom: 18px; transform: perspective(1500px) rotateY(-5deg) rotateX(1.5deg); transform-origin: 60% 50%; transition: transform .5s var(--ease); }
+.laptop:hover { transform: perspective(1500px) rotateY(0) rotateX(0); }
+.laptop .mock {
+    border: 9px solid #1F2A24; border-bottom-width: 11px; border-radius: 18px 18px 6px 6px; background: var(--surface);
+    box-shadow: 0 60px 100px -40px rgba(20, 38, 29, .55), 0 18px 30px -14px rgba(20, 38, 29, .25);
+}
+.laptop .mock:hover { transform: none; }
+.laptop::after {
+    content: ""; display: block; height: 14px; margin: 0 -6%; border-radius: 0 0 18px 18px;
+    background: linear-gradient(180deg, #DAD5C8, #B9B3A4 62%, #A39D8E); box-shadow: 0 24px 34px -16px rgba(20, 38, 29, .45);
+}
+
+/* Avatars à initiales (illustratif, dessinés en CSS) */
+.mock-lead-name::before {
+    content: attr(data-ini); display: inline-grid; place-items: center; width: 30px; height: 30px; margin-right: 10px;
+    border-radius: 50%; vertical-align: middle; font: 600 11px/1 var(--sans); letter-spacing: .04em;
+    background: var(--sage-100); color: var(--sage-700);
+}
+.mock-lead.p-go .mock-lead-name::before { background: var(--go-ink, #063B0B); color: var(--go, #39FF14); }
+.mock-lead.p-jaune .mock-lead-name::before { background: #F3E9CF; color: #7A5C14; }
+.mock-lead.p-gris .mock-lead-name::before { background: #ECE8DE; color: #5E655C; }
+.ring b, .lead-badge, .mock-title { font-variant-numeric: tabular-nums; }
+.reasons li { font-size: 12px; }
+
+/* Téléphone : la carte « bien correspondant » prend un cadre de smartphone */
+@media (min-width: 961px) {
+    .hero-visual { padding-bottom: 110px; }
+    .mock-match {
+        left: auto; right: -26px; bottom: -6px; width: 270px;
+        border: 8px solid #1F2A24; border-radius: 34px; padding: 30px 16px 18px;
+        box-shadow: 0 44px 76px -26px rgba(20, 38, 29, .62), 0 10px 20px -10px rgba(20, 38, 29, .3);
+    }
+    .mock-match::before {
+        content: ""; position: absolute; top: 9px; left: 50%; width: 62px; height: 16px; border-radius: 999px;
+        background: #1F2A24; transform: translateX(-50%);
+    }
+}
+
+/* Appel final : bande vert profond, accent laiton (rythme clair, sombre, clair) */
+.final-card {
+    background: linear-gradient(160deg, var(--deep-green), var(--deep-green-2)); border-color: rgba(212, 177, 95, .28);
+    box-shadow: 0 40px 80px -40px rgba(20, 38, 29, .6);
+}
+.final-card::before {
+    background: radial-gradient(520px 280px at 50% 0%, rgba(212, 177, 95, .15), transparent 70%),
+                radial-gradient(420px 260px at 100% 100%, rgba(169, 185, 162, .12), transparent 65%);
+}
+.final-card::after {
+    content: ""; position: absolute; z-index: -1; right: -70px; bottom: -70px; width: 240px; height: 240px;
+    border: 1px solid rgba(212, 177, 95, .24); border-radius: 24px; transform: rotate(45deg);
+}
+.final-card h2 { color: #F6F2EA; }
+.final-card p { color: #C9D3C3; }
+.pub .final-card a.btn:not(.btn-ghost) { background: var(--laiton); border-color: var(--laiton); color: #14221A; }
+.pub .final-card a.btn:not(.btn-ghost):hover { background: #E2C275; border-color: #E2C275; }
+.pub .final-card a.btn.btn-ghost { color: #F6F2EA; border-color: rgba(246, 242, 234, .45); }
+.pub .final-card a.btn.btn-ghost:hover { background: rgba(246, 242, 234, .1); border-color: #F6F2EA; color: #F6F2EA; }
+.pub .final-card :focus-visible { outline-color: var(--laiton); }
+
+/* Apparition échelonnée */
+.reveal:nth-child(2) { transition-delay: .06s; }
+.reveal:nth-child(3) { transition-delay: .12s; }
+.reveal:nth-child(4) { transition-delay: .18s; }
+
+/* Animations d'entrée (une seule fois, jamais en continu) */
+@media (prefers-reduced-motion: no-preference) {
+    .hero .ring .val { animation: zelyro-ring 1.4s .5s var(--ease) both; }
+    .hero h1 em { background-size: 0% 3px; animation: zelyro-trace 1s .9s var(--ease) forwards; }
+}
+@keyframes zelyro-ring { from { stroke-dasharray: 0 163.4; } to { stroke-dasharray: 140.5 163.4; } }
+@keyframes zelyro-trace { to { background-size: 100% 3px; } }
+@media (prefers-reduced-motion: reduce) {
+    .laptop { transform: none !important; transition: none !important; }
+    .reveal { transition-delay: 0s !important; }
+}
+
+/* Petits écrans : écran d'ordinateur à plat, sans base débordante */
+@media (max-width: 960px) {
+    .laptop { transform: none; }
+    .laptop::after { margin: 0 -2%; }
+    .hero-visual::before { inset: -4% -4% 4% -4%; }
+}
+
+/* Lot 3 (partie sûre) : le forfait déjà mis en avant se détache un peu plus */
+@media (min-width: 961px) {
+    .price-card.featured { transform: translateY(-8px); box-shadow: 0 30px 60px -30px rgba(31, 42, 36, .35); }
+    .price-card.featured:hover { transform: translateY(-12px); }
+}
+@media (prefers-reduced-motion: reduce) { .price-card.featured, .price-card.featured:hover { transform: none; } }
+
+/* Corrections après essai dans le navigateur */
+@media (min-width: 961px) and (max-width: 1279px) {
+    .mock-match { right: 0; width: 250px; }
+}
+@media (max-width: 560px) {
+    .mock-lead { grid-template-columns: minmax(0, 1fr); }
+    .mock-lead .lead-badge { justify-self: start; margin: 2px 0 2px 40px; }
+    .mock-lead-name { white-space: nowrap; }
+}

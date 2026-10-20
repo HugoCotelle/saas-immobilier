@@ -1141,3 +1141,83 @@ nav a.active::after { transform: scaleX(1); background: var(--sage-600); }
 .photos-mail { grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr)); }
 .lead-footer { flex-wrap: wrap; gap: 10px; }
 .leads-panel, .biens-liste { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+
+/* Refonte visuelle : couleurs de mise en scène (vert profond, laiton) partagées par le site public et l'application */
+:root {
+    --deep-green: #1F3A2E;
+    --deep-green-2: #14261D;
+    --laiton: #D4B15F;          /* sur vert profond uniquement (6:1) */
+    --laiton-ink: #8A6A1F;      /* laiton lisible sur crème (4,5:1) */
+}
+.stat-value, .rappel-date, .stat-card b { font-variant-numeric: tabular-nums; }
+
+/* ==========================================================================
+   Refonte visuelle — lot 2 : application (cartes prospects, connexion).
+   ========================================================================== */
+
+/* Avatar à initiales et anneau de score (le chiffre /100 reste écrit dans le badge) */
+.lead-name[data-ini]::before {
+    content: attr(data-ini); display: inline-grid; place-items: center; width: 34px; height: 34px; margin-right: 10px;
+    border-radius: 50%; vertical-align: middle; font: 600 12px/1 var(--sans); letter-spacing: .04em;
+    background: var(--sage-100); color: var(--sage-700);
+}
+.lead-card.p-go .lead-name[data-ini]::before { background: #063B0B; color: #39FF14; }
+.lead-card.p-vert .lead-name[data-ini]::before { background: #DDF1E1; color: #1F6B33; }
+.lead-card.p-jaune .lead-name[data-ini]::before { background: #F3E9CF; color: #7A5C14; }
+.lead-card.p-orange .lead-name[data-ini]::before { background: #F6E3D3; color: #8A3F0E; }
+.lead-card.p-gris .lead-name[data-ini]::before { background: #ECE8DE; color: #5E655C; }
+.lead-card[data-score] { position: relative; --ring-c: var(--sage-600); }
+.lead-card[data-score] .lead-name { padding-right: 62px; }
+.lead-card[data-score]::after {
+    content: attr(data-score); position: absolute; top: 16px; right: 16px; width: 48px; height: 48px; border-radius: 50%;
+    display: grid; place-items: center; font: 600 15px/1 var(--serif); color: var(--ink); font-variant-numeric: tabular-nums;
+    background: radial-gradient(closest-side, var(--surface) 74%, transparent 77%),
+                conic-gradient(var(--ring-c) calc(var(--score) * 1%), var(--line) 0);
+}
+.lead-card.p-go { --ring-c: #1F8A3B; }
+.lead-card.p-vert { --ring-c: #1F8A3B; }
+.lead-card.p-jaune { --ring-c: #B08A00; }
+.lead-card.p-orange { --ring-c: #C25E1C; }
+.lead-card.p-gris { --ring-c: #8E948B; }
+
+/* La pulsation « à appeler » ne tourne que quelques cycles : elle attire l'œil sans fatiguer une longue liste */
+.lead-card.p-go { animation-iteration-count: 3; }
+
+/* Connexion et pages d'accès : fond vert profond, la carte crème ressort */
+body.auth::before {
+    background:
+        radial-gradient(700px 480px at 12% 8%, rgba(212, 177, 95, .16), transparent 62%),
+        radial-gradient(640px 520px at 92% 96%, rgba(169, 185, 162, .16), transparent 62%),
+        linear-gradient(160deg, var(--deep-green), var(--deep-green-2));
+}
+body.auth::after {
+    content: ""; position: fixed; left: -110px; bottom: -110px; width: 400px; height: 400px; z-index: -1; pointer-events: none;
+    border: 1px solid rgba(212, 177, 95, .24); border-radius: 44px; transform: rotate(45deg);
+}
+.auth-container { box-shadow: 0 40px 90px -30px rgba(0, 0, 0, .55), 0 2px 6px rgba(0, 0, 0, .12); border-color: rgba(246, 242, 234, .55); }
+
+/* Tableau de bord : courbe de tendance, indicateurs plus lisibles, barres qui se remplissent à l'ouverture */
+.tendance { display: block; width: 100%; height: auto; max-height: 190px; }
+.tendance-grille { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 5; }
+.tendance-ligne { fill: none; stroke: var(--sage-600); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.tendance-point { fill: var(--surface); stroke: var(--sage-600); stroke-width: 2; }
+.tendance-point.actif { fill: var(--sage-600); }
+.tendance-legende { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 8px; font-size: 13px; color: var(--ink-2); }
+.stat-card .stat-label { font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
+.stat-card:first-child { border-top: 3px solid var(--sage-600); }
+.barre-piste { height: 14px; box-shadow: inset 0 1px 2px rgba(31, 42, 36, .08); }
+.barre-remplie { background: linear-gradient(90deg, var(--sage-700), var(--sage-600)); }
+.barre-remplie.perdu { background: #B7B5AA; }
+.barre-remplie.source { background: linear-gradient(90deg, #BFA97B, #CDBB98); }
+@media (prefers-reduced-motion: no-preference) {
+    .barre-remplie { transform-origin: left; animation: zelyro-barre .9s var(--ease, cubic-bezier(.2,.7,.2,1)) both; }
+}
+@keyframes zelyro-barre { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* Biens : le prix devient l'élément fort de la carte */
+.bien-prix { font-family: var(--serif); font-size: 22px; font-weight: 500; color: var(--sage-700); }
+.bien-card .bien-titre { font-size: 20px; }
+@media (max-width: 760px) { .bien-prix { font-size: 20px; } }
+
+/* Correction après essai à 320 px : une grille à une colonne ne doit pas être élargie par son contenu */
+.content-grid > * { min-width: 0; }

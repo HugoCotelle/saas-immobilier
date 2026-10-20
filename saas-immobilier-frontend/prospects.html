@@ -601,10 +601,13 @@
                                     const statut = statutDe(lead);
                                     const enRetard = lead.next_reminder && lead.next_reminder < aujourdhui();
                                     return (
-                                        <div key={lead.id} className={`lead-card ${q} ${pal}`}>
+                                        <div key={lead.id} className={`lead-card ${q} ${pal}`}
+                                            data-score={typeof lead.quality_score === 'number' ? lead.quality_score : undefined}
+                                            style={typeof lead.quality_score === 'number' ? { '--score': lead.quality_score } : undefined}>
                                             {pal === 'p-go' && <div className="pastille-go">À appeler maintenant</div>}
                                             {lead.proprietaire === true && <div className="bandeau-proprio">⌂ Déjà propriétaire · à estimer ?</div>}
-                                            <div className="lead-name">{lead.name}</div>
+                                            <div className="lead-name"
+                                                data-ini={(lead.name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((s) => s[0]).join('').toUpperCase()}>{lead.name}</div>
                                             <div className="lead-field">
                                                 <span className="lead-label">Email :</span>
                                                 <span className="lead-value">{lead.email || 'N/A'}</span>
