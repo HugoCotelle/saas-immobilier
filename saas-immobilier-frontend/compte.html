@@ -14,6 +14,7 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
     <script src="/pwa.js" defer></script>
+    <script src="/accueil.js" defer></script>
 </head>
 <body>
     <div id="root"></div>
@@ -589,10 +590,10 @@
                             <div className="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style={{ color: 'inherit', textDecoration: 'none' }}>ZELYRO</a></div>
                             <nav>
                                 <a href="/taches.html">À faire</a>
-                                <a href="/prospects.html">Leads</a>
+                                <a href="/prospects.html">Prospects</a>
                                 <a href="/biens.html">Biens</a>
-                                <a href="/matching.html">Matching</a>
-                                <a href="/propositions.html">Propositions</a>
+                                <a href="/matching.html">Biens pour mes prospects</a>
+                                <a href="/propositions.html">E-mails à envoyer</a>
                                 <a href="/dashboard.html">Dashboard</a>
                                 <a href="/compte.html" className="active">Compte</a>
                                 {user && user.is_admin && <a href="/admin.html">Admin</a>}
@@ -609,6 +610,20 @@
                             <div>
                                 <h1 className="page-title">Mon compte</h1>
                                 <p className="page-subtitle">Vos informations et l'accès à votre espace.</p>
+                            </div>
+                        </div>
+
+                        <div className="panel" style={{ marginBottom: '16px' }}>
+                            <div className="panel-header">
+                                <h2 className="panel-title">Recevoir vos prospects automatiquement</h2>
+                            </div>
+                            <p className="panel-note">
+                                Trois façons d'alimenter Zelyro sans ressaisie. Choisissez celle qui correspond à votre façon de travailler :
+                            </p>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                                <a className="btn" href="#gmail">Connecter ma boîte Gmail</a>
+                                <a className="btn secondary" href="#reception">Transférer les e-mails des portails</a>
+                                <a className="btn secondary" href="#formulaire">Mon formulaire de contact</a>
                             </div>
                         </div>
 
@@ -639,7 +654,7 @@
                                         repartent à zéro le 1er de chaque mois. Pour changer de forfait, écrivez à{' '}
                                         <a href="mailto:contact@zelyro.fr?subject=Changement%20de%20forfait%20Zelyro" style={{ color: 'var(--sage-700)' }}>contact@zelyro.fr</a>.
                                     </p>
-                                    {[['leads', 'Prospects'], ['properties', 'Biens'], ['mails', 'E-mails envoyés ce mois-ci'], ['extractions', 'Extractions IA ce mois-ci']].map(([k, libelle]) => {
+                                    {[['leads', 'Prospects'], ['properties', 'Biens'], ['mails', 'E-mails envoyés ce mois-ci'], ['extractions', 'Lectures de messages par IA ce mois-ci']].map(([k, libelle]) => {
                                         const n = forfait.usage[k], max = forfait.limits[k];
                                         const ratio = max ? n / max : 0;
                                         return (
@@ -997,7 +1012,7 @@
                                 </div>
                             </div>
 
-                            <div className="panel">
+                            <div className="panel" id="formulaire">
                                 <div className="panel-header">
                                     <h2 className="panel-title">Formulaire de contact</h2>
                                 </div>
@@ -1126,7 +1141,7 @@
                                 </div>
                             )}
 
-                            <div className="panel">
+                            <div className="panel" id="reception">
                                 <div className="panel-header">
                                     <h2 className="panel-title">Réception des prospects LeBonCoin et SeLoger</h2>
                                     {journal && (
@@ -1312,7 +1327,7 @@
                             {user && user.role === 'admin' && (
                                 <div className="panel">
                                     <div className="panel-header">
-                                        <h2 className="panel-title">Connexion par API (partenaires)</h2>
+                                        <h2 className="panel-title">Connexion avec votre logiciel ou un partenaire (API)</h2>
                                     </div>
                                     <p className="panel-note">
                                         Une passerelle de diffusion, un CRM ou un outil comme Zapier peut envoyer directement des prospects à votre
@@ -1393,7 +1408,7 @@
                                 </div>
                             )}
 
-                            <div className="panel">
+                            <div className="panel" id="gmail">
                                 <div className="panel-header">
                                     <h2 className="panel-title">Connexion à votre boîte Gmail</h2>
                                 </div>

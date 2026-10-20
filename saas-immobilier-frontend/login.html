@@ -42,6 +42,9 @@
                 if (token && !cleDuLien) window.location.replace('/prospects.html');
             }, []);
 
+            // Un message (erreur ou succès) s'affiche en haut de la carte : on y ramène la vue, surtout sur téléphone.
+            useEffect(() => { if (message) window.scrollTo({ top: 0, behavior: 'smooth' }); }, [message]);
+
             const handleLogin = async (e) => {
                 e.preventDefault();
                 setMessage(null);
@@ -59,12 +62,33 @@
                         setMessage({ type: 'success', text: 'Connexion réussie, redirection…' });
                         setTimeout(() => { window.location.replace('/prospects.html'); }, 1000);
                     } else {
-                        setMessage({ type: 'error', text: data.message || 'Identifiants incorrects' });
+                        // Compte suspendu pour impayé : le serveur fournit un lien vers le portail de paiement Stripe.
+                        const lien = typeof data.billing_url === 'string' && data.billing_url.startsWith('https://') ? data.billing_url : null;
+                        // Abonnement terminé : jeton limité au téléchargement des données, avant leur effacement.
+                        const exportToken = typeof data.export_token === 'string' ? data.export_token : null;
+                        const purge = data.purge_prevue ? new Date(data.purge_prevue).toLocaleDateString('fr-FR') : null;
+                        setMessage({ type: 'error', text: data.message || 'Identifiants incorrects', lien, exportToken, purge });
                     }
                 } catch (error) {
-                    setMessage({ type: 'error', text: 'Serveur injoignable : ' + error.message });
+                    setMessage({ type: 'error', text: 'Impossible de joindre Zelyro. Vérifiez votre connexion, puis réessayez dans une minute (le serveur peut mettre un instant à se réveiller).' });
                 } finally {
                     setLoading(false);
+                }
+            };
+
+            const telechargerDonnees = async (jeton) => {
+                try {
+                    const r = await fetch(`${API_URL}/api/v1/export/complet`, { headers: { 'Authorization': `Bearer ${jeton}` } });
+                    if (!r.ok) throw new Error('Téléchargement impossible (' + r.status + ')');
+                    const blob = await r.blob();
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'zelyro-export.zip';
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                } catch (error) {
+                    setMessage({ type: 'error', text: error.message });
                 }
             };
 
@@ -99,7 +123,7 @@
                         setMessage({ type: 'error', text: data.message || 'Inscription impossible' });
                     }
                 } catch (error) {
-                    setMessage({ type: 'error', text: 'Serveur injoignable : ' + error.message });
+                    setMessage({ type: 'error', text: 'Impossible de joindre Zelyro. Vérifiez votre connexion, puis réessayez dans une minute (le serveur peut mettre un instant à se réveiller).' });
                 } finally {
                     setLoading(false);
                 }
@@ -115,6 +139,19 @@
                     {message && (
                         <div className={message.type === 'error' ? 'error' : 'success'}>
                             {message.text}
+                            {message.exportToken && (
+                                <div style={{ marginTop: '10px' }}>
+                                    <button type="button" onClick={() => telechargerDonnees(message.exportToken)}>
+                                        Télécharger toutes mes données
+                                    </button>
+                                    {message.purge && <div>Vos données seront définitivement effacées le {message.purge}.</div>}
+                                </div>
+                            )}
+                            {message.lien && (
+                                <div style={{ marginTop: '10px' }}>
+                                    <a href={message.lien} rel="noopener noreferrer"><strong>Régulariser mon paiement</strong></a>
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -149,6 +186,18 @@
                     {activeTab === 'signup' && (
                         <form onSubmit={handleSignup}>
                             <div className="form-group">
+                                <label>Clé d'activation</label>
+                                <input type="text" className="champ-cle" value={signupData.cle}
+                                    onChange={(e) => setSignupData({ ...signupData, cle: e.target.value })}
+                                    placeholder="ZLY-XXXX-XXXX-XXXX" autoComplete="off" autoCapitalize="characters"
+                                    spellCheck={false} maxLength={64} required disabled={loading} />
+                                <p className="field-hint">
+                                    Zelyro est accessible sur invitation. Votre clé d'activation (elle commence par ZLY-) vous a été
+                                    envoyée par e-mail par l'équipe Zelyro. Pas encore de clé ? Écrivez-nous à{' '}
+                                    <a href="mailto:contact@zelyro.fr?subject=Demande%20de%20cl%C3%A9%20Zelyro" style={{ color: 'inherit' }}>contact@zelyro.fr</a>.
+                                </p>
+                            </div>
+                            <div className="form-group">
                                 <label>Email</label>
                                 <input type="email" value={signupData.email}
                                     onChange={(e) => setSignupData({ ...signupData, email: e.target.value })}
@@ -178,18 +227,6 @@
                                 <input type="password" value={signupData.confirmPassword}
                                     onChange={(e) => setSignupData({ ...signupData, confirmPassword: e.target.value })}
                                     placeholder="••••••••" autoComplete="new-password" required disabled={loading} />
-                            </div>
-                            <div className="form-group">
-                                <label>Clé d'activation</label>
-                                <input type="text" className="champ-cle" value={signupData.cle}
-                                    onChange={(e) => setSignupData({ ...signupData, cle: e.target.value })}
-                                    placeholder="ZLY-XXXX-XXXX-XXXX" autoComplete="off" autoCapitalize="characters"
-                                    spellCheck={false} maxLength={64} required disabled={loading} />
-                                <p className="field-hint">
-                                    Zelyro est accessible sur invitation : la clé d'activation vous est remise par l'équipe Zelyro.
-                                    Pas encore de clé ? Écrivez-nous à{' '}
-                                    <a href="mailto:contact@zelyro.fr?subject=Demande%20de%20cl%C3%A9%20Zelyro" style={{ color: 'inherit' }}>contact@zelyro.fr</a>.
-                                </p>
                             </div>
                             <button type="submit" disabled={loading}>
                                 {loading ? 'Création…' : "S'inscrire"}

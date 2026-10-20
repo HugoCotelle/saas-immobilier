@@ -30,6 +30,7 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
     <script src="/pwa.js" defer></script>
+    <script src="/accueil.js" defer></script>
 </head>
 <body>
     <div id="root"></div>
@@ -299,10 +300,10 @@
                             <div className="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style={{ color: 'inherit', textDecoration: 'none' }}>ZELYRO</a></div>
                             <nav>
                                 <a href="/taches.html">À faire</a>
-                                <a href="/prospects.html" className="active">Leads</a>
+                                <a href="/prospects.html" className="active">Prospects</a>
                                 <a href="/biens.html">Biens</a>
-                                <a href="/matching.html">Matching</a>
-                                <a href="/propositions.html">Propositions</a>
+                                <a href="/matching.html">Biens pour mes prospects</a>
+                                <a href="/propositions.html">E-mails à envoyer</a>
                                 <a href="/dashboard.html">Dashboard</a>
                                 <a href="/compte.html">Compte</a>
                                 {user && user.is_admin && <a href="/admin.html">Admin</a>}
@@ -338,7 +339,15 @@
                                 </div>
                                 {resultat.quotaMessage && (
                                     <div className="error">
-                                        {resultat.quotaMessage} Contactez Zelyro pour passer au forfait supérieur : les lignes restantes pourront alors être importées.
+                                        {resultat.quotaMessage} Pour passer au forfait supérieur et importer les lignes restantes, écrivez-nous à{' '}
+                                        <a href="mailto:contact@zelyro.fr?subject=Passer%20au%20forfait%20sup%C3%A9rieur" style={{ color: 'inherit' }}>contact@zelyro.fr</a>.
+                                    </div>
+                                )}
+                                {resultat.imported > 0 && (
+                                    <div className="panel-note" style={{ marginBottom: '16px' }}>
+                                        Les prospects importés sont d'abord classés « Premier contact » : leur score sur 100 monte dès que vous
+                                        renseignez leur financement et leur échéance (ouvrez une fiche pour les compléter). Si votre fichier
+                                        contenait déjà ces colonnes, ils sont classés tout de suite.
                                     </div>
                                 )}
                                 {resultat.invalid.length > 0 && (
@@ -354,6 +363,10 @@
                         {!analyse && !envoi && (
                             <div className="panel">
                                 <div className="panel-title">1. Choisir le fichier</div>
+                                <div className="panel-note" style={{ marginBottom: '8px' }}>
+                                    Conseil : faites cet import depuis votre ordinateur, là où se trouve votre fichier Excel.
+                                    Un modèle prêt à remplir est disponible ci-dessous.
+                                </div>
                                 <div className="panel-note">
                                     Un fichier Excel (.xlsx) ou CSV avec une ligne de titres : Nom, E-mail, Téléphone, Achat ou
                                     location, Budget (ou loyer maximum), Secteur, Type de bien, Financement, Échéance et, pour

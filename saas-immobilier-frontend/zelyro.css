@@ -1011,3 +1011,10 @@ body.auth::before {
 .lead-item.p-vert.selected, .lead-item.p-jaune.selected, .lead-item.p-orange.selected, .lead-item.p-gris.selected { background: var(--sage-50); }
 .lead-item .lead-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 .lead-item .lead-footer .lead-badge { margin-top: 0; }
+
+/* Téléphone : champs à 16 px (sinon Safari iOS zoome à chaque saisie) et zones tactiles d'au moins 44 px. */
+@media (max-width: 760px) {
+    input, select, textarea { font-size: 16px; }
+    nav a { padding-top: 12px; padding-bottom: 12px; }
+    button, .btn, .filter-btn { min-height: 44px; }
+}

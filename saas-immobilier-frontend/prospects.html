@@ -14,6 +14,7 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
     <script src="/pwa.js" defer></script>
+    <script src="/accueil.js" defer></script>
 </head>
 <body>
     <div id="root"></div>
@@ -163,7 +164,7 @@
                             window.location.replace('/login.html');
                             return;
                         }
-                        throw new Error(`Erreur API: ${response.status}`);
+                        throw new Error('Impossible de charger vos prospects pour le moment. Réessayez dans un instant.');
                     }
                     const data = await response.json();
                     setLeads(data);
@@ -265,6 +266,8 @@
                 }
             };
 
+            // Une erreur s'affiche en haut de la page : on y ramène la vue (le bouton est parfois plusieurs écrans plus bas).
+            useEffect(() => { if (error) window.scrollTo({ top: 0, behavior: 'smooth' }); }, [error]);
             const set = (k, v) => { setForm({ ...form, [k]: v }); setError(null); };
 
             const statutDe = (lead) => (STATUTS.some((x) => x[0] === lead.status) ? lead.status : 'nouveau');
@@ -294,10 +297,10 @@
                             <div className="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style={{ color: 'inherit', textDecoration: 'none' }}>ZELYRO</a></div>
                             <nav>
                                 <a href="/taches.html">À faire</a>
-                                <a href="/prospects.html" className="active">Leads</a>
+                                <a href="/prospects.html" className="active">Prospects</a>
                                 <a href="/biens.html">Biens</a>
-                                <a href="/matching.html">Matching</a>
-                                <a href="/propositions.html">Propositions</a>
+                                <a href="/matching.html">Biens pour mes prospects</a>
+                                <a href="/propositions.html">E-mails à envoyer</a>
                                 <a href="/dashboard.html">Dashboard</a>
                                 <a href="/compte.html">Compte</a>
                                 {user && user.is_admin && <a href="/admin.html">Admin</a>}
@@ -312,14 +315,14 @@
                     <div className="container">
                         <div className="titre-ligne">
                             <div>
-                                <h1 className="page-title">Leads</h1>
+                                <h1 className="page-title">Prospects</h1>
                                 <p className="page-subtitle">
                                     {leads.length} prospect{leads.length > 1 ? 's' : ''} dans votre portefeuille
                                 </p>
                             </div>
                             <div className="btn-ligne">
                                 <button className="btn secondary" onClick={exporter} disabled={exportEnCours}>
-                                    {exportEnCours ? 'Export…' : 'Exporter (CSV)'}
+                                    {exportEnCours ? 'Export…' : 'Exporter (fichier Excel)'}
                                 </button>
                                 <a className="btn secondary" href="/import.html">Importer un fichier</a>
                                 <button className="btn" onClick={() => { setFormOuvert(!formOuvert); setMessage(null); }}>
@@ -330,6 +333,12 @@
 
                         {error && <div className="error">{error}</div>}
                         {message && <div className="success">{message}</div>}
+                        {leads.length > 0 && (
+                            <p style={{ fontSize: '0.88em', opacity: 0.8, margin: '4px 0 12px' }}>
+                                Le score (sur 100) estime les chances de conclure. Il monte quand vous renseignez le financement et
+                                l'échéance du prospect : ouvrez sa fiche pour les compléter.
+                            </p>
+                        )}
 
                         {formOuvert && (
                             <div className="panel">
@@ -532,8 +541,16 @@
                         ) : leads.length === 0 ? (
                             <div className="panel">
                                 <div className="empty-state">
-                                    Aucun prospect pour le moment.<br />
-                                    Utilisez le bouton « Ajouter un prospect » pour commencer.
+                                    <strong style={{ fontSize: '1.15em' }}>Bienvenue sur Zelyro.</strong><br />
+                                    Commençons par vos prospects : deux minutes suffisent pour voir le premier, avec son score sur 100.
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', marginTop: '18px' }}>
+                                        <a className="btn" href="/import.html">Importer mon fichier Excel</a>
+                                        <button type="button" className="btn secondary" onClick={() => setFormOuvert(true)}>Ajouter un premier prospect</button>
+                                        <a className="btn secondary" href="/compte.html">Recevoir mes demandes SeLoger / Leboncoin</a>
+                                    </div>
+                                    <p style={{ marginTop: '14px', fontSize: '0.9em' }}>
+                                        Ensuite, ajoutez un bien (avec code postal et ville) pour voir à quels prospects le proposer.
+                                    </p>
                                 </div>
                             </div>
                         ) : (

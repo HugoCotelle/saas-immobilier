@@ -20,6 +20,7 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
     <script src="/pwa.js" defer></script>
+    <script src="/accueil.js" defer></script>
 </head>
 <body>
     <div id="root"></div>
@@ -126,7 +127,7 @@
                             window.location.replace('/login.html');
                             return;
                         }
-                        throw new Error(`Erreur API: ${response.status}`);
+                        throw new Error('Impossible de charger les correspondances pour le moment. Réessayez dans un instant.');
                     }
                     const data = await response.json();
                     setLeads(data);
@@ -199,10 +200,10 @@
                             <div className="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style={{ color: 'inherit', textDecoration: 'none' }}>ZELYRO</a></div>
                             <nav>
                                 <a href="/taches.html">À faire</a>
-                                <a href="/prospects.html">Leads</a>
+                                <a href="/prospects.html">Prospects</a>
                                 <a href="/biens.html">Biens</a>
-                                <a href="/matching.html" className="active">Matching</a>
-                                <a href="/propositions.html">Propositions</a>
+                                <a href="/matching.html" className="active">Biens pour mes prospects</a>
+                                <a href="/propositions.html">E-mails à envoyer</a>
                                 <a href="/dashboard.html">Dashboard</a>
                                 <a href="/compte.html">Compte</a>
                                 {user && user.is_admin && <a href="/admin.html">Admin</a>}
@@ -215,12 +216,12 @@
                     </header>
 
                     <div className="container">
-                        <h1 className="page-title">Matching</h1>
+                        <h1 className="page-title">Biens pour mes prospects</h1>
                         <p className="page-subtitle">
                             Les meilleures correspondances pour chacun de vos {leads.length} prospects
                         </p>
 
-                        {error && <div className="error">Erreur: {error}</div>}
+                        {error && <div className="error">{error}</div>}
 
                         {loading ? (
                             <div className="loading">
@@ -229,7 +230,15 @@
                             </div>
                         ) : leads.length === 0 ? (
                             <div className="panel">
-                                <div className="empty-state">Aucun prospect à rapprocher pour le moment.</div>
+                                <div className="empty-state">
+                                    Aucun prospect à rapprocher pour le moment.<br />
+                                    Zelyro met en relation vos prospects et vos biens : ajoutez un prospect (avec son budget et son secteur)
+                                    et un bien (avec son code postal et sa ville).
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', marginTop: '14px' }}>
+                                        <a className="btn" href="/prospects.html">Ajouter un prospect</a>
+                                        <a className="btn secondary" href="/biens.html">Ajouter un bien</a>
+                                    </div>
+                                </div>
                             </div>
                         ) : (
                             <>
@@ -283,7 +292,13 @@
                                                 <div
                                                     key={lead.id}
                                                     className={`lead-item ${lead.lead_quality || ''} ${palier(lead.quality_score, lead.lead_quality)} ${idAffiche === lead.id ? 'selected' : ''}`}
-                                                    onClick={() => setSelectedLeadId(lead.id)}>
+                                                    onClick={() => {
+                                                        setSelectedLeadId(lead.id);
+                                                        // Sur téléphone le détail est sous la liste : on y amène la vue.
+                                                        if (window.innerWidth < 900) {
+                                                            setTimeout(() => { const d = document.getElementById('detail-rapprochement'); if (d) d.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50);
+                                                        }
+                                                    }}>
                                                     {palier(lead.quality_score, lead.lead_quality) === 'p-go' && <div className="pastille-go">À appeler maintenant</div>}
                                                     <div className="lead-name">{lead.name}</div>
                                                     <div className="lead-field">
@@ -310,7 +325,7 @@
                                         )}
                                     </div>
 
-                                    <div className="panel">
+                                    <div className="panel" id="detail-rapprochement">
                                         {selectedLead ? (
                                             <>
                                                 <div className="panel-title">{selectedLead.name}</div>
@@ -414,6 +429,9 @@
                                                         {estLocation(selectedLead)
                                                             ? 'Aucun bien à louer ne correspond à ce prospect'
                                                             : 'Aucun bien à vendre ne correspond à ce prospect'}
+                                                        <br />
+                                                        Vérifiez que vos biens ont un code postal et une ville, et que le budget et le secteur du prospect sont renseignés.
+                                                        <div style={{ marginTop: '12px' }}><a className="btn secondary" href="/biens.html">Ajouter un bien</a></div>
                                                     </div>
                                                 )}
                                             </>

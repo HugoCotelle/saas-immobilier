@@ -11,6 +11,7 @@
     <meta name="robots" content="noindex">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="zelyro.css">
+    <script src="/accueil.js" defer></script>
     <style>
         .tete-taches { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 16px; }
         .filtres-taches { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 26px; align-items: center; }
@@ -348,10 +349,10 @@
                             <div className="logo"><a href="/taches.html" style={{ color: 'inherit', textDecoration: 'none' }}>ZELYRO</a></div>
                             <nav>
                                 <a href="/taches.html" className="active">À faire</a>
-                                <a href="/prospects.html">Leads</a>
+                                <a href="/prospects.html">Prospects</a>
                                 <a href="/biens.html">Biens</a>
-                                <a href="/matching.html">Matching</a>
-                                <a href="/propositions.html">Propositions</a>
+                                <a href="/matching.html">Biens pour mes prospects</a>
+                                <a href="/propositions.html">E-mails à envoyer</a>
                                 <a href="/dashboard.html">Dashboard</a>
                                 <a href="/compte.html">Compte</a>
                                 {user && user.is_admin && <a href="/admin.html">Admin</a>}
@@ -375,6 +376,19 @@
                             </div>
                             <button className="btn petit secondary" onClick={charger}>Actualiser</button>
                         </div>
+
+                        {c && c.total === 0 && (
+                            <div className="panel" style={{ marginTop: 16 }}>
+                                <div className="panel-note">
+                                    Cette page vous dira chaque matin qui appeler en premier. Pour la voir se remplir, commencez par ajouter
+                                    vos prospects : le plus rapide est d'importer votre fichier Excel.
+                                </div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                                    <a className="btn" href="/import.html">Importer mon fichier Excel</a>
+                                    <a className="btn secondary" href="/prospects.html">Ajouter un prospect</a>
+                                </div>
+                            </div>
+                        )}
 
                         {erreur && <div className="error" style={{ marginTop: 16 }}>Erreur: {erreur}</div>}
                         {message && <div className="toast-ok" style={{ marginTop: 16 }} role="status">{message}</div>}
