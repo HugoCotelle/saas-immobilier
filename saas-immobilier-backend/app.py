@@ -1255,7 +1255,7 @@ def login():
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("""SELECT id, email, password_hash, first_name, company_name, token_version,
-                              is_active, plan, role, agency_owner_id
+                              is_active, plan, role, agency_owner_id, billing_suspended
                        FROM users WHERE lower(email) = %s""", (email,))
         user = cur.fetchone()
 
@@ -1270,10 +1270,24 @@ def login():
             conn.close()
             return jsonify({"message": "Invalid credentials"}), 401
         if not user['is_active']:
+            # Après la vérification du mot de passe : seul le titulaire du compte l'apprend.
+            reponse = {"message": "Ce compte est suspendu. Contactez l'équipe Zelyro.", "code": "suspended"}
+            # Suspendu pour impayé : aucune session n'est ouverte, mais le titulaire reçoit un lien
+            # direct vers le portail de paiement Stripe pour régulariser (changer de carte, payer la
+            # facture). Le webhook rétablit ensuite l'accès. Sans cela, un impayé ne se règle que par
+            # une intervention manuelle.
+            if (user['role'] or 'admin') == 'admin' and user['billing_suspended'] and _paiement_pret() and _site_url():
+                try:
+                    etat = _etat_facturation(cur, user['id'])
+                    if etat and etat['stripe_customer_id']:
+                        reponse = {"message": "Votre abonnement est suspendu pour impayé. Régularisez votre "
+                                              "paiement pour retrouver l'accès : il est rétabli dès que Stripe "
+                                              "confirme.", "code": "billing_suspended", "billing_url": _url_portail(etat)}
+                except Exception:
+                    app.logger.exception("Connexion : lien de régularisation indisponible pour le compte %s", user['id'])
             cur.close()
             conn.close()
-            # Après la vérification du mot de passe : seul le titulaire du compte l'apprend.
-            return jsonify({"message": "Ce compte est suspendu. Contactez l'équipe Zelyro.", "code": "suspended"}), 403
+            return jsonify(reponse), 403
 
         # Un compte employé n'a pas son propre abonnement : le nom d'agence et
         # le forfait affichés viennent du compte administrateur qui l'a invité.
@@ -10152,6 +10166,25 @@ def _stripe_pret():
     return stripe is not None and bool(STRIPE_SECRET_KEY)
 
 
+def _cle_stripe_live():
+    return STRIPE_SECRET_KEY.startswith(("sk_live_", "rk_live_"))
+
+
+def _paiement_pret():
+    """Stripe est prêt à encaisser : clé secrète ET secret du webhook. Sans ce dernier, un client
+    paierait sans que son forfait soit jamais activé (le webhook répond 404). Sur l'hébergeur
+    (RENDER défini), une clé de test est refusée : elle accepterait des cartes factices et offrirait
+    des forfaits gratuits. STRIPE_ALLOW_TEST_KEY=1 l'autorise pour un environnement de préproduction."""
+    if _stripe_pret() and not STRIPE_WEBHOOK_SECRET:
+        app.logger.error("Stripe : STRIPE_WEBHOOK_SECRET absent, le paiement en ligne est désactivé")
+    if (_stripe_pret() and os.getenv("RENDER") and not _cle_stripe_live()
+            and os.getenv("STRIPE_ALLOW_TEST_KEY") != "1"):
+        app.logger.error("Stripe : clé de test sur l'hébergeur, le paiement en ligne est désactivé "
+                         "(STRIPE_ALLOW_TEST_KEY=1 pour une préproduction)")
+        return False
+    return _stripe_pret() and bool(STRIPE_WEBHOOK_SECRET)
+
+
 def _prix_par_cle(cle):
     """Identifiant du tarif Stripe portant cette clé, ou None."""
     if cle in _prix_en_cache:
@@ -10213,7 +10246,7 @@ def billing_etat():
             abonnement = {"plan": e['plan'], "formule": e['billing_formula'], "status": e['billing_status'],
                           "period_end": _iso(e['billing_period_end']), "commit_end": _iso(e['billing_commit_end']),
                           "cancel_at_period_end": bool(e['billing_cancel_at_period_end'])}
-        return jsonify({"configured": _stripe_pret(), "can_manage": request.role == 'admin',
+        return jsonify({"configured": _paiement_pret(), "can_manage": request.role == 'admin',
                         "subscription": abonnement, "extra_seats": (e['extra_seats'] if e else 0) or 0,
                         "seat_price_ht": PRIX_SIEGE_HT}), 200
     except Exception:
@@ -10232,10 +10265,13 @@ def billing_checkout():
         if plan not in PLANS_PAYANTS or formule not in FORMULES:
             return jsonify({"message": "Forfait ou formule inconnus"}), 400
         site = _site_url()
-        if not _stripe_pret() or not site:
+        if not _paiement_pret() or not site:
             return jsonify({"message": "Le paiement en ligne n'est pas encore disponible. "
                                        "Écrivez à contact@zelyro.fr pour souscrire."}), 503
         with _base() as (conn, cur):
+            # Verrou sur la ligne du compte : deux clics (ou deux onglets) simultanés passent l'un après
+            # l'autre, et le second ne crée pas un second client Stripe.
+            cur.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (request.user_id,))
             e = _etat_facturation(cur, request.user_id)
             if e['billing_status'] in ('active', 'trialing', 'past_due'):
                 return jsonify({"message": "Cette agence a déjà un abonnement. "
@@ -10268,6 +10304,9 @@ def billing_checkout():
                 "/cgu.html). Pour un prélèvement SEPA, vous autorisez Zelyro SAS à débiter votre compte.")}},
             success_url=f"{site}/compte.html?abonnement=ok",
             cancel_url=f"{site}/compte.html?abonnement=annule",
+            # Session courte (30 min au minimum chez Stripe) : une page de paiement laissée ouverte
+            # ne peut pas être payée le lendemain, après qu'un autre abonnement a été souscrit.
+            expires_at=int(_time.time()) + 31 * 60,
         )
         if auto:
             params["automatic_tax"] = {"enabled": True}
@@ -10278,6 +10317,27 @@ def billing_checkout():
             app.logger.exception("Stripe : ouverture du paiement impossible")
             return jsonify({"message": "Le service de paiement ne répond pas. Réessayez dans un instant."}), 502
         return erreur_interne()
+
+
+class _PortailNonConfigure(Exception):
+    pass
+
+
+def _url_portail(e):
+    """Adresse d'une session du portail Stripe pour l'agence décrite par `e` (_etat_facturation).
+    Pendant l'engagement de 12 mois, il faut la configuration « engagé » (sans bouton de résiliation) :
+    si elle manque, on refuse plutôt que de retomber sur le portail par défaut de Stripe, qui permet
+    de résilier."""
+    en_engagement = bool(e['billing_formula'] == 'engage' and e['billing_commit_end']
+                         and e['billing_commit_end'] > _maintenant())
+    nom_variable = "STRIPE_PORTAL_CONFIG_ENGAGE" if en_engagement else "STRIPE_PORTAL_CONFIG_FLEX"
+    config = (os.getenv(nom_variable) or "").strip()
+    if en_engagement and not config:
+        raise _PortailNonConfigure(nom_variable)
+    params = {"customer": e['stripe_customer_id'], "return_url": f"{_site_url()}/compte.html"}
+    if config:
+        params["configuration"] = config
+    return stripe.billing_portal.Session.create(**params).url
 
 
 @app.route('/api/v1/billing/portal', methods=['POST'])
@@ -10295,14 +10355,13 @@ def billing_portail():
             e = _etat_facturation(cur, request.user_id)
         if not e or not e['stripe_customer_id']:
             return jsonify({"message": "Aucun abonnement pour cette agence."}), 404
-        en_engagement = (e['billing_formula'] == 'engage' and e['billing_commit_end']
-                         and e['billing_commit_end'] > _maintenant())
-        config = (os.getenv("STRIPE_PORTAL_CONFIG_ENGAGE" if en_engagement else "STRIPE_PORTAL_CONFIG_FLEX") or "").strip()
-        params = {"customer": e['stripe_customer_id'], "return_url": f"{_site_url()}/compte.html"}
-        if config:
-            params["configuration"] = config
-        session = stripe.billing_portal.Session.create(**params)
-        return jsonify({"url": session.url}), 200
+        try:
+            url = _url_portail(e)
+        except _PortailNonConfigure as manquante:
+            app.logger.error("Stripe : %s absente, portail refusé pendant un engagement", manquante)
+            return jsonify({"message": "La gestion de l'abonnement est momentanément indisponible. "
+                                       "Écrivez-nous à contact@zelyro.fr."}), 503
+        return jsonify({"url": url}), 200
     except Exception as exc:
         if stripe is not None and isinstance(exc, stripe.StripeError):
             app.logger.exception("Stripe : ouverture du portail impossible")
@@ -10323,9 +10382,13 @@ def billing_sieges():
         qte = data.get('quantity')
         if not isinstance(qte, int) or isinstance(qte, bool) or not 0 <= qte <= SIEGES_SUPPLEMENTAIRES_MAX:
             return jsonify({"message": f"Indiquez un nombre entre 0 et {SIEGES_SUPPLEMENTAIRES_MAX}"}), 400
-        if not _stripe_pret():
+        if not _paiement_pret():
             return jsonify({"message": "Le paiement en ligne n'est pas encore disponible."}), 503
         with _base() as (conn, cur):
+            # Verrou sur la ligne du compte jusqu'à la fin de la requête : un double clic attend le
+            # premier, voit alors l'abonnement de comptes déjà enregistré et le modifie au lieu d'en
+            # créer un second (qui serait prélevé sans être suivi).
+            cur.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (request.user_id,))
             e = _etat_facturation(cur, request.user_id)
             if not e or e['billing_status'] not in _STATUTS_ACCES:
                 return jsonify({"message": "Souscrivez d'abord à un forfait pour ajouter des comptes."}), 409
@@ -10344,9 +10407,18 @@ def billing_sieges():
                 if qte == 0:
                     sub = stripe.Subscription.modify(sub_id, cancel_at_period_end=True).to_dict()
                 else:
+                    actuelle = int(sub['items']['data'][0].get('quantity') or 0)
+                    options = {}
+                    if qte > actuelle and not sub.get('cancel_at_period_end'):
+                        # Ajout de comptes : le prorata est facturé et encaissé tout de suite, et si le
+                        # paiement échoue Stripe n'applique pas la hausse (donc aucun accès offert).
+                        # Pour une baisse, le crédit est simplement reporté sur la prochaine facture.
+                        options = {"proration_behavior": "always_invoice", "payment_behavior": "error_if_incomplete"}
+                    else:
+                        options = {"proration_behavior": "create_prorations"}
                     sub = stripe.Subscription.modify(
                         sub_id, items=[{"id": item, "quantity": qte}], cancel_at_period_end=False,
-                        proration_behavior='create_prorations').to_dict()
+                        **options).to_dict()
             elif qte == 0:
                 return jsonify({"extra_seats": 0}), 200
             else:
@@ -10369,8 +10441,11 @@ def billing_sieges():
     except Exception as exc:
         if stripe is not None and isinstance(exc, stripe.StripeError):
             app.logger.exception("Stripe : modification des comptes supplémentaires impossible")
-            return jsonify({"message": "Le paiement n'a pas pu être effectué. Vérifiez votre moyen de paiement "
-                                       "dans « Gérer mon abonnement »."}), 402
+            # Carte refusée ou paiement non abouti : l'agence peut agir. Panne ou erreur de notre côté : non.
+            if isinstance(exc, (stripe.CardError, stripe.InvalidRequestError)):
+                return jsonify({"message": "Le paiement n'a pas pu être effectué. Vérifiez votre moyen de paiement "
+                                           "dans « Gérer mon abonnement »."}), 402
+            return jsonify({"message": "Le service de paiement ne répond pas. Réessayez dans un instant."}), 502
         return erreur_interne()
 
 
@@ -10405,7 +10480,8 @@ def _sync_abonnement(cur, sub, supprime=False):
         app.logger.warning("Stripe : abonnement %s sans compte Zelyro associé", sub.get('id'))
         return
     cur.execute("""SELECT id, email, plan, is_active, stripe_customer_id, stripe_subscription_id,
-                          stripe_seats_subscription_id, billing_suspended FROM users WHERE id = %s FOR UPDATE""", (uid,))
+                          stripe_seats_subscription_id, billing_suspended, billing_status
+                   FROM users WHERE id = %s FOR UPDATE""", (uid,))
     u = cur.fetchone()
     if not u:
         return
@@ -10430,8 +10506,18 @@ def _sync_abonnement(cur, sub, supprime=False):
 
     if statut == 'incomplete':
         return  # paiement pas encore abouti : rien à changer
-    if supprime and u['stripe_subscription_id'] not in (None, sub.get('id')):
+    if (supprime or statut in _STATUTS_COUPURE) and u['stripe_subscription_id'] not in (None, sub.get('id')):
         return  # un ancien abonnement qui se termine alors qu'un nouveau est en cours
+    if (statut in _STATUTS_ACCES and u['stripe_subscription_id'] not in (None, sub.get('id'))
+            and u['billing_status'] in ('active', 'trialing', 'past_due')):
+        # Un second abonnement payant alors que l'agence en a déjà un en cours (deux pages de paiement
+        # réglées). On ne remplace pas celui qui est suivi : il faut annuler et rembourser l'un des deux
+        # dans Stripe, à la main. L'événement est tracé pour ne pas passer inaperçu.
+        app.logger.error("Stripe : abonnement en double pour le compte %s : %s (déjà suivi : %s)",
+                         uid, sub.get('id'), u['stripe_subscription_id'])
+        _journal_stripe(cur, 'abonnement en double', u['email'],
+                        f"{sub.get('id')} en plus de {u['stripe_subscription_id']} : à annuler/rembourser dans Stripe")
+        return
     fin = _ts(sub.get('current_period_end') or (items[0].get('current_period_end') if items else None))
     debut = _ts(sub.get('start_date'))
     engage_jusque = _ajouter_mois(debut, ENGAGEMENT_MOIS) if (debut and formule in ('engage', 'annuel')) else None
@@ -10478,6 +10564,46 @@ def _prevenir_paiement_echoue(adresse):
     _envoyer_email(adresse, "Votre paiement Zelyro a échoué", texte, html)
 
 
+def _alerter_equipe_facturation(titre, lignes):
+    """Prévient l'équipe Zelyro (ADMIN_EMAILS) d'un événement d'argent à traiter à la main."""
+    if not _envoi_configure():
+        return
+    texte, html = _gabarit_email(titre, lignes)
+    for adresse in sorted(_admins()):
+        _envoyer_email(adresse, titre, texte, html)
+
+
+def _signaler_remboursement_litige(cur, type_, objet):
+    """Remboursement ou litige (contestation de paiement) : aucune décision n'est prise automatiquement
+    (couper un client qui a été remboursé ou qui conteste est un choix humain), mais l'événement est
+    tracé dans le journal d'administration et l'équipe est prévenue par e-mail."""
+    client = objet.get('customer')
+    if type_.startswith('charge.dispute') and not client and objet.get('charge') and _stripe_pret():
+        try:
+            client = stripe.Charge.retrieve(objet['charge']).to_dict().get('customer')
+        except Exception:
+            app.logger.exception("Stripe : client du litige %s introuvable", objet.get('id'))
+    u = None
+    if client:
+        cur.execute("SELECT email FROM users WHERE stripe_customer_id = %s", (client,))
+        u = cur.fetchone()
+    cible = u['email'] if u else f"client Stripe {client or 'inconnu'}"
+    devise = str(objet.get('currency') or 'eur').upper()
+    if type_ == 'charge.refunded':
+        action = 'remboursement'
+        detail = (f"{(objet.get('amount_refunded') or 0) / 100:.2f} {devise} remboursés "
+                  f"sur {(objet.get('amount') or 0) / 100:.2f} (paiement {objet.get('id')})")
+    else:
+        action = 'litige ouvert' if type_.endswith('created') else 'litige clos'
+        detail = (f"{(objet.get('amount') or 0) / 100:.2f} {devise} · motif {objet.get('reason') or 'inconnu'} · "
+                  f"statut {objet.get('status') or 'inconnu'} (litige {objet.get('id')})")
+    _journal_stripe(cur, action, cible, detail)
+    app.logger.warning("Stripe : %s pour %s : %s", action, cible, detail)
+    _lancer_en_arriere_plan(_alerter_equipe_facturation, f"Zelyro : {action}",
+                            [f"Compte : {cible}", detail,
+                             "Aucune action automatique n'a été prise : à vérifier dans le tableau de bord Stripe."])
+
+
 def _traiter_evenement_stripe(cur, evenement):
     type_ = evenement.get('type')
     objet = (evenement.get('data') or {}).get('object') or {}
@@ -10499,9 +10625,15 @@ def _traiter_evenement_stripe(cur, evenement):
                 app.logger.exception("Stripe : moyen de paiement par défaut non enregistré")
         _sync_abonnement(cur, sub)
     elif type_ in ('customer.subscription.created', 'customer.subscription.updated'):
-        _sync_abonnement(cur, objet)
+        # Stripe ne garantit ni l'ordre ni la fraîcheur des événements (et rejoue ceux qui ont échoué
+        # pendant des jours) : on applique l'état ACTUEL de l'abonnement, jamais celui de l'événement.
+        # Si Stripe ne répond pas, l'exception renvoie 500 et Stripe réessaiera.
+        sub = stripe.Subscription.retrieve(objet['id']).to_dict() if objet.get('id') else objet
+        _sync_abonnement(cur, sub)
     elif type_ == 'customer.subscription.deleted':
         _sync_abonnement(cur, objet, supprime=True)
+    elif type_ in ('charge.refunded', 'charge.dispute.created', 'charge.dispute.closed'):
+        _signaler_remboursement_litige(cur, type_, objet)
     elif type_ == 'invoice.payment_failed':
         cur.execute("SELECT email FROM users WHERE stripe_customer_id = %s", (objet.get('customer'),))
         u = cur.fetchone()
@@ -10525,6 +10657,11 @@ def stripe_webhook():
         evenement = _json.loads(charge)
     except (ValueError, stripe.SignatureVerificationError):
         return jsonify({"message": "Signature invalide"}), 400
+    if evenement.get('livemode') is not None and bool(evenement['livemode']) != _cle_stripe_live():
+        # Événement d'un autre mode (test/réel) que la clé configurée : jamais appliqué à de vrais comptes.
+        app.logger.warning("Stripe : événement %s ignoré (livemode=%s, clé %s)", evenement.get('type'),
+                           evenement['livemode'], 'réelle' if _cle_stripe_live() else 'de test')
+        return jsonify({"received": True, "ignored": "livemode"}), 200
     try:
         _assurer_schema()
         with _base() as (conn, cur):
