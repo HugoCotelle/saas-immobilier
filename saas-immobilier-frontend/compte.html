@@ -142,7 +142,24 @@
                 // nettoie l'URL, pour ne pas le rejouer si la page est rechargée.
                 const parametresGmail = new URLSearchParams(window.location.search);
                 const resultatGmail = parametresGmail.get('gmail');
-                if (resultatGmail) {
+                // Retour de Google réussi : le serveur n'a encore rien enregistré. Le jeton en attente est
+                // dans le # de l'adresse ; on le renvoie avec notre session, ce qui prouve qu'il s'agit
+                // bien de l'agence qui a demandé la liaison.
+                const enAttenteGmail = resultatGmail === 'confirmer'
+                    ? new URLSearchParams(window.location.hash.replace(/^#/, '')).get('p') : null;
+                if (resultatGmail === 'confirmer') {
+                    if (enAttenteGmail) {
+                        appel('/api/v1/gmail/finish', { method: 'POST', body: JSON.stringify({ pending: enAttenteGmail }) })
+                            .then(() => {
+                                setMessageGmail({ type: 'success', text: 'Boîte Gmail connectée : Zelyro va maintenant y détecter automatiquement les notifications LeBonCoin et SeLoger.' });
+                                return appel('/api/v1/gmail/status').then(setGmailStatus);
+                            })
+                            .catch((e) => setMessageGmail({ type: 'error', text: e.message }));
+                    } else {
+                        setMessageGmail({ type: 'error', text: 'La connexion à Gmail a échoué. Réessayez, ou contactez-nous si le problème persiste.' });
+                    }
+                    window.history.replaceState({}, '', window.location.pathname);
+                } else if (resultatGmail) {
                     if (resultatGmail === 'connecte') {
                         setMessageGmail({ type: 'success', text: 'Boîte Gmail connectée : Zelyro va maintenant y détecter automatiquement les notifications LeBonCoin et SeLoger.' });
                     } else if (resultatGmail === 'refuse') {
