@@ -6594,6 +6594,20 @@ def lien_completion_lead(lead_id):
 
 # ===== TABLEAU DE BORD =====
 
+def _nouveaux_par_semaine(prospects, maintenant, semaines=12):
+    """Nombre de prospects arrivés chaque semaine, sur les `semaines` dernières (la plus ancienne en premier,
+    la semaine en cours en dernier). Chiffres réels de l'agence, pour le graphique de tendance."""
+    comptes = [0] * semaines
+    for p in prospects:
+        cree = p.get('created_at')
+        if not cree:
+            continue
+        ecart = max(0, (maintenant - cree).days) // 7
+        if 0 <= ecart < semaines:
+            comptes[semaines - 1 - ecart] += 1
+    return comptes
+
+
 @app.route('/api/v1/dashboard', methods=['GET'])
 @token_required
 def get_dashboard():
@@ -6667,6 +6681,7 @@ def get_dashboard():
             "quality": qualite,
             "sources": sources,
             "new_last_30_days": recents,
+            "weekly_new": _nouveaux_par_semaine(prospects, maintenant),
             "to_contact": a_contacter,
             "avg_first_response_hours": round(sum(delais) / len(delais), 1) if delais else None,
             "conversion_rate": round(100 * pipeline['signe'] / total) if total else None,
