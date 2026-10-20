@@ -302,6 +302,9 @@ def create_access_token(identity, expires):
         'exp': datetime.utcnow() + expires,
         'iat': datetime.utcnow()
     }
+    if identity.get('rst'):
+        # Jeton d'export : ne sert qu'à télécharger ses données (voir token_required).
+        payload['rst'] = True
     token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
     return token
 
@@ -555,6 +558,31 @@ _DDL_SURFACE = (
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
     )""",
     "CREATE INDEX IF NOT EXISTS property_photos_bien_idx ON property_photos (property_id, position)",
+)
+
+# Protection des données (RGPD) :
+#  - billing_ended_at : début du délai de grâce après une coupure pour abonnement terminé ou impayé ;
+#    passé DELAI_PURGE_JOURS jours, les données de l'agence sont effacées (/internal/purge) ;
+#  - purged_at : compte déjà purgé (ses données ont disparu, la ligne ne sert plus qu'à la facturation) ;
+#  - ia_enabled : l'agence autorise l'envoi du texte des messages à l'IA (Anthropic) ; activé par défaut, l'agence peut le couper ;
+#  - opposition_at : le prospect s'est opposé à recevoir des e-mails de l'agence.
+_DDL_RGPD = (
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_ended_at TIMESTAMP",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS purged_at TIMESTAMP",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS ia_enabled BOOLEAN NOT NULL DEFAULT TRUE",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS opposition_at TIMESTAMP",
+    # Migration unique : les agences déjà coupées pour abonnement terminé avant cette version entrent dans
+    # le délai de grâce à la date du déploiement (sans effet une fois la date posée).
+    "UPDATE users SET billing_ended_at = NOW() WHERE billing_suspended AND NOT is_active "
+    "AND billing_ended_at IS NULL AND purged_at IS NULL AND agency_owner_id IS NULL",
+    # Liste de suppression : empreinte (SHA-256) des adresses des prospects opposés, par agence. Elle survit
+    # à la suppression de la fiche et protège contre une nouvelle fiche créée avec la même adresse.
+    """CREATE TABLE IF NOT EXISTS contact_opposition (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        email_hash CHAR(64) NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (user_id, email_hash)
+    )""",
 )
 
 # Les forfaits : code, nom, prospects, biens, e-mails par mois, extractions IA
@@ -825,12 +853,17 @@ def _assurer_schema():
                                WHERE table_name = 'leads' AND column_name = 'dpe_max'),
                        EXISTS (SELECT 1 FROM information_schema.columns
                                WHERE table_name = 'leads' AND column_name = 'ges_max'),
-                       to_regclass('property_photos') IS NOT NULL
+                       to_regclass('property_photos') IS NOT NULL,
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'users' AND column_name = 'ia_enabled'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'leads' AND column_name = 'opposition_at'),
+                       to_regclass('contact_opposition') IS NOT NULL
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
                 for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
-                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS + _DDL_FACTURATION + _DDL_RECEPTION):
+                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS + _DDL_FACTURATION + _DDL_RECEPTION + _DDL_RGPD):
                     cur.execute(ddl)
             conn.commit()
             _schema_pret = True
@@ -881,7 +914,7 @@ def token_required(f):
                 # un compte employe encore actif).
                 cur.execute("""
                     SELECT u.token_version, u.is_active, u.email, u.role, u.agency_owner_id,
-                           COALESCE(a.is_active, TRUE) AS agence_active
+                           COALESCE(a.is_active, TRUE) AS agence_active, u.billing_suspended, u.purged_at
                     FROM users u LEFT JOIN users a ON a.id = u.agency_owner_id
                     WHERE u.id = %s
                 """, (current_user_id,))
@@ -892,8 +925,16 @@ def token_required(f):
             return erreur_interne()
         if ligne is None:
             return jsonify({"message": "Invalid token"}), 401
-        if int(data.get('v', 0)) != ligne[0] or not ligne[1] or not ligne[5]:
+        if int(data.get('v', 0)) != ligne[0] or not ligne[5]:
             return jsonify({"message": "Invalid token"}), 401
+        # Jeton d'export (délivré à la connexion d'une agence dont l'abonnement est terminé) : il ne donne
+        # accès qu'au téléchargement des données, jamais au reste de l'application, même si le compte
+        # est réactivé entre-temps.
+        if data.get('rst') is True and request.endpoint != 'export_complet':
+            return jsonify({"message": "Invalid token"}), 401
+        if not ligne[1]:
+            if not (data.get('rst') is True and ligne[6] and not ligne[7] and request.endpoint == 'export_complet'):
+                return jsonify({"message": "Invalid token"}), 401
         request.user_email = ligne[2]
         # request.agency_id est l'identifiant a utiliser pour tout ce qui est
         # commun a l'agence (prospects, biens, forfait, boite Gmail...).
@@ -1004,7 +1045,7 @@ def init_database(demo=False):
         ):
             cursor.execute(ddl)
         for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
-                    + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS + _DDL_FACTURATION + _DDL_RECEPTION):
+                    + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS + _DDL_FACTURATION + _DDL_RECEPTION + _DDL_RGPD):
             cursor.execute(ddl)
 
         # Vérifier si vide
@@ -1255,7 +1296,8 @@ def login():
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("""SELECT id, email, password_hash, first_name, company_name, token_version,
-                              is_active, plan, role, agency_owner_id, billing_suspended
+                              is_active, plan, role, agency_owner_id, billing_suspended,
+                              billing_ended_at, purged_at
                        FROM users WHERE lower(email) = %s""", (email,))
         user = cur.fetchone()
 
@@ -1285,6 +1327,14 @@ def login():
                                               "confirme.", "code": "billing_suspended", "billing_url": _url_portail(etat)}
                 except Exception:
                     app.logger.exception("Connexion : lien de régularisation indisponible pour le compte %s", user['id'])
+            # Abonnement terminé : pendant le délai de grâce, l'agence peut récupérer toutes ses données
+            # (jeton valable une heure, limité au téléchargement) avant leur effacement définitif.
+            if (user['role'] or 'admin') == 'admin' and user['billing_suspended'] and not user['purged_at']:
+                reponse["export_token"] = create_access_token(
+                    {'id': user['id'], 'email': user['email'], 'v': user['token_version'], 'rst': True},
+                    expires=timedelta(hours=1))
+                if user['billing_ended_at']:
+                    reponse["purge_prevue"] = _iso(user['billing_ended_at'] + timedelta(days=DELAI_PURGE_JOURS))
             cur.close()
             conn.close()
             return jsonify(reponse), 403
@@ -1450,6 +1500,8 @@ def _traiter_oubli(email):
             jeton = secrets.token_urlsafe(32)
             maintenant = _maintenant()
             # Un seul lien valable à la fois : une nouvelle demande annule les précédentes.
+            # Rétention annoncée : un lien est supprimé au plus tard 24 h après son expiration.
+            cur.execute("DELETE FROM password_resets WHERE expires_at < %s", (maintenant - timedelta(hours=24),))
             cur.execute("UPDATE password_resets SET used_at = %s WHERE user_id = %s AND used_at IS NULL",
                         (maintenant, user[0]))
             cur.execute("INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES (%s, %s, %s)",
@@ -1621,12 +1673,13 @@ def get_profile():
             cur.close()
             conn.close()
             return jsonify({"message": "User not found"}), 404
-        cur.execute("SELECT company_name, alerts_enabled, plan FROM users WHERE id = %s", (request.agency_id,))
+        cur.execute("SELECT company_name, alerts_enabled, plan, ia_enabled FROM users WHERE id = %s", (request.agency_id,))
         agence = cur.fetchone() or {}
         cur.close()
         conn.close()
 
         user['company_name'] = agence.get('company_name')
+        user['ia_enabled'] = bool(agence.get('ia_enabled'))
         user['alerts_enabled'] = agence.get('alerts_enabled')
         user['plan'] = agence.get('plan')
         user['role'] = request.role
@@ -3766,8 +3819,18 @@ def delete_lead(lead_id):
     l'effacement). L'appartenance au compte est vérifiée dans la requête."""
     try:
         with _base() as (conn, cur):
+            # Le journal de réception garde l'identifiant du message (anti-doublon) mais ne doit rien
+            # conserver qui permette de reconnaître la personne : objet et détail sont vidés avec la fiche.
+            cur.execute("UPDATE inbound_emails SET subject = NULL, detail = NULL WHERE lead_id = %s AND user_id = %s",
+                        (lead_id, request.agency_id))
             cur.execute("DELETE FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.agency_id))
             supprimes = cur.rowcount
+            if supprimes:
+                # Preuve de l'effacement (RGPD art. 5.2), sans donnée personnelle : seulement des identifiants.
+                cur.execute("""INSERT INTO admin_log (admin_email, action, target, detail, created_at)
+                               VALUES (%s, %s, %s, %s, %s)""",
+                            (f"agence:{request.agency_id}", 'prospect supprimé', f"fiche {lead_id}",
+                             f"par le compte {request.user_id}", _maintenant()))
             conn.commit()
         if supprimes == 0:
             return jsonify({"message": "Lead not found"}), 404
@@ -4936,13 +4999,50 @@ def team_reactivate(employee_id):
                     "message": f"Votre forfait {label} est limité à {_nombre(max_users)} comptes utilisateurs.",
                     "code": "quota", "metric": "users", "limit": max_users,
                 }), 403
-            cur.execute("UPDATE users SET is_active = TRUE WHERE id = %s AND agency_owner_id = %s",
+            cur.execute("""UPDATE users SET is_active = TRUE
+                           WHERE id = %s AND agency_owner_id = %s AND purged_at IS NULL""",
                         (employee_id, request.user_id))
             modifie = cur.rowcount
             conn.commit()
         if modifie == 0:
             return jsonify({"message": "Compte introuvable"}), 404
         return jsonify({"message": "Collaborateur réactivé."}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/team/<int:employee_id>/erase', methods=['POST'])
+@limiter.limit("20 per hour", key_func=_cle_utilisateur)
+@token_required
+@agency_admin_required
+def team_erase(employee_id):
+    """Efface définitivement les données personnelles d'un ancien collaborateur (e-mail, prénom, mot de
+    passe, appareils, invitation), à sa demande ou à celle de l'agence. Son compte est anonymisé plutôt que
+    supprimé : les notes, e-mails et rendez-vous qu'il a créés restent dans l'historique de l'agence,
+    attribués à « Ancien collaborateur ». Irréversible."""
+    try:
+        with _base() as (conn, cur):
+            cur.execute("""SELECT id, email FROM users WHERE id = %s AND agency_owner_id = %s AND role = 'employe'
+                           FOR UPDATE""", (employee_id, request.agency_id))
+            e = cur.fetchone()
+            if not e:
+                return jsonify({"message": "Compte introuvable"}), 404
+            adresse = (e['email'] or '').lower()
+            cur.execute("""UPDATE users SET email = %s, first_name = 'Ancien collaborateur', password_hash = '!',
+                               is_active = FALSE, token_version = token_version + 1, capture_token = NULL,
+                               mail_capture_token = NULL, purged_at = %s WHERE id = %s""",
+                        (f"ancien-collaborateur-{e['id']}@purge.invalid", _maintenant(), e['id']))
+            cur.execute("DELETE FROM push_subscriptions WHERE user_id = %s", (e['id'],))
+            cur.execute("DELETE FROM password_resets WHERE user_id = %s", (e['id'],))
+            cur.execute("DELETE FROM team_invitations WHERE agency_owner_id = %s AND lower(email) = %s",
+                        (request.agency_id, adresse))
+            cur.execute("UPDATE leads SET assigned_to = NULL WHERE assigned_to = %s", (e['id'],))
+            cur.execute("UPDATE admin_log SET target = 'compte purgé' WHERE lower(target) = %s", (adresse,))
+            cur.execute("""INSERT INTO admin_log (admin_email, action, target, detail, created_at)
+                           VALUES (%s, 'collaborateur effacé', %s, %s, %s)""",
+                        (f"agence:{request.agency_id}", f"compte {e['id']}", f"par le compte {request.user_id}", _maintenant()))
+            conn.commit()
+        return jsonify({"message": "Les données de ce collaborateur ont été effacées."}), 200
     except Exception:
         return erreur_interne()
 
@@ -5206,9 +5306,16 @@ def admin_modifier_compte(user_id):
                 if not data['is_active'] and _est_admin(compte['email']):
                     return jsonify({"message": "Un compte administrateur ne peut pas être suspendu"}), 400
                 actif = data['is_active']
+            # Une réactivation à la main annule aussi la coupure pour abonnement terminé (et son délai de
+            # grâce) : sinon une coupure ultérieure hériterait d'une vieille date et déclencherait la purge
+            # des données sans le délai promis.
+            reactive = bool(actif and not compte['is_active'])
             cur.execute("""UPDATE users SET plan = %s, is_active = %s,
-                               token_version = token_version + %s WHERE id = %s""",
-                        (plan, actif, 1 if (compte['is_active'] and not actif) else 0, user_id))
+                               token_version = token_version + %s,
+                               billing_suspended = CASE WHEN %s THEN FALSE ELSE billing_suspended END,
+                               billing_ended_at = CASE WHEN %s THEN NULL ELSE billing_ended_at END
+                           WHERE id = %s""",
+                        (plan, actif, 1 if (compte['is_active'] and not actif) else 0, reactive, reactive, user_id))
             if plan != compte['plan']:
                 _journal(cur, 'forfait', compte['email'], f"{compte['plan']} → {plan}")
             if actif != compte['is_active']:
@@ -5502,11 +5609,14 @@ def send_lead_mail(lead_id):
             return jsonify({"message": "L'envoi d'e-mails n'est pas encore configuré sur ce serveur"}), 503
 
         with _base() as (conn, cur):
-            cur.execute("""SELECT id, name, email, status FROM leads
+            cur.execute("""SELECT id, name, email, status, opposition_at FROM leads
                            WHERE id = %s AND user_id = %s FOR UPDATE""", (lead_id, request.agency_id))
             lead = cur.fetchone()
             if not lead:
                 return jsonify({"message": "Lead not found"}), 404
+            if _prospect_oppose(cur, request.agency_id, lead['email'], lead['opposition_at']):
+                return jsonify({"message": "Ce prospect s'est opposé à recevoir des e-mails : aucun message ne peut lui être envoyé.",
+                                "code": "opposition"}), 409
             statut = lead['status'] if lead['status'] in STATUTS else 'nouveau'
             if statut in STATUTS_CLOS:
                 return jsonify({"message": "Ce prospect est clos (signé ou perdu)"}), 409
@@ -5531,8 +5641,11 @@ def send_lead_mail(lead_id):
             agence_row = cur.fetchone() or {}
 
             agence = _nom_affiche(agence_row.get('company_name') or agent['first_name'], "Votre agence")
+            lien_opposition = _lien_opposition(lead_id)
             pied = (f"Ce message vous est adressé par {agence} dans le cadre de votre recherche immobilière. "
-                    "Pour ne plus recevoir de propositions, répondez simplement « STOP » à ce message.")
+                    "Pour ne plus recevoir de propositions, "
+                    + (f"cliquez ici : {lien_opposition} (ou répondez « STOP » à ce message)." if lien_opposition
+                       else "répondez simplement « STOP » à ce message."))
             # Lien vers les annonces en ligne, propre à ce message : c'est son
             # ouverture que l'agent verra sur son tableau de bord. Le PDF reste
             # en pièce jointe, mais une pièce jointe ne dit pas si elle est lue.
@@ -5610,12 +5723,17 @@ def update_preferences():
     try:
         data = request.get_json(silent=True) or {}
         reponse = {}
-        if 'alerts_enabled' not in data and 'digest_enabled' not in data:
+        if 'alerts_enabled' not in data and 'digest_enabled' not in data and 'ia_enabled' not in data:
             return jsonify({"message": "Valeur « alerts_enabled » attendue (true ou false)"}), 400
-        for cle in ('alerts_enabled', 'digest_enabled'):
+        for cle in ('alerts_enabled', 'digest_enabled', 'ia_enabled'):
             if cle in data and not isinstance(data[cle], bool):
                 return jsonify({"message": f"Valeur « {cle} » attendue (true ou false)"}), 400
+        if 'ia_enabled' in data and request.role != 'admin':
+            return jsonify({"message": "Réservé à l'administrateur de l'agence"}), 403
         with _base() as (conn, cur):
+            if 'ia_enabled' in data:
+                cur.execute("UPDATE users SET ia_enabled = %s WHERE id = %s", (data['ia_enabled'], request.agency_id))
+                reponse['ia_enabled'] = data['ia_enabled']
             if 'alerts_enabled' in data:
                 cur.execute("UPDATE users SET alerts_enabled = %s WHERE id = %s", (data['alerts_enabled'], request.agency_id))
                 reponse['alerts_enabled'] = data['alerts_enabled']
@@ -6027,7 +6145,7 @@ def _envoyer_planning_auto(lead_id):
             return
         _assurer_schema()
         with _base() as (conn, cur):
-            cur.execute("""SELECT l.name, l.email, u.company_name FROM leads l JOIN users u ON u.id = l.user_id
+            cur.execute("""SELECT l.name, l.email, l.opposition_at, l.user_id AS agence_id, u.company_name FROM leads l JOIN users u ON u.id = l.user_id
                            WHERE l.id = %s""", (lead_id,))
             lead = cur.fetchone()
             cur.execute("""SELECT r.jeton, r.bien, r.agent_id, a.email AS agent_email, a.first_name AS agent_prenom
@@ -6036,6 +6154,9 @@ def _envoyer_planning_auto(lead_id):
             rdv = cur.fetchone()
         if not lead or not rdv or not _MAIL_RE.match((lead['email'] or '').strip()):
             return
+        with _base() as (conn, cur):
+            if _prospect_oppose(cur, lead['agence_id'], lead['email'], lead['opposition_at']):
+                return   # le prospect s'est opposé à recevoir des e-mails de l'agence
         _mail_planning(lead['email'].strip(), lead['name'], _nom_affiche(lead['company_name'], "Votre agence"),
                        rdv['bien'], _lien_rdv(rdv['jeton']), rdv['agent_email'],
                        _nom_affiche(rdv['agent_prenom'], ''))
@@ -6089,7 +6210,7 @@ def _prevenir_annulation_prospect(lead_id, ancien_libelle):
             return
         _assurer_schema()
         with _base() as (conn, cur):
-            cur.execute("""SELECT l.name, l.email, u.company_name FROM leads l JOIN users u ON u.id = l.user_id
+            cur.execute("""SELECT l.name, l.email, l.opposition_at, l.user_id AS agence_id, u.company_name FROM leads l JOIN users u ON u.id = l.user_id
                            WHERE l.id = %s""", (lead_id,))
             lead = cur.fetchone()
             cur.execute("""SELECT r.jeton, a.email AS agent_email, a.first_name AS agent_prenom
@@ -6098,6 +6219,9 @@ def _prevenir_annulation_prospect(lead_id, ancien_libelle):
             rdv = cur.fetchone()
         if not lead or not rdv or not _MAIL_RE.match((lead['email'] or '').strip()):
             return
+        with _base() as (conn, cur):
+            if _prospect_oppose(cur, lead['agence_id'], lead['email'], lead['opposition_at']):
+                return   # le prospect s'est opposé à recevoir des e-mails de l'agence
         agence = _nom_affiche(lead['company_name'], "Votre agence")
         prenom = _prenom_prospect(lead['name'])
         texte, html = _gabarit_email(
@@ -7725,6 +7849,14 @@ def _appeler_extraction_ia(consigne):
     return _valider(brut), None
 
 
+def _ia_activee(cur, agence_id):
+    """L'agence a-t-elle choisi d'envoyer le texte des messages à l'IA (Anthropic, sous-traitant ultérieur) ?
+    Activé par défaut ; l'agence, responsable de traitement, peut le couper (réglage « Mon compte »)."""
+    cur.execute("SELECT ia_enabled FROM users WHERE id = %s", (agence_id,))
+    ligne = cur.fetchone()
+    return bool(ligne and ligne['ia_enabled'])
+
+
 @app.route('/api/v1/extract', methods=['POST'])
 @limiter.limit("30 per hour;200 per day", key_func=_cle_utilisateur)
 @token_required
@@ -7735,6 +7867,14 @@ def extract_message():
     cle = (os.getenv('ANTHROPIC_API_KEY') or '').strip()
     if not cle:
         return jsonify({"message": "Extraction non configurée sur le serveur"}), 503
+    try:
+        with _base() as (conn, cur):
+            if not _ia_activee(cur, request.agency_id):
+                return jsonify({"message": "L'analyse par IA est désactivée pour votre agence. Vous pouvez la réactiver dans « Mon compte » : "
+                                           "le texte du message est alors transmis à notre sous-traitant Anthropic.",
+                                "code": "ia_disabled"}), 403
+    except Exception:
+        return erreur_interne()
 
     data = request.get_json(silent=True) or {}
     message = (data.get('message') or '').strip()
@@ -8223,7 +8363,8 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
 
         champs = None
         analyse = 'absente'
-        if corps and len(corps) >= 10 and (os.getenv('ANTHROPIC_API_KEY') or '').strip():
+        if (corps and len(corps) >= 10 and (os.getenv('ANTHROPIC_API_KEY') or '').strip()
+                and _ia_activee(cur, user_id)):
             reste_extr, _ = _reste(cur, user_id, 'extractions', verrouiller=False)
             if reste_extr == 0:
                 analyse = 'quota'
@@ -8350,6 +8491,94 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
     return lead_id
 
 
+# ----- Opposition du prospect (RGPD art. 21) : « ne plus recevoir d'e-mails de cette agence » -----
+# Chaque e-mail envoyé à un prospect contient un lien signé (sans stockage : la signature suffit) vers une
+# page de confirmation. Une fois confirmée, la fiche porte `opposition_at`, et Zelyro refuse d'envoyer
+# d'autres e-mails à ce prospect depuis cette agence (envoi manuel comme automatique).
+
+_CLE_OPPOSITION = hashlib.sha256(b'zelyro-opposition:' + SECRET_KEY.encode()).digest()
+
+
+def _jeton_opposition(lead_id):
+    import hmac
+    signature = hmac.new(_CLE_OPPOSITION, str(int(lead_id)).encode(), hashlib.sha256).hexdigest()[:32]
+    return f"{int(lead_id)}.{signature}"
+
+
+def _lien_opposition(lead_id):
+    api = _api_publique()
+    return f"{api}/public/opposition/{_jeton_opposition(lead_id)}" if api else None
+
+
+def _lead_depuis_jeton_opposition(token):
+    m = re.fullmatch(r'([0-9]{1,10})\.[0-9a-f]{32}', str(token or ''), re.ASCII)
+    if m and secrets.compare_digest(_jeton_opposition(int(m.group(1))), token):
+        return int(m.group(1))
+    return None
+
+
+def _page_opposition(contenu):
+    return Response(
+        '<!doctype html><html lang="fr"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">'
+        "<title>Ne plus recevoir d'e-mails</title></head>"
+        '<body style="font-family:sans-serif;max-width:480px;margin:40px auto;padding:0 16px">'
+        + contenu + '</body></html>', mimetype='text/html', headers={'Cache-Control': 'no-store'})
+
+
+def _empreinte_email(email):
+    return hashlib.sha256((email or '').strip().lower().encode('utf-8')).hexdigest()
+
+
+def _prospect_oppose(cur, agence_id, email, opposition_at=None):
+    """Le prospect (ou cette adresse e-mail) s'est-il opposé à recevoir des e-mails de l'agence ?"""
+    if opposition_at:
+        return True
+    if not (email or '').strip():
+        return False
+    cur.execute("SELECT 1 FROM contact_opposition WHERE user_id = %s AND email_hash = %s",
+                (agence_id, _empreinte_email(email)))
+    return cur.fetchone() is not None
+
+
+@app.route('/public/opposition/<token>', methods=['GET', 'POST'])
+@limiter.limit("120 per hour")   # large : des prospects partagent parfois une même adresse IP (entreprise, proxy de messagerie)
+def opposition_prospect(token):
+    """Page publique de désinscription. Le GET ne fait que demander confirmation (les logiciels de sécurité
+    des messageries ouvrent les liens : un GET qui agirait désinscrirait tout le monde)."""
+    try:
+        lead_id = _lead_depuis_jeton_opposition(token)
+        if lead_id is None:
+            return jsonify({"message": "Not found"}), 404
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("""SELECT l.user_id, l.opposition_at, l.email, u.company_name FROM leads l
+                           JOIN users u ON u.id = l.user_id WHERE l.id = %s""", (lead_id,))
+            ligne = cur.fetchone()
+            if not ligne:
+                # Fiche déjà effacée : plus aucune donnée, donc plus rien à faire.
+                return _page_opposition("<h1>C'est fait</h1><p>Vous ne recevrez plus d'e-mails.</p>")
+            agence = _html.escape(ligne['company_name'] or "cette agence")
+            if request.method == 'GET' and not ligne['opposition_at']:
+                return _page_opposition(
+                    f"<h1>Ne plus recevoir d'e-mails</h1><p>Confirmez que vous ne souhaitez plus recevoir d'e-mails de "
+                    f"{agence}.</p><form method='post'><button type='submit'>Confirmer</button></form>")
+            if request.method == 'POST' and not ligne['opposition_at']:
+                cur.execute("UPDATE leads SET opposition_at = %s WHERE id = %s", (_maintenant(), lead_id))
+                if (ligne['email'] or '').strip():
+                    cur.execute("""INSERT INTO contact_opposition (user_id, email_hash) VALUES (%s, %s)
+                                   ON CONFLICT DO NOTHING""", (ligne['user_id'], _empreinte_email(ligne['email'])))
+                cur.execute("""INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
+                               VALUES (%s, %s, 'note', %s, %s)""",
+                            (lead_id, ligne['user_id'],
+                             "Le prospect s'est opposé à recevoir des e-mails (lien de désinscription) : "
+                             "Zelyro n'enverra plus d'e-mails à cette adresse.", _maintenant()))
+                conn.commit()
+        return _page_opposition(f"<h1>C'est enregistré</h1><p>Vous ne recevrez plus d'e-mails de {agence}.</p>")
+    except Exception:
+        return erreur_interne()
+
+
 def _envoyer_email_completion(user_id, lead_id, nom, email_contact, portail):
     """E-mail automatique demandant au prospect de préciser sa recherche
     (budget, secteur, type de bien...), envoyé juste après la création
@@ -8366,8 +8595,10 @@ def _envoyer_email_completion(user_id, lead_id, nom, email_contact, portail):
             cur.execute("SELECT company_name FROM users WHERE id = %s", (user_id,))
             agent = cur.fetchone()
             agence = (agent or {}).get('company_name') or 'votre agence'
-            cur.execute("SELECT completion_token FROM leads WHERE id = %s", (lead_id,))
+            cur.execute("SELECT completion_token, opposition_at FROM leads WHERE id = %s", (lead_id,))
             ligne = cur.fetchone()
+            if _prospect_oppose(cur, user_id, email_contact, ligne['opposition_at'] if ligne else None):
+                return   # le prospect s'est opposé à recevoir des e-mails
             jeton = ligne['completion_token'] if ligne else None
             if not jeton:
                 jeton = secrets.token_urlsafe(24)
@@ -8386,7 +8617,9 @@ def _envoyer_email_completion(user_id, lead_id, nom, email_contact, portail):
              f"Vous avez contacté {agence} via {libelle_portail}. Pour vous proposer rapidement les "
              "biens qui correspondent vraiment à votre projet, merci de préciser en une minute votre "
              "budget, le secteur recherché et vos critères.",
-             "Ce lien est personnel, à usage unique pour votre demande :"],
+             "Ce lien est personnel : ne le transmettez pas.",
+             f"{agence} utilise vos coordonnées pour répondre à votre demande. Vous pouvez vous opposer à "
+             "tout moment à recevoir ses e-mails" + (f" : {_lien_opposition(lead_id)}" if _lien_opposition(lead_id) else ".")],
             bouton=("Préciser ma recherche", lien),
         )
         envoye = _envoyer_email(email_contact, f"Précisez votre recherche — {agence}", texte, html,
@@ -8559,7 +8792,9 @@ def _synchroniser_gmail(user_id):
             # ignore sans créer de prospect, mais on retient le message pour
             # ne pas le réexaminer à chaque cycle.
             with _base() as (conn, cur):
-                _noter_message(cur, message_id, user_id, 'gmail-ignore', sujet=sujet)
+                # Seul l'identifiant est retenu : l'objet d'un message sans rapport avec les portails
+                # (potentiellement personnel) n'a aucune raison d'être conservé.
+                _noter_message(cur, message_id, user_id, 'gmail-ignore')
                 conn.commit()
             continue
         if _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, message_id):
@@ -8727,14 +8962,27 @@ def gmail_disconnect():
     with _base() as (conn, cur):
         cur.execute("SELECT refresh_token_enc FROM gmail_connections WHERE user_id = %s", (request.agency_id,))
         ligne = cur.fetchone()
-        cur.execute("DELETE FROM gmail_connections WHERE user_id = %s", (request.agency_id,))
-        conn.commit()
+    revoque = True
     if ligne:
+        # Révocation chez Google AVANT d'oublier le jeton ; si elle échoue on le dit (sans jamais écrire le jeton).
         try:
             jeton = _dechiffrer_jeton(ligne['refresh_token_enc'])
-            requests.post(GOOGLE_REVOKE_URL, data={'token': jeton}, timeout=10)
+            r = requests.post(GOOGLE_REVOKE_URL, data={'token': jeton}, timeout=10)
+            # 400 = jeton déjà invalide ou déjà révoqué : l'accès n'existe plus, c'est le but.
+            revoque = r.status_code == 200 or r.status_code == 400
+            if not revoque:
+                app.logger.warning("Gmail : révocation refusée par Google (code %s) pour l'agence %s",
+                                   r.status_code, request.agency_id)
         except Exception:
-            pass
+            revoque = False
+            app.logger.warning("Gmail : révocation impossible pour l'agence %s", request.agency_id)
+    with _base() as (conn, cur):
+        cur.execute("DELETE FROM gmail_connections WHERE user_id = %s", (request.agency_id,))
+        conn.commit()
+    if not revoque:
+        return jsonify({"message": "Boîte Gmail déconnectée de Zelyro. L'accès n'a pas pu être retiré chez Google : "
+                                   "retirez Zelyro dans les autorisations de votre compte Google "
+                                   "(myaccount.google.com/permissions)."}), 200
     return jsonify({"message": "Boîte Gmail déconnectée."}), 200
 
 
@@ -10529,8 +10777,10 @@ def _sync_abonnement(cur, sub, supprime=False):
                            is_active = CASE WHEN %s THEN FALSE ELSE is_active END,
                            billing_suspended = billing_suspended OR %s,
                            token_version = token_version + CASE WHEN %s THEN 1 ELSE 0 END,
+                           billing_ended_at = CASE WHEN %s AND (billing_ended_at IS NULL OR is_active) THEN %s
+                                                  ELSE billing_ended_at END,
                            extra_seats = 0
-                       WHERE id = %s""", (statut, fin, coupe, coupe, coupe, uid))
+                       WHERE id = %s""", (statut, fin, coupe, coupe, coupe, coupe, _maintenant(), uid))
         _journal_stripe(cur, 'abonnement terminé', u['email'], f"{statut}" + (" · accès suspendu" if coupe else ""))
         if u['stripe_seats_subscription_id'] and _stripe_pret():
             try:
@@ -10545,7 +10795,7 @@ def _sync_abonnement(cur, sub, supprime=False):
                        billing_cancel_at_period_end = %s, stripe_subscription_id = %s,
                        stripe_customer_id = COALESCE(stripe_customer_id, %s),
                        is_active = CASE WHEN billing_suspended THEN TRUE ELSE is_active END,
-                       billing_suspended = FALSE
+                       billing_suspended = FALSE, billing_ended_at = NULL
                    WHERE id = %s""",
                 (nouveau_plan, statut, formule if formule in FORMULES else None, fin, engage_jusque,
                  bool(sub.get('cancel_at_period_end')), sub.get('id'), client, uid))
@@ -10598,7 +10848,8 @@ def _signaler_remboursement_litige(cur, type_, objet):
         detail = (f"{(objet.get('amount') or 0) / 100:.2f} {devise} · motif {objet.get('reason') or 'inconnu'} · "
                   f"statut {objet.get('status') or 'inconnu'} (litige {objet.get('id')})")
     _journal_stripe(cur, action, cible, detail)
-    app.logger.warning("Stripe : %s pour %s : %s", action, cible, detail)
+    # Pas d'adresse e-mail dans les journaux du serveur : l'identifiant Stripe suffit pour retrouver le compte.
+    app.logger.warning("Stripe : %s (client %s) : %s", action, client or 'inconnu', detail)
     _lancer_en_arriere_plan(_alerter_equipe_facturation, f"Zelyro : {action}",
                             [f"Compte : {cible}", detail,
                              "Aucune action automatique n'a été prise : à vérifier dans le tableau de bord Stripe."])
@@ -10675,6 +10926,231 @@ def stripe_webhook():
     except Exception:
         app.logger.exception("Stripe : échec de traitement de l'événement %s", evenement.get('type'))
         return jsonify({"message": "Erreur de traitement"}), 500
+
+
+# ===== PROTECTION DES DONNÉES : PURGE DE FIN DE CONTRAT, EXPORT, DROITS =====
+#
+# Zelyro est sous-traitant : les prospects appartiennent aux agences. À la fin du contrat (abonnement
+# résilié ou impayé), l'agence dispose de DELAI_PURGE_JOURS jours pour récupérer ses données
+# (/api/v1/export/complet, accessible même compte suspendu), puis tout est effacé par /internal/purge,
+# à appeler chaque jour par la même tâche planifiée que /internal/gmail/sync-all (en-tête X-Cron-Key).
+
+DELAI_PURGE_JOURS = int(os.getenv("DELAI_PURGE_JOURS", "30"))
+RETENTION_JOURNAL_RECEPTION_JOURS = 90
+RETENTION_TECHNIQUE_JOURS = 90
+EXPORT_PHOTOS_MAX_OCTETS = 150 * 1024 * 1024
+
+
+def _revoquer_jeton_gmail(chiffre, agence):
+    """Retire l'accès Gmail chez Google. True si l'accès n'existe plus (révoqué ou déjà invalide)."""
+    try:
+        r = requests.post(GOOGLE_REVOKE_URL, data={'token': _dechiffrer_jeton(chiffre)}, timeout=10)
+        if r.status_code in (200, 400):
+            return True
+        app.logger.warning("Gmail : révocation refusée par Google (code %s) pour l'agence %s", r.status_code, agence)
+    except Exception:
+        app.logger.warning("Gmail : révocation impossible pour l'agence %s", agence)
+    return False
+
+
+def _purger_agence(uid):
+    """Efface toutes les données d'une agence : prospects et tout ce qui s'y rattache, biens et photos,
+    boîte Gmail (jeton révoqué chez Google), clés d'API, appareils, collaborateurs, journaux nominatifs.
+    Le compte lui-même est supprimé ; si une contrainte de la base l'en empêche, il est anonymisé.
+    Tout se fait dans une seule transaction : en cas d'erreur, rien n'est effacé et la purge sera retentée.
+    Seuls restent les enregistrements de facturation chez Stripe (conservation comptable légale)."""
+    with _base() as (conn, cur):
+        cur.execute("""SELECT email, is_active, billing_suspended, billing_ended_at FROM users
+                       WHERE id = %s AND purged_at IS NULL FOR UPDATE""", (uid,))
+        compte = cur.fetchone()
+        if not compte:
+            return False
+        # Revérification sous verrou : entre la liste des candidats et ce point, un paiement a pu rétablir
+        # l'agence (webhook Stripe) ou l'équipe la réactiver. L'effacement est irréversible : on ne purge
+        # que si, À CET INSTANT, le compte est toujours coupé pour abonnement terminé depuis assez longtemps.
+        if (compte['is_active'] or not compte['billing_suspended'] or not compte['billing_ended_at']
+                or compte['billing_ended_at'] >= _maintenant() - timedelta(days=DELAI_PURGE_JOURS)):
+            app.logger.info("Purge : compte %s ignoré (état changé depuis la sélection)", uid)
+            return False
+        cur.execute("SELECT refresh_token_enc FROM gmail_connections WHERE user_id = %s", (uid,))
+        gmail = cur.fetchone()
+        if gmail:
+            _revoquer_jeton_gmail(gmail['refresh_token_enc'], uid)
+        cur.execute("SELECT id, email FROM users WHERE agency_owner_id = %s", (uid,))
+        employes = cur.fetchall()
+        ids = [uid] + [e['id'] for e in employes]
+        adresses = [str(a).lower() for a in [compte['email']] + [e['email'] for e in employes] if a]
+
+        cur.execute("DELETE FROM leads WHERE user_id = %s", (uid,))
+        fiches = cur.rowcount
+        cur.execute("DELETE FROM properties WHERE user_id = %s", (uid,))
+        biens = cur.rowcount
+        cur.execute("DELETE FROM inbound_emails WHERE user_id = ANY(%s)", (ids,))
+        cur.execute("DELETE FROM gmail_connections WHERE user_id = %s", (uid,))
+        cur.execute("DELETE FROM api_keys WHERE user_id = %s", (uid,))
+        cur.execute("DELETE FROM contact_opposition WHERE user_id = %s", (uid,))
+        cur.execute("DELETE FROM push_subscriptions WHERE user_id = ANY(%s)", (ids,))
+        cur.execute("DELETE FROM team_invitations WHERE agency_owner_id = %s", (uid,))
+        cur.execute("DELETE FROM password_resets WHERE user_id = ANY(%s)", (ids,))
+        cur.execute("""UPDATE admin_log SET target = 'compte purgé' WHERE lower(target) = ANY(%s)""", (adresses,))
+        cur.execute("""UPDATE invitations SET email = NULL, used_email = NULL
+                       WHERE lower(email) = ANY(%s) OR lower(used_email) = ANY(%s)""", (adresses, adresses))
+        if employes:
+            cur.execute("DELETE FROM users WHERE agency_owner_id = %s", (uid,))
+
+        cur.execute("SAVEPOINT suppression_compte")
+        try:
+            cur.execute("DELETE FROM users WHERE id = %s", (uid,))
+            mode = "compte supprimé"
+        except psycopg2.Error:
+            cur.execute("ROLLBACK TO SAVEPOINT suppression_compte")
+            app.logger.warning("Purge : compte %s non supprimable (contrainte), anonymisé à la place", uid)
+            cur.execute("""UPDATE users SET email = %s, first_name = '', company_name = '', password_hash = '!',
+                               capture_token = NULL, mail_capture_token = NULL, is_active = FALSE,
+                               token_version = token_version + 1, purged_at = %s WHERE id = %s""",
+                        (f"purge-{uid}@purge.invalid", _maintenant(), uid))
+            mode = "compte anonymisé"
+        cur.execute("""INSERT INTO admin_log (admin_email, action, target, detail, created_at)
+                       VALUES ('système', 'agence purgée', %s, %s, %s)""",
+                    (f"compte {uid}", f"{fiches} fiches, {biens} biens, {len(employes)} collaborateurs : {mode}", _maintenant()))
+        conn.commit()
+    return True
+
+
+def _purger_agences_resiliees():
+    """Purge les agences dont l'accès est coupé (abonnement terminé ou impayé) depuis plus de DELAI_PURGE_JOURS."""
+    limite = _maintenant() - timedelta(days=DELAI_PURGE_JOURS)
+    with _base() as (conn, cur):
+        cur.execute("""SELECT id, email FROM users
+                       WHERE is_active = FALSE AND billing_suspended = TRUE AND purged_at IS NULL
+                         AND agency_owner_id IS NULL AND COALESCE(role, 'admin') = 'admin'
+                         AND billing_ended_at IS NOT NULL AND billing_ended_at < %s""", (limite,))
+        candidats = cur.fetchall()
+    purgees = 0
+    for c in candidats:
+        if _est_admin(c['email']):
+            continue
+        try:
+            if _purger_agence(c['id']):
+                purgees += 1
+        except Exception:
+            app.logger.exception("Purge : échec pour le compte %s (retenté au prochain passage)", c['id'])
+    return purgees
+
+
+def _purger_journaux():
+    """Durées de conservation des données techniques (annoncées dans la politique de confidentialité)."""
+    maintenant = _maintenant()
+    with _base() as (conn, cur):
+        cur.execute("DELETE FROM password_resets WHERE expires_at < %s", (maintenant - timedelta(hours=24),))
+        cur.execute("DELETE FROM inbound_emails WHERE received_at < %s",
+                    (maintenant - timedelta(days=RETENTION_JOURNAL_RECEPTION_JOURS),))
+        cur.execute("DELETE FROM stripe_events WHERE received_at < %s",
+                    (maintenant - timedelta(days=RETENTION_TECHNIQUE_JOURS),))
+        cur.execute("DELETE FROM invitations WHERE expires_at < %s",
+                    (maintenant - timedelta(days=RETENTION_TECHNIQUE_JOURS),))
+        cur.execute("DELETE FROM team_invitations WHERE expires_at < %s",
+                    (maintenant - timedelta(days=RETENTION_TECHNIQUE_JOURS),))
+        conn.commit()
+
+
+@app.route('/internal/purge', methods=['POST'])
+@limiter.exempt
+def purge_interne():
+    """À appeler chaque jour par la tâche planifiée (en-tête X-Cron-Key = CRON_SECRET)."""
+    cle = (os.getenv("CRON_SECRET") or "").strip()
+    if not cle or not secrets.compare_digest(request.headers.get('X-Cron-Key', '').encode('utf-8'), cle.encode('utf-8')):
+        return jsonify({"message": "Not found"}), 404
+    try:
+        _assurer_schema()
+        agences = _purger_agences_resiliees()
+        _purger_journaux()
+        return jsonify({"agences_purgees": agences}), 200
+    except Exception:
+        return erreur_interne()
+
+
+_COLONNES_JETON = ('completion_token', 'suivi_token', 'jeton')
+
+
+def _lignes_export(cur, requete, params):
+    cur.execute(requete, params)
+    lignes = []
+    for ligne in cur.fetchall():
+        d = dict(ligne)
+        for cle in _COLONNES_JETON:
+            d.pop(cle, None)
+        lignes.append(d)
+    return lignes
+
+
+@app.route('/api/v1/export/complet', methods=['GET'])
+@limiter.limit("5 per hour", key_func=_cle_utilisateur)
+@token_required
+@agency_admin_required
+def export_complet():
+    """Toutes les données de l'agence dans une archive ZIP : donnees.json (prospects, notes, relances,
+    e-mails envoyés, activité, rendez-vous, biens, collaborateurs) et les photos des biens.
+    Accessible aussi à une agence dont l'abonnement est terminé, pendant le délai de grâce
+    (jeton d'export fourni à la connexion) : restitution des données à la fin du contrat."""
+    import zipfile
+    try:
+        a = request.agency_id
+        with _base() as (conn, cur):
+            lead_ids = "(SELECT id FROM leads WHERE user_id = %s)"
+            donnees = {
+                "exporte_le": _maintenant().isoformat(),
+                "agence": _lignes_export(cur, "SELECT email, first_name, company_name, plan, created_at FROM users WHERE id = %s", (a,)),
+                "collaborateurs": _lignes_export(cur, """SELECT id, email, first_name, role, is_active, created_at
+                                                          FROM users WHERE agency_owner_id = %s""", (a,)),
+                "prospects": _lignes_export(cur, "SELECT * FROM leads WHERE user_id = %s ORDER BY id", (a,)),
+                "notes": _lignes_export(cur, f"SELECT * FROM lead_notes WHERE lead_id IN {lead_ids} ORDER BY id", (a,)),
+                "relances": _lignes_export(cur, f"SELECT * FROM lead_reminders WHERE lead_id IN {lead_ids} ORDER BY id", (a,)),
+                "emails_envoyes": _lignes_export(cur, f"SELECT * FROM lead_mails WHERE lead_id IN {lead_ids} ORDER BY id", (a,)),
+                "activite": _lignes_export(cur, f"SELECT * FROM lead_events WHERE lead_id IN {lead_ids} ORDER BY id", (a,)),
+                "rendez_vous": _lignes_export(cur, f"SELECT * FROM lead_rdv WHERE lead_id IN {lead_ids} ORDER BY id", (a,)),
+                "biens": _lignes_export(cur, "SELECT * FROM properties WHERE user_id = %s ORDER BY id", (a,)),
+                "photos": _lignes_export(cur, """SELECT id, property_id, position, mime, octet_length(data) AS octets
+                                                 FROM property_photos WHERE user_id = %s ORDER BY property_id, position""", (a,)),
+            }
+            total_photos = sum(p['octets'] for p in donnees["photos"])
+            avec_photos = total_photos <= EXPORT_PHOTOS_MAX_OCTETS
+            # Fichier temporaire (en mémoire jusqu'à 16 Mo, sur disque au-delà) : une archive de photos
+            # volumineuse ne doit pas occuper la mémoire du serveur, partagée par tous les clients.
+            tampon = _tempfile.SpooledTemporaryFile(max_size=16 * 1024 * 1024)
+            with zipfile.ZipFile(tampon, 'w', zipfile.ZIP_DEFLATED) as z:
+                if avec_photos:
+                    for p in donnees["photos"]:
+                        cur.execute("SELECT data FROM property_photos WHERE id = %s AND user_id = %s", (p['id'], a))
+                        brut = cur.fetchone()
+                        if brut:
+                            extension = (p['mime'] or 'image/jpeg').split('/')[-1]
+                            z.writestr(f"photos/bien-{p['property_id']}-photo-{p['id']}.{extension}", bytes(brut['data']))
+                donnees["photos_incluses"] = avec_photos
+                z.writestr('donnees.json', _json.dumps(donnees, ensure_ascii=False, indent=1, default=str))
+                z.writestr('LISEZ-MOI.txt', (
+                    "Export Zelyro de toutes les données de votre agence.\n"
+                    "donnees.json : prospects, notes, relances, e-mails envoyés, activité, rendez-vous, biens, collaborateurs.\n"
+                    + ("photos/ : les photos des biens (fichiers d'origine).\n" if avec_photos else
+                       "Les photos des biens sont trop volumineuses pour cette archive : demandez-les à contact@zelyro.fr.\n")
+                    + "Les liens personnels (jetons) ne sont pas exportés.\n"))
+        taille = tampon.tell()
+        tampon.seek(0)
+
+        def flux():
+            try:
+                while True:
+                    bloc = tampon.read(64 * 1024)
+                    if not bloc:
+                        break
+                    yield bloc
+            finally:
+                tampon.close()
+        return Response(flux(), mimetype='application/zip', headers={
+            'Content-Disposition': 'attachment; filename="zelyro-export.zip"', 'Cache-Control': 'no-store',
+            'Content-Length': str(taille)})
+    except Exception:
+        return erreur_interne()
 
 
 if __name__ == '__main__':
