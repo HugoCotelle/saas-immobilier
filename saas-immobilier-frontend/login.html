@@ -42,9 +42,6 @@
                 if (token && !cleDuLien) window.location.replace('/prospects.html');
             }, []);
 
-            // Un message (erreur ou succès) s'affiche en haut de la carte : on y ramène la vue, surtout sur téléphone.
-            useEffect(() => { if (message) window.scrollTo({ top: 0, behavior: 'smooth' }); }, [message]);
-
             const handleLogin = async (e) => {
                 e.preventDefault();
                 setMessage(null);
@@ -70,7 +67,7 @@
                         setMessage({ type: 'error', text: data.message || 'Identifiants incorrects', lien, exportToken, purge });
                     }
                 } catch (error) {
-                    setMessage({ type: 'error', text: 'Impossible de joindre Zelyro. Vérifiez votre connexion, puis réessayez dans une minute (le serveur peut mettre un instant à se réveiller).' });
+                    setMessage({ type: 'error', text: 'Serveur injoignable : ' + error.message });
                 } finally {
                     setLoading(false);
                 }
@@ -123,7 +120,7 @@
                         setMessage({ type: 'error', text: data.message || 'Inscription impossible' });
                     }
                 } catch (error) {
-                    setMessage({ type: 'error', text: 'Impossible de joindre Zelyro. Vérifiez votre connexion, puis réessayez dans une minute (le serveur peut mettre un instant à se réveiller).' });
+                    setMessage({ type: 'error', text: 'Serveur injoignable : ' + error.message });
                 } finally {
                     setLoading(false);
                 }
@@ -186,18 +183,6 @@
                     {activeTab === 'signup' && (
                         <form onSubmit={handleSignup}>
                             <div className="form-group">
-                                <label>Clé d'activation</label>
-                                <input type="text" className="champ-cle" value={signupData.cle}
-                                    onChange={(e) => setSignupData({ ...signupData, cle: e.target.value })}
-                                    placeholder="ZLY-XXXX-XXXX-XXXX" autoComplete="off" autoCapitalize="characters"
-                                    spellCheck={false} maxLength={64} required disabled={loading} />
-                                <p className="field-hint">
-                                    Zelyro est accessible sur invitation. Votre clé d'activation (elle commence par ZLY-) vous a été
-                                    envoyée par e-mail par l'équipe Zelyro. Pas encore de clé ? Écrivez-nous à{' '}
-                                    <a href="mailto:contact@zelyro.fr?subject=Demande%20de%20cl%C3%A9%20Zelyro" style={{ color: 'inherit' }}>contact@zelyro.fr</a>.
-                                </p>
-                            </div>
-                            <div className="form-group">
                                 <label>Email</label>
                                 <input type="email" value={signupData.email}
                                     onChange={(e) => setSignupData({ ...signupData, email: e.target.value })}
@@ -227,6 +212,18 @@
                                 <input type="password" value={signupData.confirmPassword}
                                     onChange={(e) => setSignupData({ ...signupData, confirmPassword: e.target.value })}
                                     placeholder="••••••••" autoComplete="new-password" required disabled={loading} />
+                            </div>
+                            <div className="form-group">
+                                <label>Clé d'activation</label>
+                                <input type="text" className="champ-cle" value={signupData.cle}
+                                    onChange={(e) => setSignupData({ ...signupData, cle: e.target.value })}
+                                    placeholder="ZLY-XXXX-XXXX-XXXX" autoComplete="off" autoCapitalize="characters"
+                                    spellCheck={false} maxLength={64} required disabled={loading} />
+                                <p className="field-hint">
+                                    Zelyro est accessible sur invitation : la clé d'activation vous est remise par l'équipe Zelyro.
+                                    Pas encore de clé ? Écrivez-nous à{' '}
+                                    <a href="mailto:contact@zelyro.fr?subject=Demande%20de%20cl%C3%A9%20Zelyro" style={{ color: 'inherit' }}>contact@zelyro.fr</a>.
+                                </p>
                             </div>
                             <button type="submit" disabled={loading}>
                                 {loading ? 'Création…' : "S'inscrire"}

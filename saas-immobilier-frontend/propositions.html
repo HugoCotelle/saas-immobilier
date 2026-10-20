@@ -328,10 +328,10 @@
                             <div className="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style={{ color: 'inherit', textDecoration: 'none' }}>ZELYRO</a></div>
                             <nav>
                                 <a href="/taches.html">À faire</a>
-                                <a href="/prospects.html">Prospects</a>
+                                <a href="/prospects.html">Leads</a>
                                 <a href="/biens.html">Biens</a>
-                                <a href="/matching.html">Biens pour mes prospects</a>
-                                <a href="/propositions.html" className="active">E-mails à envoyer</a>
+                                <a href="/matching.html">Matching</a>
+                                <a href="/propositions.html" className="active">Propositions</a>
                                 <a href="/dashboard.html">Dashboard</a>
                                 <a href="/compte.html">Compte</a>
                                 {user && user.is_admin && <a href="/admin.html">Admin</a>}
@@ -344,7 +344,7 @@
                     </header>
 
                     <div className="container">
-                        <h1 className="page-title">E-mails à envoyer</h1>
+                        <h1 className="page-title">Propositions</h1>
                         <p className="page-subtitle">
                             Chaque prospect dont le dossier est complet reçoit ici un message déjà rédigé, avec les biens qui lui
                             conviennent le mieux. Relisez-le, corrigez-le si besoin, puis envoyez-le.
@@ -388,10 +388,6 @@
                                             Un prospect apparaît ici quand son e-mail, son budget et son secteur (ou son type de bien)
                                             sont renseignés, qu'un bien de votre portefeuille lui correspond, et que vous ne lui avez
                                             pas déjà écrit ces dernières 24 heures.
-                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', marginTop: '14px' }}>
-                                                <a className="btn" href="/prospects.html">Voir mes prospects</a>
-                                                <a className="btn secondary" href="/biens.html">Ajouter un bien</a>
-                                            </div>
                                         </div>
                                     </div>
                                 ) : (

@@ -40,7 +40,6 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
     <script src="/pwa.js" defer></script>
-    <script src="/accueil.js" defer></script>
 </head>
 <body>
     <div id="root"></div>
@@ -381,7 +380,7 @@
                             window.location.replace('/login.html');
                             return;
                         }
-                        throw new Error('Impossible de charger vos biens pour le moment. Réessayez dans un instant.');
+                        throw new Error(`Erreur API: ${response.status}`);
                     }
                     const data = await response.json();
                     setBiens(data);
@@ -611,8 +610,6 @@
                 window.location.replace('/login.html');
             };
 
-            // Une erreur s'affiche en haut de la page : on y ramène la vue (le bouton est parfois plusieurs écrans plus bas).
-            useEffect(() => { if (error) window.scrollTo({ top: 0, behavior: 'smooth' }); }, [error]);
             const set = (k, v) => { setForm({ ...form, [k]: v }); setError(null); };
 
             const ouvrirNouveau = () => {
@@ -663,10 +660,10 @@
                             <div className="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style={{ color: 'inherit', textDecoration: 'none' }}>ZELYRO</a></div>
                             <nav>
                                 <a href="/taches.html">À faire</a>
-                                <a href="/prospects.html">Prospects</a>
+                                <a href="/prospects.html">Leads</a>
                                 <a href="/biens.html" className="active">Biens</a>
-                                <a href="/matching.html">Biens pour mes prospects</a>
-                                <a href="/propositions.html">E-mails à envoyer</a>
+                                <a href="/matching.html">Matching</a>
+                                <a href="/propositions.html">Propositions</a>
                                 <a href="/dashboard.html">Dashboard</a>
                                 <a href="/compte.html">Compte</a>
                                 {user && user.is_admin && <a href="/admin.html">Admin</a>}
@@ -725,12 +722,11 @@
                                             </button>
                                         </div>
                                     )}
-                                    <details className="petit-texte" style={{ marginTop: '8px' }}>
-                                        <summary>Pour votre éditeur de logiciel ou votre informaticien</summary>
+                                    <div className="petit-texte" style={{ marginTop: '8px' }}>
                                         Votre éditeur de logiciel ou votre passerelle de diffusion peut aussi envoyer vos biens
-                                        directement à Zelyro (adresse technique /api/v1/inbound/properties) avec une clé créée
+                                        directement à l'API de Zelyro (adresse /api/v1/inbound/properties) avec une clé créée
                                         sur la page Compte.
-                                    </details>
+                                    </div>
                                 </div>
 
                                 <div className="import-etapes">
@@ -1133,8 +1129,7 @@
                             <div className="panel">
                                 <div className="empty-state">
                                     Aucun bien au portefeuille.<br />
-                                    Ajoutez un bien (avec son code postal et sa ville) ou importez votre fichier : Zelyro vous dira
-                                    alors à quels prospects le proposer. Un bien sans adresse ne peut pas être rapproché.
+                                    Utilisez le bouton « Ajouter un bien » pour commencer.
                                 </div>
                             </div>
                         ) : biensFiltres.length === 0 ? (
