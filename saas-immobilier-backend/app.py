@@ -1203,7 +1203,7 @@ def register():
 
     email = str(data.get('email') or '').strip().lower()
     if not email or not password:
-        return jsonify({"message": "Email and password required"}), 400
+        return jsonify({"message": "Indiquez votre adresse e-mail et votre mot de passe."}), 400
     if len(email) > 255 or not EMAIL_RE.match(email):
         return jsonify({"message": "Adresse email invalide"}), 400
     if not isinstance(password, str) or len(password) < 10:
@@ -1287,7 +1287,7 @@ def login():
     email = str(data.get('email') or '').strip().lower()
     password = data.get('password')
     if not email or not password or not isinstance(password, str):
-        return jsonify({"message": "Email and password required"}), 400
+        return jsonify({"message": "Indiquez votre adresse e-mail et votre mot de passe."}), 400
     if len(password) > 128:
         return jsonify({"message": "Invalid credentials"}), 401
 
