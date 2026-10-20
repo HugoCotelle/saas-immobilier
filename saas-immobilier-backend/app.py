@@ -66,6 +66,9 @@ def _charger_secret():
 
 
 SECRET_KEY = _charger_secret()
+# Clé propre à la liaison Gmail (state OAuth et jeton en attente), dérivée de SECRET_KEY : un jeton
+# de session ne peut pas être rejoué ici, ni l'inverse.
+_CLE_OAUTH_GMAIL = hashlib.sha256(b'zelyro-gmail-oauth:' + SECRET_KEY.encode()).hexdigest()
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://hugocotelle@localhost:5432/saas_immobilier")
 PORT = int(os.getenv("PORT", 8888))
 
@@ -99,9 +102,9 @@ TOKEN_LIFETIME_HOURS = int(os.getenv("TOKEN_LIFETIME_HOURS", "24"))
 _ORIGINES_AUTORISEES = [
     r"^https://saas-immobilier(-[a-z0-9]+)*-(immo-flow|zelyro)\.vercel\.app$",
     r"^https://saas-immobilier\.vercel\.app$",
-    r"^http://localhost(:\d+)?$",
-    r"^http://127\.0\.0\.1(:\d+)?$",
 ]
+if not os.getenv("RENDER"):   # développement local seulement, jamais sur l'hébergeur
+    _ORIGINES_AUTORISEES += [r"^http://localhost(:\d+)?$", r"^http://127\.0\.0\.1(:\d+)?$"]
 _ORIGINES_AUTORISEES += [
     o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
@@ -1148,7 +1151,10 @@ def register():
     """
     data = request.get_json(silent=True) or {}
     cle = str(data.get('invitation') or '').strip()
-    if not cle and os.getenv("OPEN_REGISTRATION") != "1":
+    # L'inscription libre n'est jamais ouverte sur l'hébergeur (Render définit RENDER), même si
+    # la variable y est restée : elle ne sert qu'aux tests en local.
+    inscription_libre = os.getenv("OPEN_REGISTRATION") == "1" and not os.getenv("RENDER")
+    if not cle and not inscription_libre:
         return jsonify({"message": MESSAGE_INVITATION, "code": "invitation_required"}), 403
     password = data.get('password')
     first_name = str(data.get('first_name') or '').strip()[:100]
@@ -1164,6 +1170,7 @@ def register():
     if len(password) > 128:
         return jsonify({"message": "Mot de passe trop long (128 caractères maximum)"}), 400
     empreinte = None
+    adresse_verrouillee = False   # la clé a été créée pour cette adresse précise
     if cle:
         empreinte = _empreinte_cle(cle)
         if not empreinte:
@@ -1184,7 +1191,13 @@ def register():
                     return jsonify({"message": LIEN_INVITATION_INVALIDE}), 400
                 if inv['email'] and inv['email'].strip().lower() != email:
                     return jsonify({"message": MESSAGE_CLE_AUTRE_ADRESSE}), 400
+                adresse_verrouillee = bool(inv['email'])
                 plan, inv_id = inv['plan'], inv['id']
+
+            # Les adresses des administrateurs Zelyro ne s'ouvrent qu'avec une clé créée pour elles :
+            # une clé sans adresse, ou l'inscription libre, ne doit jamais donner les droits d'admin.
+            if _est_admin(email) and not adresse_verrouillee:
+                return jsonify({"message": MESSAGE_CLE_AUTRE_ADRESSE}), 400
 
             cur.execute("SELECT id FROM users WHERE lower(email) = %s", (email,))
             if cur.fetchone():
@@ -2439,6 +2452,7 @@ def _cellule_csv(valeur):
 @app.route('/api/v1/leads/export', methods=['GET'])
 @limiter.limit("20 per hour", key_func=_cle_utilisateur)
 @token_required
+@agency_admin_required
 def export_leads():
     """Tous les prospects de l'agence au format CSV (séparateur point-virgule,
     UTF-8 avec marque d'ordre : s'ouvre correctement dans Excel en français).
@@ -4142,6 +4156,7 @@ def get_capture_link():
 @app.route('/api/v1/capture-link/regenerate', methods=['POST'])
 @limiter.limit("10 per hour", key_func=_cle_utilisateur)
 @token_required
+@agency_admin_required
 def regenerate_capture_link():
     """Nouvelle adresse : l'ancienne cesse de fonctionner (en cas de spam ou de fuite)."""
     try:
@@ -4202,6 +4217,7 @@ def get_mail_capture():
 @app.route('/api/v1/mail-capture/regenerate', methods=['POST'])
 @limiter.limit("10 per hour", key_func=_cle_utilisateur)
 @token_required
+@agency_admin_required
 def regenerate_mail_capture():
     """Nouvelle adresse : l'ancienne cesse de fonctionner (en cas de messages indésirables)."""
     try:
@@ -7683,7 +7699,8 @@ def _appeler_extraction_ia(consigne):
         brut = _json.loads(texte)
 
     except _json.JSONDecodeError:
-        print(f"Réponse non JSON : {texte[:200]}")
+        # Le contenu n'est pas journalisé : il peut contenir des données de prospects.
+        app.logger.warning("Réponse du modèle non JSON (%d caractères)", len(texte))
         return None, ("Réponse du modèle illisible", 502)
     except requests.Timeout:
         return None, ("Délai dépassé, réessayez", 504)
@@ -7813,9 +7830,10 @@ _PORTAIL_NOM_DEFAUT = {'leboncoin': 'Contact LeBonCoin', 'seloger': 'Contact SeL
 
 def _source_portail(adresse_expediteur):
     domaine = (adresse_expediteur or '').rsplit('@', 1)[-1].lower()
-    if 'leboncoin' in domaine:
+    # Domaine exact (ou sous-domaine) : « leboncoin-promo.com » ne doit pas passer pour LeBonCoin.
+    if re.search(r'(^|\.)leboncoin\.(fr|com)$', domaine):
         return 'leboncoin'
-    if 'seloger' in domaine:
+    if re.search(r'(^|\.)seloger\.(fr|com)$', domaine):
         return 'seloger'
     return 'portail'
 
@@ -8548,8 +8566,9 @@ def gmail_connect():
     Zelyro à lire sa boîte Gmail (lecture seule)."""
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
         return jsonify({"message": "La connexion Gmail n'est pas encore configurée."}), 503
-    etat = jwt.encode({'uid': request.agency_id, 'exp': datetime.utcnow() + timedelta(minutes=10)},
-                       SECRET_KEY, algorithm='HS256')
+    etat = jwt.encode({'uid': request.agency_id, 'aud': 'gmail-oauth', 'jti': secrets.token_urlsafe(16),
+                        'exp': datetime.utcnow() + timedelta(minutes=10)},
+                       _CLE_OAUTH_GMAIL, algorithm='HS256')
     parametres = {
         'client_id': GOOGLE_CLIENT_ID,
         'redirect_uri': GOOGLE_OAUTH_REDIRECT_URI,
@@ -8577,7 +8596,8 @@ def gmail_callback():
     if not code or not etat:
         return redirect(f"{site}/compte.html?gmail=erreur")
     try:
-        data = jwt.decode(etat, SECRET_KEY, algorithms=["HS256"], options={"require": ["exp", "uid"]})
+        data = jwt.decode(etat, _CLE_OAUTH_GMAIL, algorithms=["HS256"], audience='gmail-oauth',
+                          options={"require": ["exp", "uid", "aud", "jti"]})
         user_id = data['uid']
     except jwt.PyJWTError:
         return redirect(f"{site}/compte.html?gmail=erreur")
@@ -8623,6 +8643,34 @@ def gmail_callback():
         app.logger.error("Callback Gmail : TOKEN_ENCRYPTION_KEY absente, connexion non enregistrée")
         return redirect(f"{site}/compte.html?gmail=erreur")
 
+    # On n'enregistre rien ici : ce retour de Google arrive sans session, donc rien ne prouve
+    # que la personne qui vient de consentir est bien celle de l'agence qui a généré le lien
+    # (un lien /connect peut être transmis à un tiers). Le jeton est mis en attente, chiffré
+    # et signé, et c'est /api/v1/gmail/finish qui le rattache, une fois que le navigateur
+    # prouve (jeton de session) qu'il appartient à la même agence. Le jeton est placé après
+    # le # : il n'est ni envoyé à un serveur ni journalisé.
+    en_attente = jwt.encode({'uid': user_id, 'aud': 'gmail-finish', 'rt': jeton_chiffre,
+                              'ge': adresse_gmail[:255], 'exp': datetime.utcnow() + timedelta(minutes=10)},
+                             _CLE_OAUTH_GMAIL, algorithm='HS256')
+    return redirect(f"{site}/compte.html?gmail=confirmer#p={en_attente}")
+
+
+@app.route('/api/v1/gmail/finish', methods=['POST'])
+@token_required
+@agency_admin_required
+def gmail_finish():
+    """Dernière étape de la liaison Gmail : rattache la boîte autorisée à l'agence, à condition
+    que ce soit bien l'agence qui a demandé la liaison."""
+    d = request.get_json(silent=True) or {}
+    try:
+        p = jwt.decode(str(d.get('pending') or ''), _CLE_OAUTH_GMAIL, algorithms=["HS256"],
+                       audience='gmail-finish', options={"require": ["exp", "uid", "aud", "rt"]})
+    except jwt.PyJWTError:
+        return jsonify({"message": "Lien de connexion expiré. Recommencez la connexion Gmail."}), 400
+    if p['uid'] != request.agency_id:
+        app.logger.warning("Liaison Gmail refusée : jeton émis pour l'agence %s, présenté par l'agence %s",
+                           p['uid'], request.agency_id)
+        return jsonify({"message": "Cette connexion Gmail a été demandée par un autre compte."}), 403
     _assurer_schema()
     with _base() as (conn, cur):
         cur.execute("""
@@ -8633,10 +8681,9 @@ def gmail_callback():
                     refresh_token_enc = EXCLUDED.refresh_token_enc,
                     last_error = NULL,
                     connected_at = EXCLUDED.connected_at
-        """, (user_id, adresse_gmail[:255], jeton_chiffre, _maintenant()))
+        """, (request.agency_id, str(p.get('ge') or '')[:255], p['rt'], _maintenant()))
         conn.commit()
-
-    return redirect(f"{site}/compte.html?gmail=connecte")
+    return jsonify({"message": "Boîte Gmail connectée."}), 200
 
 
 @app.route('/api/v1/gmail/status', methods=['GET'])
@@ -8698,7 +8745,7 @@ def gmail_sync_all():
     par un navigateur : protégé par une clé partagée plutôt qu'un jeton de
     session, puisqu'il n'y a personne connecté derrière."""
     cle = (os.getenv("CRON_SECRET") or "").strip()
-    if not cle or request.headers.get('X-Cron-Key') != cle:
+    if not cle or not secrets.compare_digest(request.headers.get('X-Cron-Key', ''), cle):
         return jsonify({"message": "Not found"}), 404
     _assurer_schema()
     with _base() as (conn, cur):
@@ -9348,7 +9395,9 @@ def _lire_xlsx_octets(octets):
 
     def xml(nom):
         brut = archive.read(nom)
-        if b'<!DOCTYPE' in brut[:2000] or b'<!ENTITY' in brut[:2000]:
+        # Tout le contenu est examiné (pas seulement le début), sans tenir compte de la casse.
+        majuscules = brut.upper()
+        if b'<!DOCTYPE' in majuscules or b'<!ENTITY' in majuscules:
             raise ValueError("Fichier Excel non conforme.")
         return ET.fromstring(brut)
 
