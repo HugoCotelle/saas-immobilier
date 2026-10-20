@@ -32,6 +32,8 @@
             const [messageAlertes, setMessageAlertes] = useState(null);
             const [matin, setMatin] = useState(null);          // e-mail du matin : null tant que non chargé
             const [messageMatin, setMessageMatin] = useState(null);
+            const [ia, setIa] = useState(null);                 // analyse par IA : null tant que non chargé
+            const [messageIa, setMessageIa] = useState(null);
             const [apercuEnCours, setApercuEnCours] = useState(false);
             const [notif, setNotif] = useState(null);           // { permission, abonne } ; null tant que non lu
             const [messageNotif, setMessageNotif] = useState(null);
@@ -94,6 +96,7 @@
                 appel('/auth/profile').then((p) => {
                     setAlertes(p.alerts_enabled !== false);
                     setMatin(p.digest_enabled !== false);
+                    setIa(p.ia_enabled === true);
                     // Met à jour ce que le navigateur sait du compte (forfait, rôle, droits d'administration).
                     try {
                         const u = JSON.parse(localStorage.getItem('user') || '{}');
@@ -226,6 +229,18 @@
                 } catch (e) {
                     setAlertes(!valeur);
                     setMessageAlertes({ type: 'error', text: e.message });
+                }
+            };
+
+            const changerIa = async (valeur) => {
+                setIa(valeur);
+                setMessageIa(null);
+                try {
+                    await appel('/auth/preferences', { method: 'PUT', body: JSON.stringify({ ia_enabled: valeur }) });
+                    setMessageIa({ type: 'success', text: valeur ? 'Analyse par IA activée.' : 'Analyse par IA désactivée : plus aucun message n\'est transmis.' });
+                } catch (e) {
+                    setIa(!valeur);
+                    setMessageIa({ type: 'error', text: e.message });
                 }
             };
 
@@ -787,6 +802,27 @@
                                     <input type="checkbox" checked={alertes === true} disabled={alertes === null}
                                         onChange={(e) => changerAlertes(e.target.checked)} />
                                     <span>Me prévenir par e-mail à l'adresse {user ? user.email : 'de mon compte'}</span>
+                                </label>
+                            </div>
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Analyse des messages par IA</h2>
+                                </div>
+                                <p className="panel-note">
+                                    Quand elle est activée, Zelyro fait lire par une IA (notre sous-traitant Anthropic) le texte
+                                    des e-mails LeBonCoin/SeLoger reçus et des messages que vous collez, pour remplir
+                                    automatiquement la fiche du prospect : nom, coordonnées, budget et critères. Ce texte contient
+                                    les données personnelles du prospect. Désactivée, aucun message n'est transmis et les
+                                    fiches sont créées sans cette lecture. C'est à vous, responsable de traitement, d'en décider.
+                                </p>
+                                {messageIa && (
+                                    <div className={messageIa.type === 'error' ? 'error' : 'success'}>{messageIa.text}</div>
+                                )}
+                                <label className="interrupteur">
+                                    <input type="checkbox" checked={ia === true} disabled={ia === null || (user && user.role === 'employe')}
+                                        onChange={(e) => changerIa(e.target.checked)} />
+                                    <span>Autoriser l'analyse par IA des messages de mes prospects</span>
                                 </label>
                             </div>
 
