@@ -419,13 +419,22 @@
 
             // Fichier que Gmail sait importer (Paramètres > Filtres et adresses bloquées > Importer des filtres) :
             // il crée d'un coup le filtre qui transfère les messages de SeLoger et LeBonCoin.
+            // Ce que le filtre transfère : les messages des portails (expéditeur) ET ceux dont l'objet parle d'une demande,
+            // sauf les alertes « nouvelles annonces » qui ne sont pas des demandes de contact.
+            const RECHERCHE_FILTRE_GMAIL =
+                '(from:(seloger.com OR seloger.fr OR leboncoin.fr OR leboncoin.com) OR '
+                + 'subject:(seloger OR leboncoin OR "demande de visite" OR "demande de contact" OR "demande de renseignements" '
+                + 'OR "nouveau contact" OR "votre annonce")) '
+                + '-subject:(alerte OR "nouvelles annonces" OR "correspondant à vos critères")';
+            const echapperXml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
             const telechargerFiltreGmail = () => {
                 const xml = "<?xml version='1.0' encoding='UTF-8'?>\n"
                     + "<feed xmlns='http://www.w3.org/2005/Atom' xmlns:apps='http://schemas.google.com/apps/2006'>\n"
                     + "\t<title>Mail Filters</title>\n\t<entry>\n\t\t<category term='filter'></category>\n"
-                    + "\t\t<title>Zelyro : prospects LeBonCoin et SeLoger</title>\n"
-                    + "\t\t<apps:property name='from' value='seloger.com OR leboncoin.fr'/>\n"
-                    + "\t\t<apps:property name='forwardTo' value='" + journal.address + "'/>\n"
+                    + "\t\t<title>Zelyro : prospects LeBonCoin, SeLoger et demandes de visite</title>\n"
+                    + "\t\t<apps:property name='hasTheWord' value='" + echapperXml(RECHERCHE_FILTRE_GMAIL) + "'/>\n"
+                    + "\t\t<apps:property name='forwardTo' value='" + echapperXml(journal.address) + "'/>\n"
                     + "\t</entry>\n</feed>\n";
                 const lienFichier = document.createElement('a');
                 lienFichier.href = URL.createObjectURL(new Blob([xml], { type: 'application/xml' }));
@@ -1271,8 +1280,17 @@
                                                     <button type="button" className="btn secondary petit" onClick={telechargerFiltreGmail}>Télécharger le filtre Gmail</button>
                                                 </div>
                                                 <p className="field-hint">
-                                                    Si Gmail refuse le fichier, créez le filtre à la main : « Créer un filtre », expéditeur « seloger.com OR leboncoin.fr »,
+                                                    Ce filtre transfère les messages envoyés par SeLoger ou LeBonCoin, et ceux dont l'objet contient
+                                                    « seloger », « leboncoin », « demande de visite », « demande de contact », « demande de renseignements »,
+                                                    « nouveau contact » ou « votre annonce » (hors alertes « nouvelles annonces »).
+                                                    Si Gmail refuse le fichier, créez le filtre à la main : « Créer un filtre », collez ceci dans « Contient les mots » :
+                                                </p>
+                                                <p className="field-hint" style={{ userSelect: 'all', fontFamily: 'ui-monospace, monospace', overflowWrap: 'anywhere' }}>
+                                                    {RECHERCHE_FILTRE_GMAIL}
+                                                </p>
+                                                <p className="field-hint">
                                                     puis « Transférer à » l'adresse ci-dessus (possible une fois l'étape 2 terminée).
+                                                    Un message de ce type qui n'est pas une demande est le plus souvent ignoré par Zelyro quand l'analyse automatique est active.
                                                 </p>
                                             </div>
                                         )}
