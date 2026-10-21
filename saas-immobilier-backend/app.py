@@ -6321,7 +6321,7 @@ def _confirmer_rdv_prospect(rdv_id):
                                      bouton=("Modifier ou annuler", _lien_rdv(r['jeton'])))
         ics = _ics_rdv(r['jeton'][:24], r['debut'], r['fin'], f"Visite : {r['bien'] or agence}", lieu or None,
                        f"Rendez-vous avec {agence}")
-        _envoyer_email(r['email'].strip(), f"Visite confirmée : {quand}", texte, html, nom_expediteur=agence,
+        _envoyer_email(r['email'].strip(), f"Visite confirmée : {quand} — {agence}", texte, html, nom_expediteur=agence,
                        repondre_a=(r['agent_email'], _nom_affiche(r['agent_prenom'] or agence, agence)),
                        pieces_jointes=[("visite.ics", ics)])
     except Exception:
@@ -8552,7 +8552,8 @@ def _message_automatique(item, expediteur):
 _SUJETS_ZELYRO_RE = re.compile(
     r"(?i)^\s*(?:nouveau prospect\s*(?::|via\b)|pr[ée]cisez votre recherche\s*[—–-]|votre visite\s*:|visite confirm[ée]e\s*:|"
     r"demande de d[ée]mo zelyro\s*:|votre demande de d[ée]mo zelyro|votre cl[ée] d'activation zelyro|r[ée]initialisation de votre mot de passe zelyro)")
-_MARQUEURS_ZELYRO = ("capté automatiquement par zelyro", "capte automatiquement par zelyro")
+_MARQUEURS_ZELYRO = ("capté automatiquement par zelyro", "capte automatiquement par zelyro",
+                     "envoyé automatiquement par zelyro", "envoye automatiquement par zelyro")
 
 
 def _message_de_zelyro(expediteur, sujet, corps):
@@ -8905,6 +8906,44 @@ def opposition_prospect(token):
         return erreur_interne()
 
 
+def _bien_vise_par_la_demande(cur, user_id, lead_id):
+    """Le bien (ou l'annonce) que le prospect a contacté, pour le rappeler dans l'e-mail qu'il reçoit : une personne
+    qui ne connaît pas l'expéditeur est rassurée de voir son propre sujet. Renvoie {titre, reference, prix} ou None.
+    Seuls les titres déjà filtrés à la réception (voir _annonce_du_message) ou fournis par la clé d'API de
+    l'agence sont repris : jamais le texte libre du message."""
+    cur.execute("""SELECT source, annonce, annonce_ref, subject FROM inbound_emails
+                   WHERE user_id = %s AND lead_id = %s ORDER BY id DESC LIMIT 1""", (user_id, lead_id))
+    m = cur.fetchone()
+    if not m:
+        return None
+    titre = (m['annonce'] or '').strip()
+    if not titre and m['source'] == 'api' and (m['subject'] or '').strip() not in ('', "Prospect reçu par API"):
+        titre = m['subject'].strip()
+    ref = (m['annonce_ref'] or '').strip()
+    prix = None
+    if ref:
+        cur.execute("SELECT title, price FROM properties WHERE user_id = %s AND lower(reference) = lower(%s) LIMIT 1",
+                    (user_id, ref))
+        bien = cur.fetchone()
+        if bien:
+            titre = titre or (bien['title'] or '')
+            prix = bien['price']
+    if not titre:
+        return None
+    return {"titre": _texte_court(titre, 120), "reference": ref or None, "prix": prix}
+
+
+def _ligne_bien_vise(bien):
+    if not bien:
+        return None
+    morceaux = [f"Annonce : {bien['titre']}"]
+    if bien.get('reference'):
+        morceaux.append(f"réf. {bien['reference']}")
+    if bien.get('prix'):
+        morceaux.append(f"{bien['prix']:,}".replace(',', ' ') + " €")
+    return " · ".join(morceaux)
+
+
 def _envoyer_email_completion(user_id, lead_id, nom, email_contact, portail):
     """E-mail automatique demandant au prospect de préciser sa recherche
     (budget, secteur, type de bien...), envoyé juste après la création
@@ -8940,14 +8979,18 @@ def _envoyer_email_completion(user_id, lead_id, nom, email_contact, portail):
             if not jeton:
                 jeton = secrets.token_urlsafe(24)
                 cur.execute("UPDATE leads SET completion_token = %s WHERE id = %s", (jeton, lead_id))
+            bien_vise = _bien_vise_par_la_demande(cur, user_id, lead_id)
             conn.commit()
 
         lien = _lien_completion(jeton)
         if not lien:
             return
         libelle_portail = _PORTAIL_LIBELLE.get(portail)
-        contact_phrase = (f"Vous avez contacté {agence} via {libelle_portail}." if libelle_portail
-                          else f"Vous avez contacté {agence}.")
+        titre_bien = (bien_vise or {}).get('titre')
+        au_sujet = f" au sujet de l'annonce « {titre_bien} »" if titre_bien else ""
+        contact_phrase = (f"Vous avez contacté {agence}{au_sujet} via {libelle_portail}." if libelle_portail
+                          else f"Vous avez contacté {agence}{au_sujet}.")
+        rappel_bien = _ligne_bien_vise(bien_vise)
         prenom = (nom or '').split(' ')[0] if nom and nom not in _PORTAIL_NOM_DEFAUT.values() else ''
         salutation = f"Bonjour {prenom}," if prenom else "Bonjour,"
         texte, html = _gabarit_email(
@@ -8955,14 +8998,18 @@ def _envoyer_email_completion(user_id, lead_id, nom, email_contact, portail):
             [salutation,
              f"{contact_phrase} Pour vous proposer rapidement les "
              "biens qui correspondent vraiment à votre projet, merci de préciser en une minute votre "
-             "budget, le secteur recherché et vos critères.",
-             "Ce lien est personnel : ne le transmettez pas.",
+             "budget, le secteur recherché et vos critères."]
+            + ([rappel_bien] if rappel_bien else []) +
+            ["Ce lien est personnel : ne le transmettez pas.",
+             f"Ce message est envoyé automatiquement par Zelyro, le logiciel que {agence} utilise pour répondre à ses "
+             "demandes. Si vous n'êtes pas à l'origine de cette demande, ignorez-le : rien ne sera fait.",
              f"{agence} utilise vos coordonnées pour répondre à votre demande. Vous pouvez vous opposer à "
              "tout moment à recevoir ses e-mails" + (f" : {_lien_opposition(lead_id)}" if _lien_opposition(lead_id) else ".")],
             bouton=("Préciser ma recherche", lien),
         )
-        envoye = _envoyer_email(email_contact, f"Précisez votre recherche — {agence}", texte, html,
-                                nom_expediteur=agence)
+        sujet = (f"{agence} — votre demande pour « {_texte_court(titre_bien, 60)} »" if titre_bien
+                 else f"{agence} — précisez votre recherche")
+        envoye = _envoyer_email(email_contact, sujet, texte, html, nom_expediteur=agence)
         if envoye:
             # Visible dans l'historique de la fiche : l'agent sait que le prospect a reçu le lien.
             _assurer_schema()

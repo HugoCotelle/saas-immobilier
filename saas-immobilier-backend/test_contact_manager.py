@@ -193,7 +193,7 @@ class Base(BaseInbound):
         self.envoyes = []
 
         def faux(dest, sujet, texte, html, **kw):
-            self.envoyes.append({"to": dest, "sujet": sujet, "texte": texte, "html": html})
+            self.envoyes.append({"to": dest, "sujet": sujet, "texte": texte, "html": html, "kw": kw})
             return True
 
         for p in (mock.patch.object(backend, "_envoyer_email", side_effect=faux),
@@ -478,7 +478,7 @@ class FormulaireAutomatique(Base):
         self.addCleanup(p.stop)
 
     def mails_formulaire(self):
-        return [m for m in self.envoyes if m["sujet"].startswith("Précisez votre recherche")]
+        return [m for m in self.envoyes if "completer.html" in m["texte"]]
 
     def envoyer(self, adresse, expediteur="paul.durand@exemple.fr", sujet="Visite de la maison à Senlis",
                 texte="Bonjour, je suis intéressé par la maison. Nom : Paul Durand\nTéléphone : 06 11 22 33 44", **kw):
@@ -562,10 +562,13 @@ class FormulaireAutomatique(Base):
             # 4. le formulaire envoyé au prospect
             self.envoyer(adresse, expediteur="tb@zelyro.fr", sujet="Précisez votre recherche — Agence Test",
                          texte="Bonjour, merci. Tel : 06 44 55 66 77")
+            # 5. nouveau formulaire : l'objet commence par le nom de l'agence, seul le texte trahit Zelyro
+            self.envoyer(adresse, expediteur="tb@zelyro.fr", sujet="Fwd: Agence Test — votre demande pour « T3 lumineux »",
+                         texte="Ce message est envoyé automatiquement par Zelyro, le logiciel que Agence Test utilise. Tel : 06 55 66 77 88")
         self.assertEqual(self.leads(t), [])
         self.assertEqual(len(self.envoyes), avant)
         n = self.sql("SELECT COUNT(*) FROM inbound_emails WHERE source = 'zelyro-boucle'")[0][0]
-        self.assertGreaterEqual(n, 4)
+        self.assertGreaterEqual(n, 5)
 
     def test_mail_normal_de_la_meme_adresse_garde_son_prospect(self):
         adresse, t = self.adresse("cm-f21@x.fr")
@@ -583,6 +586,29 @@ class FormulaireAutomatique(Base):
                              texte=f"Bonjour, je veux visiter. Nom : Paul Durand{i}\nTéléphone : 06 11 22 33 4{i}")
         self.assertEqual(len(self.leads(t)), 6)
         self.assertEqual(len(notifs()), 3)
+
+    def test_formulaire_rappelle_l_annonce_et_porte_le_nom_de_l_agence(self):
+        adresse, t = self.adresse("cm-f30@x.fr")
+        self.sql("UPDATE users SET company_name = 'Agence Morel' WHERE email = 'cm-f30@x.fr'")
+        uid = self.sql("SELECT id FROM users WHERE email = 'cm-f30@x.fr'")[0][0]
+        self.sql("INSERT INTO properties (user_id, title, reference, price) VALUES (%s, 'T3 lumineux, Senlis', 'A123', 215000)", (uid,))
+        self.envoyer(adresse, expediteur="notifications@seloger.com", sujet="Nouveau contact pour votre annonce",
+                     texte="Nom : Sophie Martin\nEmail : sophie@exemple.fr\nTéléphone : 06 00 00 00 01\nRéf. A123\nBonjour, je veux visiter.")
+        m = self.mails_formulaire()[0]
+        self.assertEqual(m["sujet"], "Agence Morel — votre demande pour « T3 lumineux, Senlis »")
+        self.assertIn("au sujet de l'annonce « T3 lumineux, Senlis »", m["texte"])
+        self.assertIn("Annonce : T3 lumineux, Senlis · réf. A123 · 215 000 €", m["texte"])
+        self.assertIn("envoyé automatiquement par Zelyro, le logiciel que Agence Morel utilise", m["texte"])
+        self.assertEqual(m["kw"]["nom_expediteur"], "Agence Morel")
+
+    def test_formulaire_sans_annonce_garde_le_nom_de_l_agence_dans_l_objet(self):
+        adresse, t = self.adresse("cm-f31@x.fr")
+        self.sql("UPDATE users SET company_name = 'Agence Morel' WHERE email = 'cm-f31@x.fr'")
+        self.envoyer(adresse, sujet="Hello", texte="Bonjour, je veux visiter. Nom : Paul Durand\nTéléphone : 06 11 22 33 44")
+        m = self.mails_formulaire()[0]
+        self.assertEqual(m["sujet"], "Agence Morel — précisez votre recherche")
+        self.assertNotIn("Annonce :", m["texte"])
+        self.assertNotIn("Hello", m["texte"])         # le texte libre du visiteur n'est jamais repris
 
     def test_plafond_par_jour(self):
         adresse, t = self.adresse("cm-f8@x.fr")
