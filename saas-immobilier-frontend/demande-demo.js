@@ -1,15 +1,11 @@
-/* Formulaire de demande de démonstration.
-   - Sur toute page : un lien portant data-demo ouvre le formulaire dans une fenêtre (le mailto: du lien ne sert
-     que si ce script ne peut pas s'exécuter).
-   - Sur la page d'atterrissage : si #demande-demo-form existe, le formulaire s'y affiche directement et, une fois
-     la demande envoyée, le visiteur est conduit sur /demo-merci.html (page de remerciement : c'est elle qui sert
-     de repère pour mesurer les demandes dans Google Ads). */
+/* Formulaire de demande de démonstration de la page d'atterrissage (demo-agences.html).
+   Une fois la demande envoyée, le visiteur est conduit sur /demo-merci.html : c'est cette page qui sert de repère
+   pour mesurer les demandes dans Google Ads. */
 (function () {
     'use strict';
     var API_URL = 'https://saas-immobilier-921a.onrender.com';
     var page = document.getElementById('demande-demo-form');
-    var liens = document.querySelectorAll('a[data-demo]');
-    if (!page && (!liens.length || typeof HTMLDialogElement === 'undefined')) return;
+    if (!page) return;
 
     function el(tag, attrs, enfants) {
         var n = document.createElement(tag);
@@ -135,54 +131,6 @@
     // ----- Page d'atterrissage : formulaire intégré à la page -----
     if (page) {
         page.appendChild(batir(function () { location.href = '/demo-merci.html'; }));
-        Array.prototype.forEach.call(liens, function (a) {
-            a.addEventListener('click', function (e) {
-                e.preventDefault();
-                page.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                var n = page.querySelector('input[name=nom]'); if (n) n.focus({ preventScroll: true });
-            });
-        });
-        return;
     }
 
-    // ----- Autres pages : formulaire dans une fenêtre -----
-    var dialogue = null, declencheur = null;
-    function construire() {
-        var formulaire = batir(function (prenom, f) {
-            var ok = el('div', { 'class': 'dd-merci', role: 'status' }, [
-                el('h3', { text: 'Merci ' + prenom + ', votre demande est bien partie.' }),
-                el('p', { text: 'Un e-mail de confirmation vient de vous être envoyé. Nous vous répondons très vite pour convenir d’un créneau.' })
-            ]);
-            var fin = el('button', { type: 'button', 'class': 'btn btn-ghost', text: 'Fermer' });
-            fin.addEventListener('click', function () { dialogue.close(); });
-            ok.appendChild(fin);
-            f.replaceWith(ok);
-            dialogue.setAttribute('data-fini', '');
-            dialogue.querySelector('.dd-intro').hidden = true;
-            ok.setAttribute('tabindex', '-1');
-            ok.focus();
-        });
-        var fermer = el('button', { type: 'button', 'class': 'dd-fermer', 'aria-label': 'Fermer', text: '×' });
-        fermer.addEventListener('click', function () { dialogue.close(); });
-        dialogue = el('dialog', { 'class': 'dd-dialogue', 'aria-labelledby': 'dd-titre' }, [
-            fermer,
-            el('h2', { id: 'dd-titre', text: 'Demander une démonstration' }),
-            el('p', { 'class': 'dd-intro', text: 'Quelques informations, et nous revenons vers vous très vite pour convenir d’un créneau.' }),
-            formulaire
-        ]);
-        dialogue.addEventListener('click', function (e) { if (e.target === dialogue) dialogue.close(); });
-        dialogue.addEventListener('close', function () { if (declencheur && declencheur.focus) declencheur.focus(); });
-        document.body.appendChild(dialogue);
-    }
-    function ouvrir(e) {
-        e.preventDefault();
-        declencheur = e.currentTarget;
-        // La saisie est conservée si on ferme par erreur ; après un envoi réussi, on repart d'un formulaire neuf.
-        if (!dialogue || dialogue.hasAttribute('data-fini')) { if (dialogue) dialogue.remove(); construire(); }
-        dialogue.showModal();
-        var premier = dialogue.querySelector('input[name=nom]');
-        if (premier) premier.focus();
-    }
-    Array.prototype.forEach.call(liens, function (a) { a.addEventListener('click', ouvrir); });
-    if (location.hash === '#demande-demo') ouvrir({ preventDefault: function () {}, currentTarget: liens[0] });
 })();
