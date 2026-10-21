@@ -8435,6 +8435,27 @@ def _portail_de_test(cur, user_id, sujet):
     return 'leboncoin' if 'bon' in m.group(1).lower() else 'seloger'
 
 
+_SUJET_TRANSFERE_RE = re.compile(r"(?i)^\s*(?:(?:re|tr|fw|fwd|wg)\s*:\s*)+")
+_ENTETE_AUTOMATIQUE_RE = re.compile(
+    r"(?im)^\s*(?:auto-submitted\s*:\s*(?!no\b)\S|precedence\s*:\s*(?:bulk|list|junk)\b|list-unsubscribe\s*:|"
+    r"x-auto-response-suppress\s*:|x-autoreply\s*:|x-autorespond\s*:)")
+FORMULAIRES_AUTO_PAR_JOUR = 100   # plafond par agence et par jour, pour les messages qui ne viennent pas d'un portail
+
+
+def _message_automatique(item, expediteur):
+    """Vrai pour un message qu'une machine a écrit (réponse automatique, newsletter, notification) : on ne lui
+    répond jamais automatiquement."""
+    entetes = item.get('Headers')
+    if isinstance(entetes, (list, tuple)):
+        entetes = "\n".join(str(e) for e in entetes)
+    elif isinstance(entetes, dict):
+        entetes = "\n".join(f"{k}: {v}" for k, v in entetes.items())
+    if _ENTETE_AUTOMATIQUE_RE.search(str(entetes or '')):
+        return True
+    local = (expediteur or '').split('@', 1)[0].lower()
+    return local.startswith(_PREFIXES_NON_CONTACT) or local in ('notification', 'notifications', 'newsletter', 'info-noreply')
+
+
 def _traiter_email_entrant(item):
     """Transforme un e-mail entrant (notification LeBonCoin/SeLoger transférée
     par un agent) en prospect. Ne lève jamais : une erreur reste dans les
@@ -8478,10 +8499,12 @@ def _traiter_email_entrant(item):
                            detail=_json.dumps({"code": code, "url": lien}))
             conn.commit()
         return
-    _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, message_id, mode_test=mode_test)
+    _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, message_id, mode_test=mode_test,
+                               formulaire_generique=not _message_automatique(item, expediteur))
 
 
-def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, message_id, mode_test=False):
+def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, message_id, mode_test=False,
+                               formulaire_generique=False):
     """Cœur commun aux deux voies de réception d'un e-mail LeBonCoin/SeLoger :
     le transfert manuel (_traiter_email_entrant, via le webhook Brevo) et la
     boîte Gmail connectée (_synchroniser_gmail). Les deux ont déjà résolu
@@ -8579,9 +8602,11 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
         # lui-même. On ne se rabat sur l'expéditeur que pour un transfert
         # générique (portail inconnu), où l'expéditeur a des chances d'être la
         # bonne personne.
+        email_de_expediteur = False
         if (not email_contact and portail == 'portail' and expediteur
                 and EMAIL_RE.match(expediteur) and 'noreply' not in expediteur.lower()):
             email_contact = expediteur
+            email_de_expediteur = True
 
         if (portail in ('leboncoin', 'seloger') and champs
                 and not any([email_contact, telephone_contact, champs.get('budget'),
@@ -8663,6 +8688,11 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
         _compter_extraction(user_id)
     _lancer_en_arriere_plan(_alertes_matching, user_id, [lead_id], None, portail)
     if portail in ('leboncoin', 'seloger') and email_contact:
+        _lancer_en_arriere_plan(_envoyer_email_completion, user_id, lead_id, nom, email_contact, portail)
+    elif (formulaire_generique and portail == 'portail' and email_contact
+          and not (email_de_expediteur and _SUJET_TRANSFERE_RE.match(sujet or ''))):
+        # Message quelconque reçu à l'adresse de réception : le formulaire part aussi (texte neutre), sauf s'il
+        # s'agit d'un transfert manuel dont l'adresse est celle de la personne qui a transféré.
         _lancer_en_arriere_plan(_envoyer_email_completion, user_id, lead_id, nom, email_contact, portail)
     return lead_id
 
@@ -8775,6 +8805,17 @@ def _envoyer_email_completion(user_id, lead_id, nom, email_contact, portail):
             ligne = cur.fetchone()
             if _prospect_oppose(cur, user_id, email_contact, ligne['opposition_at'] if ligne else None):
                 return   # le prospect s'est opposé à recevoir des e-mails
+            if portail not in ('leboncoin', 'seloger'):
+                # Message quelconque : jamais à un collaborateur de l'agence, et pas plus de N formulaires par jour.
+                cur.execute("""SELECT 1 FROM users WHERE lower(email) = lower(%s) AND (id = %s OR agency_owner_id = %s)""",
+                            (email_contact, user_id, user_id))
+                if cur.fetchone():
+                    return
+                cur.execute("""SELECT COUNT(*) AS n FROM lead_notes
+                               WHERE user_id = %s AND body LIKE %s AND created_at > %s""",
+                            (user_id, "E-mail « Précisez votre recherche » envoyé à%", _maintenant() - timedelta(days=1)))
+                if cur.fetchone()['n'] >= FORMULAIRES_AUTO_PAR_JOUR:
+                    return
             jeton = ligne['completion_token'] if ligne else None
             if not jeton:
                 jeton = secrets.token_urlsafe(24)
@@ -8784,13 +8825,15 @@ def _envoyer_email_completion(user_id, lead_id, nom, email_contact, portail):
         lien = _lien_completion(jeton)
         if not lien:
             return
-        libelle_portail = _PORTAIL_LIBELLE.get(portail, "un portail immobilier")
+        libelle_portail = _PORTAIL_LIBELLE.get(portail)
+        contact_phrase = (f"Vous avez contacté {agence} via {libelle_portail}." if libelle_portail
+                          else f"Vous avez contacté {agence}.")
         prenom = (nom or '').split(' ')[0] if nom and nom not in _PORTAIL_NOM_DEFAUT.values() else ''
         salutation = f"Bonjour {prenom}," if prenom else "Bonjour,"
         texte, html = _gabarit_email(
             f"Précisez votre recherche pour {agence}",
             [salutation,
-             f"Vous avez contacté {agence} via {libelle_portail}. Pour vous proposer rapidement les "
+             f"{contact_phrase} Pour vous proposer rapidement les "
              "biens qui correspondent vraiment à votre projet, merci de préciser en une minute votre "
              "budget, le secteur recherché et vos critères.",
              "Ce lien est personnel : ne le transmettez pas.",

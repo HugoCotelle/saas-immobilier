@@ -26,8 +26,9 @@ cur.execute("DELETE FROM users WHERE email LIKE '%@t.test'"); conn.commit()
 
 
 def mk(email, role='admin', owner=None, plan='agence'):
-    cur.execute("""INSERT INTO users (email, password_hash, first_name, company_name, plan, role, agency_owner_id)
-                   VALUES (%s,'x','Test','Agence Test',%s,%s,%s) RETURNING id""", (email, plan, role, owner))
+    # ia_enabled : ces agences de test ont activé l'analyse par IA (désactivée par défaut en production)
+    cur.execute("""INSERT INTO users (email, password_hash, first_name, company_name, plan, role, agency_owner_id, ia_enabled)
+                   VALUES (%s,'x','Test','Agence Test',%s,%s,%s,TRUE) RETURNING id""", (email, plan, role, owner))
     i = cur.fetchone()[0]; conn.commit(); return i
 
 
@@ -278,17 +279,20 @@ cur.execute("SELECT source FROM leads WHERE user_id=%s AND email=%s", (agence, "
 ligne = cur.fetchone()
 ok(ligne and ligne[0] == "leboncoin", "démo : l'avis négatif de l'IA ne bloque pas un message de test")
 
-# sans l'étiquette, un e-mail transféré ordinaire n'envoie rien au prospect
+# sans l'étiquette, un e-mail ordinaire reçoit aussi le formulaire, avec le texte neutre (portail « portail »)
 with mock.patch.object(appz, "_lancer_en_arriere_plan", side_effect=lambda f, *a: None) as bg:
     poster(mail("Nouveau contact T3", corps_test.replace("julien.test", "anna.test"), de="tom@gmail.com"))
-    ok(not [c_ for c_ in bg.call_args_list if c_.args[0].__name__ == "_envoyer_email_completion"],
-       "démo : sans étiquette, aucun e-mail n'est envoyé au prospect")
+    envois_ordinaires = [c_ for c_ in bg.call_args_list if c_.args[0].__name__ == "_envoyer_email_completion"]
+    ok(len(envois_ordinaires) == 1 and envois_ordinaires[0].args[4] == "anna.test@example.com"
+       and envois_ordinaires[0].args[5] == "portail",
+       "message ordinaire : le formulaire est envoyé au prospect, sans mention d'un portail")
 
 # plafond quotidien
 with mock.patch.object(appz, "_lancer_en_arriere_plan", side_effect=lambda f, *a: None) as bg:
     for i in range(appz._TESTS_PAR_JOUR + 2):
         poster(mail("[TEST SeLoger] essai", corps_test.replace("julien.test", f"lim{i}.test"), de="tom@gmail.com"))
-    envois = [c_ for c_ in bg.call_args_list if c_.args[0].__name__ == "_envoyer_email_completion"]
+    envois = [c_ for c_ in bg.call_args_list if c_.args[0].__name__ == "_envoyer_email_completion"
+              and c_.args[5] in ("leboncoin", "seloger")]
     ok(0 < len(envois) <= appz._TESTS_PAR_JOUR, "démo : plafond de messages de test par jour")
 
 # la trace dans la fiche une fois l'e-mail parti
