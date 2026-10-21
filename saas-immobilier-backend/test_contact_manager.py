@@ -144,6 +144,12 @@ class DemandeDemo(ts.Base):
         self.assertIn("Bonjour Julie", accuse["texte"])
         self.assertNotIn("matching", accuse["texte"])          # rien de la saisie, hors prénom
 
+    def test_origine_de_la_visite(self):
+        self.envoyer(origine="google / cpc, campagne 123, mot-clé logiciel agence")
+        self.assertIn("Origine : google / cpc, campagne 123, mot-clé logiciel agence", self.envoyes[0]["texte"])
+        self.envoyer(email="autre@agence-morel.fr")
+        self.assertIn("Origine : accès direct ou site", self.envoyes[2]["texte"])
+
     def test_champs_obligatoires_seulement(self):
         r = self.c.post("/api/v1/demande-demo", json={"nom": "Paul Roy", "email": "paul@exemple.fr", "agence": "Roy Immo"})
         self.assertEqual(r.status_code, 200)

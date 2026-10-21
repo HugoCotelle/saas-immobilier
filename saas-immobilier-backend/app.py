@@ -1659,6 +1659,7 @@ def demande_demo():
     ville = _ligne_demo(data.get('ville'), 80)
     telephone = _ligne_demo(data.get('telephone'), 30)
     outil = _ligne_demo(data.get('outil'), 80)
+    origine = _ligne_demo(data.get('origine'), 200)
     message = _CARACTERES_CONTROLE_RE.sub('', str(data.get('message') or '')).strip()[:1500]
     taille = str(data.get('taille') or '')
     creneau = str(data.get('creneau') or '')
@@ -1684,6 +1685,7 @@ def demande_demo():
         f"Taille de l'équipe : {DEMO_TAILLES.get(taille, 'non renseignée')}",
         f"Outil actuel : {outil or 'non renseigné'}",
         f"Créneau souhaité : {DEMO_CRENEAUX.get(creneau, 'non renseigné')}",
+        f"Origine : {origine or 'accès direct ou site'}",
     ]
     if message:
         lignes.append("Message :\n" + message)
