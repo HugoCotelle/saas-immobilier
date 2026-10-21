@@ -39,7 +39,7 @@
         <div class="wrap">
             <h1>Accord de sous-traitance de données (DPA)</h1>
             <p>Annexe aux <a href="/cgu.html">conditions générales d’utilisation</a>, conforme à l’article 28 du règlement général sur la protection des données (RGPD), applicable entre Zelyro et chaque Agence pour les données des Prospects traitées dans le Service.</p>
-            <p class="legal-meta">Dernière mise à jour : <span data-societe="date_maj">6 octobre 2026</span></p>
+            <p class="legal-meta">Dernière mise à jour : <span data-societe="date_maj">21 octobre 2026</span></p>
         </div>
     </div>
     <div class="wrap">
@@ -49,7 +49,7 @@
 
 <section id="parties" aria-labelledby="h-parties">
     <h2 id="h-parties">1. Parties et objet</h2>
-    <p>Le présent accord de sous-traitance de données (« DPA ») est conclu entre, d’une part, Zelyro SAS, société par actions simplifiée dont le siège social est situé <span class="a-completer" data-societe="adresse">[À COMPLÉTER : adresse complète du siège social]</span>, immatriculée sous le numéro SIREN <span class="a-completer" data-societe="siren">[À COMPLÉTER : numéro SIREN]</span> (« Zelyro », le sous-traitant), et d’autre part chaque Agence titulaire d’un compte sur le Service (le responsable de traitement), telle que définie à l’article 1 des <a href="/cgu.html">CGU</a>.</p>
+    <p>Le présent accord de sous-traitance de données (« DPA ») est conclu entre, d’une part, Zelyro SAS, société par actions simplifiée dont le siège social est situé <span data-societe="adresse">59 rue de Ponthieu, bureau 326, 75008 Paris</span>, immatriculée sous le numéro SIREN <span class="a-completer" data-societe="siren">[À COMPLÉTER : numéro SIREN]</span> (« Zelyro », le sous-traitant), et d’autre part chaque Agence titulaire d’un compte sur le Service (le responsable de traitement), telle que définie à l’article 1 des <a href="/cgu.html">CGU</a>.</p>
     <p>Il précise les conditions dans lesquelles Zelyro traite, pour le compte de l’Agence et sur ses instructions, les données personnelles des Prospects enregistrées dans le Service, conformément à l’article 28 du RGPD. Il fait partie intégrante des CGU : en cas de contradiction entre les deux documents sur ce point, le présent DPA prévaut pour ce qui concerne le traitement des données des Prospects.</p>
     <p>Les termes en majuscule non définis dans le présent DPA ont le sens qui leur est donné à l’article 1 des CGU.</p>
 </section>
@@ -65,7 +65,7 @@
         <table>
             <thead><tr><th>Élément</th><th>Description</th></tr></thead>
             <tbody>
-                <tr><td data-label="Élément">Objet</td><td data-label="Description">Hébergement, stockage, qualification automatique, rapprochement avec les biens, suivi des Prospects de l’Agence et de leur activité sur les liens que l’Agence leur envoie, et réception des demandes de contact issues de ses e-mails de portails (SeLoger, Leboncoin), dans le Service</td></tr>
+                <tr><td data-label="Élément">Objet</td><td data-label="Description">Hébergement, stockage, qualification automatique, rapprochement avec les biens, suivi des Prospects de l’Agence et de leur activité sur les liens que l’Agence leur envoie, et réception des demandes de contact issues de ses e-mails de portails (SeLoger, Leboncoin) ou transmises par un partenaire de l'Agence au moyen d'une clé d'API qu'elle a créée, dans le Service</td></tr>
                 <tr><td data-label="Élément">Nature des opérations</td><td data-label="Description">Collecte, enregistrement, structuration, conservation, consultation, modification, extraction, rapprochement, limitation et effacement</td></tr>
                 <tr><td data-label="Élément">Finalité</td><td data-label="Description">Fournir à l’Agence les fonctionnalités du Service décrites à l’article 3 des CGU</td></tr>
                 <tr><td data-label="Élément">Catégories de personnes concernées</td><td data-label="Description">Les Prospects de l’Agence, les personnes que l’Agence associe le cas échéant à un bien ou à un dossier et, à titre accessoire, les collaborateurs de l’Agence désignés comme responsables d’un Prospect</td></tr>
@@ -99,7 +99,8 @@
             <tr><td data-label="Sous-traitant">Sendinblue SAS (Brevo)</td><td data-label="Rôle">Envoi d’e-mails (notifications, alertes, e-mail du matin, messages adressés aux Prospects au nom de l’Agence)</td><td data-label="Localisation">France</td></tr>
             <tr><td data-label="Sous-traitant">Google (API Gmail), si l’Agence connecte sa boîte</td><td data-label="Rôle">Accès, en lecture seule et avec l’autorisation de l’Agence, aux e-mails de SeLoger et de Leboncoin</td><td data-label="Localisation">États-Unis ou selon l’infrastructure de Google</td></tr>
             <tr><td data-label="Sous-traitant">Services de notification des navigateurs et systèmes d’exploitation (Google, Apple, Mozilla, Microsoft selon l’appareil)</td><td data-label="Rôle">Acheminement de notifications chiffrées vers l’appareil des Utilisateurs de l’Agence qui les ont activées (le contenu ne peut pas être lu par ces services)</td><td data-label="Localisation">États-Unis ou selon le fournisseur de l’appareil</td></tr>
-            <tr><td data-label="Sous-traitant">Anthropic</td><td data-label="Rôle">Analyse du texte d’un message (texte collé ou e-mail de portail) pour en extraire des critères, si cette fonction est activée par l’Agence</td><td data-label="Localisation">États-Unis</td></tr>
+            <tr><td data-label="Sous-traitant">Stripe Payments Europe, Ltd.</td><td data-label="Rôle">Paiement des abonnements et facturation de l’Agence (ne traite aucune donnée de Prospect)</td><td data-label="Localisation">Union européenne — Irlande, avec transferts possibles vers les États-Unis encadrés par Stripe</td></tr>
+            <tr><td data-label="Sous-traitant">Anthropic</td><td data-label="Rôle">Analyse du texte d’un message (texte collé ou e-mail de portail) pour en extraire des critères, fonction activée par défaut, que l’Agence peut désactiver à tout moment dans son compte</td><td data-label="Localisation">États-Unis</td></tr>
         </tbody>
     </table>
     <p>Cette liste correspond à celle publiée dans la <a href="/confidentialite.html">politique de confidentialité</a>, qui fait foi en cas de mise à jour entre deux révisions du présent DPA. Zelyro impose contractuellement à chacun de ces sous-traitants des obligations de protection des données équivalentes à celles prévues par le présent DPA.</p>

@@ -78,8 +78,9 @@
         f.appendChild(retour);
         f.appendChild(el('div', { 'class': 'dd-actions' }, [bouton]));
         f.appendChild(el('p', { 'class': 'dd-mention' }, [
-            document.createTextNode('Zelyro SAS utilise ces informations uniquement pour répondre à votre demande de démonstration et vous recontacter à ce sujet. '
-                + 'Elles sont conservées 3 ans après notre dernier échange. Pour les consulter ou les faire effacer : '),
+            document.createTextNode('Zelyro SAS, responsable du traitement, utilise ces informations pour répondre à votre demande de démonstration et vous recontacter, '
+                + 'y compris par e-mail, au sujet de nos offres (intérêt légitime). La campagne publicitaire dont vous venez, s’il y en a une, est notée. '
+                + 'Elles sont conservées 3 ans après notre dernier échange. Vous pouvez vous opposer à ce traitement, accéder à vos données ou les faire effacer : '),
             el('a', { href: 'mailto:contact@zelyro.fr', text: 'contact@zelyro.fr' }),
             document.createTextNode('. '),
             el('a', { href: '/confidentialite.html', text: 'Politique de confidentialité' })
