@@ -831,3 +831,30 @@ body.pub {
     .dd-dialogue { padding: 24px 18px; }
     .dd-ligne { grid-template-columns: 1fr; gap: 0; }
 }
+
+/* ---------- Page d'atterrissage de la démonstration (Google Ads) ---------- */
+.lp-header { display: flex; align-items: center; justify-content: space-between; max-width: var(--wrap); margin: 0 auto; }
+.lp-hero { padding: clamp(32px, 6vw, 72px) 0 clamp(48px, 8vw, 96px); }
+.lp-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); grid-template-areas: "copie carte" "args carte"; grid-template-rows: auto 1fr; column-gap: clamp(28px, 5vw, 64px); align-items: start; }
+.lp-copy { grid-area: copie; }
+.lp-carte { grid-area: carte; }
+.lp-arguments { grid-area: args; }
+.lp-copy h1 { font-size: clamp(34px, 5vw, 54px); line-height: 1.05; letter-spacing: -.01em; margin: 0 0 20px; }
+.lp-copy h1 em { font-style: italic; color: var(--sage-600); font-weight: 400; display: block; }
+.lp-lead { font-size: clamp(17px, 1.6vw, 19px); line-height: 1.6; color: var(--ink-2); max-width: 34em; margin: 0 0 26px; }
+.lp-copy .lp-lead { margin-bottom: 0; }
+.lp-arguments { margin-top: 26px; }
+.lp-points { list-style: none; margin: 0 0 24px; padding: 0; display: grid; gap: 14px; }
+.lp-points li { position: relative; padding-left: 26px; line-height: 1.5; color: var(--ink-2); }
+.lp-points li::before { content: ""; position: absolute; left: 4px; top: .6em; width: 8px; height: 8px; background: var(--sage-600); border-radius: 2px; transform: rotate(45deg); }
+.lp-prix { font-size: 15px; color: var(--muted); border-top: 1px solid var(--line-strong); padding-top: 18px; margin: 0; }
+.lp-carte { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: clamp(22px, 3vw, 34px); box-shadow: 0 18px 44px rgba(31, 42, 36, .12); }
+.lp-carte h2 { font-size: clamp(22px, 2.6vw, 28px); margin: 0 0 8px; }
+.lp-merci { max-width: 720px; }
+.lp-merci h1 { font-size: clamp(32px, 5vw, 48px); line-height: 1.08; margin: 0 0 20px; }
+.lp-merci h1 em { font-style: italic; color: var(--sage-600); font-weight: 400; }
+.lp-footer { border-top: 1px solid var(--line-strong); background: var(--surface-2); padding: 22px 0; font-size: 13px; color: var(--muted); }
+.lp-footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; }
+.lp-footer nav { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.lp-footer a { color: var(--ink-2); }
+@media (max-width: 860px) { .lp-grid { grid-template-columns: 1fr; grid-template-areas: "copie" "carte" "args"; grid-template-rows: auto; row-gap: 28px; } }
