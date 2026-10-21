@@ -771,6 +771,23 @@ _DDL_STATS = (
 )
 
 
+# Contact Manager : portail d'origine et annonce visée par chaque message reçu (statistiques par
+# portail et par annonce), et rapport du lundi (réglage par utilisateur, une seule fois par semaine
+# grâce à rapport_hebdo_sent_on, qui garde la date du lundi du dernier envoi).
+_DDL_CONTACTS = (
+    "ALTER TABLE inbound_emails ADD COLUMN IF NOT EXISTS portail VARCHAR(20)",
+    "ALTER TABLE inbound_emails ADD COLUMN IF NOT EXISTS annonce VARCHAR(160)",
+    "ALTER TABLE inbound_emails ADD COLUMN IF NOT EXISTS annonce_ref VARCHAR(40)",
+    # Message écarté comme spam : son début et son expéditeur sont gardés 30 jours seulement, pour que l'agence
+    # puisse le récupérer (« Ce n'est pas du spam »). Effacés ensuite par _purger_journaux.
+    "ALTER TABLE inbound_emails ADD COLUMN IF NOT EXISTS corps_spam TEXT",
+    "ALTER TABLE inbound_emails ADD COLUMN IF NOT EXISTS expediteur_spam VARCHAR(255)",
+    "CREATE INDEX IF NOT EXISTS inbound_emails_stats_idx ON inbound_emails (user_id, received_at)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS rapport_hebdo_enabled BOOLEAN NOT NULL DEFAULT TRUE",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS rapport_hebdo_sent_on DATE",
+)
+
+
 def _assurer_schema():
     global _schema_pret
     if _schema_pret:
@@ -858,12 +875,18 @@ def _assurer_schema():
                                WHERE table_name = 'users' AND column_name = 'ia_enabled'),
                        EXISTS (SELECT 1 FROM information_schema.columns
                                WHERE table_name = 'leads' AND column_name = 'opposition_at'),
-                       to_regclass('contact_opposition') IS NOT NULL
+                       to_regclass('contact_opposition') IS NOT NULL,
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'inbound_emails' AND column_name = 'annonce_ref'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'users' AND column_name = 'rapport_hebdo_sent_on'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'inbound_emails' AND column_name = 'corps_spam')
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
                 for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
-                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS + _DDL_FACTURATION + _DDL_RECEPTION + _DDL_RGPD):
+                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS + _DDL_FACTURATION + _DDL_RECEPTION + _DDL_RGPD + _DDL_CONTACTS):
                     cur.execute(ddl)
             conn.commit()
             _schema_pret = True
@@ -1045,7 +1068,7 @@ def init_database(demo=False):
         ):
             cursor.execute(ddl)
         for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
-                    + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS + _DDL_FACTURATION + _DDL_RECEPTION + _DDL_RGPD):
+                    + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS + _DDL_FACTURATION + _DDL_RECEPTION + _DDL_RGPD + _DDL_CONTACTS):
             cursor.execute(ddl)
 
         # Vérifier si vide
@@ -1667,7 +1690,7 @@ def get_profile():
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, email, first_name, created_at, digest_enabled FROM users WHERE id = %s", (request.user_id,))
+        cur.execute("SELECT id, email, first_name, created_at, digest_enabled, rapport_hebdo_enabled FROM users WHERE id = %s", (request.user_id,))
         user = cur.fetchone()
         if not user:
             cur.close()
@@ -1684,6 +1707,7 @@ def get_profile():
         user['plan'] = agence.get('plan')
         user['role'] = request.role
         user['digest_enabled'] = bool(user.get('digest_enabled'))
+        user['rapport_hebdo_enabled'] = bool(user.get('rapport_hebdo_enabled'))
         user['is_admin'] = _est_admin(user['email'])
         return jsonify(user), 200
     except Exception:
@@ -3821,8 +3845,11 @@ def delete_lead(lead_id):
         with _base() as (conn, cur):
             # Le journal de réception garde l'identifiant du message (anti-doublon) mais ne doit rien
             # conserver qui permette de reconnaître la personne : objet et détail sont vidés avec la fiche.
-            cur.execute("UPDATE inbound_emails SET subject = NULL, detail = NULL WHERE lead_id = %s AND user_id = %s",
-                        (lead_id, request.agency_id))
+            # analysis = 'supprime' : la ligne reste comptée comme « prospect créé » dans les statistiques
+            # (le lien avec la fiche disparaît avec elle), sans rien conserver de reconnaissable.
+            cur.execute("""UPDATE inbound_emails SET subject = NULL, detail = NULL, annonce = NULL, annonce_ref = NULL,
+                                  analysis = 'supprime'
+                           WHERE lead_id = %s AND user_id = %s""", (lead_id, request.agency_id))
             cur.execute("DELETE FROM leads WHERE id = %s AND user_id = %s", (lead_id, request.agency_id))
             supprimes = cur.rowcount
             if supprimes:
@@ -5723,9 +5750,10 @@ def update_preferences():
     try:
         data = request.get_json(silent=True) or {}
         reponse = {}
-        if 'alerts_enabled' not in data and 'digest_enabled' not in data and 'ia_enabled' not in data:
+        if ('alerts_enabled' not in data and 'digest_enabled' not in data and 'ia_enabled' not in data
+                and 'rapport_hebdo_enabled' not in data):
             return jsonify({"message": "Valeur « alerts_enabled » attendue (true ou false)"}), 400
-        for cle in ('alerts_enabled', 'digest_enabled', 'ia_enabled'):
+        for cle in ('alerts_enabled', 'digest_enabled', 'ia_enabled', 'rapport_hebdo_enabled'):
             if cle in data and not isinstance(data[cle], bool):
                 return jsonify({"message": f"Valeur « {cle} » attendue (true ou false)"}), 400
         if 'ia_enabled' in data and request.role != 'admin':
@@ -5740,6 +5768,10 @@ def update_preferences():
             if 'digest_enabled' in data:
                 cur.execute("UPDATE users SET digest_enabled = %s WHERE id = %s", (data['digest_enabled'], request.user_id))
                 reponse['digest_enabled'] = data['digest_enabled']
+            if 'rapport_hebdo_enabled' in data:
+                cur.execute("UPDATE users SET rapport_hebdo_enabled = %s WHERE id = %s",
+                            (data['rapport_hebdo_enabled'], request.user_id))
+                reponse['rapport_hebdo_enabled'] = data['rapport_hebdo_enabled']
             conn.commit()
         return jsonify(reponse), 200
     except Exception:
@@ -7600,7 +7632,7 @@ def digest_send_all():
     synchronisation Gmail). Un utilisateur ne reçoit au plus qu'un e-mail par
     jour, et seulement s'il y a quelque chose à traiter."""
     cle = (os.getenv("CRON_SECRET") or "").strip()
-    if not cle or not secrets.compare_digest(request.headers.get('X-Cron-Key', ''), cle):
+    if not cle or not secrets.compare_digest(request.headers.get('X-Cron-Key', '').encode('utf-8'), cle.encode('utf-8')):
         return jsonify({"message": "Not found"}), 404
     if not _envoi_configure():
         return jsonify({"message": "Envoi d'e-mails non configuré"}), 503
@@ -8036,15 +8068,109 @@ def _est_alerte_portail(sujet, corps):
     return not (_telephones_dans(corps[:2000]) or _emails_dans(corps[:2000]))
 
 
+# Messages indésirables : publicité, arnaque, contenu pour adultes... Le filtre est volontairement
+# prudent : un message qui contient un téléphone ou une adresse e-mail n'est jamais écarté. Sans eux, deux mots
+# typiques de spam suffisent ; un seul ne suffit que dans un message transféré, avec plusieurs liens.
+# Un message écarté n'est pas réexaminé (son identifiant est mémorisé) : la liste de mots reste donc minimale.
+# Tout message écarté reste visible dans le journal de réception, avec la mention « spam ».
+# Seuls des mots qui n'ont AUCUN sens dans une demande immobilière figurent ici. Des mots comme casino (rue du
+# Casino), héritage (« bien reçu en héritage »), crypto, bitcoin, seo, loterie, prêt personnel, rendement garanti
+# (recopié depuis l'annonce de l'agence) apparaissent dans de vrais messages : ils ont été retirés.
+_SPAM_MOTS_RE = re.compile(
+    r"(?i)(?<![\w-])(viagra|cialis|forex|gagn(?:ez|er)\s+(?:de\s+l.argent|\d+)|"
+    r"r[eé]f[eé]rencement\s+(?:naturel|google)|backlinks?|marketing\s+digital|"
+    r"offre\s+promotionnelle|f[eé]licitations.{0,30}gagn|"
+    r"rencontres?\s+(?:coquines?|adultes?)|porn|xxx|bonus\s+gratuit)(?![\w-])")
+
+
+def _est_spam(portail, sujet, corps):
+    corps = corps or ''
+    debut = corps[:2000]
+    # Un vrai prospect laisse toujours un moyen de le joindre : on ne l'écarte jamais, quoi qu'il écrive.
+    if _telephones_dans(debut) or _emails_dans(debut):
+        return False
+    texte = f"{sujet or ''}\n{corps[:3000]}"
+    mots = {m.group(1).lower() for m in _SPAM_MOTS_RE.finditer(texte)}
+    if len(mots) >= 2:
+        return True
+    if mots and portail == 'portail':
+        return len(_URL_RE.findall(corps[:3000])) >= 3
+    return False
+
+
+# L'annonce visée : une référence (« Réf. A123 », « annonce n° 2345678901 ») et/ou un titre entre guillemets.
+# Rien d'autre n'est retenu : on ne garde pas un morceau de phrase qui pourrait contenir des données personnelles.
+_REF_ANNONCE_RE = re.compile(
+    r"(?i)(?:\br[ée]f(?:[ée]rence)?\s*(?:[:#]|n°|no\.?)|\br[ée]f\.)\s*([A-Z0-9][A-Z0-9_\-/.]{2,29})")
+_NUM_ANNONCE_RE = re.compile(r"(?i)\bannonce\s*(?:n°|no\.?|num[ée]ro|#)\s*:?\s*(\d{6,12})")
+_TITRE_ANNONCE_RE = re.compile(r"[«“\"]\s*([^»”\"\n]{4,120}?)\s*[»”\"]")
+# Dans le corps (texte du prospect), un titre n'est retenu que s'il suit explicitement le mot « annonce ».
+_TITRE_APRES_ANNONCE_RE = re.compile(r"(?i)\bannonce\s*:?\s*[«“\"]\s*([^»”\"\n]{4,120}?)\s*[»”\"]")
+# Ce qu'un titre d'annonce ne contient jamais : adresse précise, plaque, IBAN, date, civilité, lien.
+_TITRE_INTERDIT_RE = re.compile(
+    r"(?i)(?:\b\d{1,4}\s*(?:bis|ter)?\s*,?\s*(?:rue|avenue|av\.?|bd|boulevard|chemin|impasse|all[ée]e|route|quai|cours)\b"
+    r"|\b[A-Z]{2}-?\d{3}-?[A-Z]{2}\b|\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){3,}\b"
+    r"|\b\d{1,2}[/.]\d{1,2}[/.]\d{2,4}\b|\b(?:mme|mlle|monsieur|madame|docteur|dr|mr|m\.)\s+[A-ZÉÈ]"
+    r"|https?:|www\.|\b[a-z0-9-]+\.(?:com|fr|net|org|info|biz|ru|xyz|top|tld)\b)")
+
+
+def _titre_acceptable(titre):
+    if _TEL_TEXTE_RE.search(titre) or _EMAIL_TEXTE_RE.search(titre) or _TITRE_INTERDIT_RE.search(titre):
+        return False
+    chiffres = re.sub(r"\D", "", titre)
+    return len(chiffres) < 7
+
+
+def _ref_acceptable(candidate, texte, fin):
+    """Une référence d'annonce n'est ni un téléphone, ni le début d'une adresse e-mail."""
+    if texte[fin:fin + 1] == '@':
+        return False
+    chiffres = re.sub(r"\D", "", candidate)
+    if re.fullmatch(r"(?:0|33|0033)[1-9]\d{8}", chiffres) or len(chiffres) >= 10 and chiffres.startswith(('06', '07', '01', '02', '03', '04', '05', '09')):
+        return False
+    return True
+
+
+def _annonce_du_message(sujet, corps):
+    """(titre, référence) de l'annonce visée par un message, ou (None, None)."""
+    sujet = sujet or ''
+    debut = (corps or '')[:3000]
+    ref = None
+    for texte in (sujet, debut):
+        for motif in (_NUM_ANNONCE_RE, _REF_ANNONCE_RE):
+            m = motif.search(texte)
+            if m:
+                candidate = m.group(1).strip('.-/')
+                if any(c.isdigit() for c in candidate) and _ref_acceptable(candidate, texte, m.end(1)):
+                    ref = candidate[:40]
+                    break
+        if ref:
+            break
+    titre = None
+    # Le sujet est écrit par le portail ; le corps, lui, contient le texte libre du prospect.
+    m = _TITRE_ANNONCE_RE.search(sujet) or _TITRE_APRES_ANNONCE_RE.search(debut)
+    if m:
+        titre = ' '.join(m.group(1).split())[:160]
+        if not _titre_acceptable(titre):
+            titre = None
+    return titre, ref
+
+
 # ===== COORDONNÉES DU CONTACT : RÈGLES SANS IA =====
 # Le téléphone et l'e-mail sont ce que l'agence veut le plus ; on ne s'en
 # remet donc pas qu'à l'IA : des règles les repèrent dans le texte, et ce que
 # l'IA annonce doit figurer dans le message (jamais de numéro inventé).
 
 _URL_RE = re.compile(r'https?://\S+')
-_EMAIL_TEXTE_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}")
+# Partie locale : lettres (accentuées comprises), chiffres et . _ % + - ; le (?<!...) empêche de couper une adresse
+# en son milieu (« é.jean@... » ne doit pas devenir « .jean@... », une adresse fausse).
+_EMAIL_TEXTE_RE = re.compile(r"(?<![\w.%+\-])[\w%+\-](?:[\w.%+\-'’]*[\w%+\-])?@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}")
+# Séparateurs de numéro : espace (insécable compris), point, tiret, tirets typographiques et barre oblique.
+# Les groupes de chiffres sont libres (06 12 34 56 78, 0612 345 678, 061 234 5678, 0 6 12 34...) : _telephone_normalise
+# vérifie ensuite qu'il y a exactement 10 chiffres, et le numéro ne doit pas commencer au milieu d'un autre nombre.
 _TEL_TEXTE_RE = re.compile(
-    r"(?<![\d+])(?:(?:\+|00)33[\s.\-]?(?:\(0\)[\s.\-]?)?|0)[1-9](?:[\s.\-]?\d{2}){4}(?!\d)")
+    r"(?<![\d+])(?<!\d[\s.\-–—/])(?:(?:\+|00)33[\s.\-–—/]{0,2}(?:\(0\)[\s.\-–—/]{0,2})?|0[\s.\-–—/]{0,2})"
+    r"[1-9](?:[\s.\-–—/]{0,2}\d){8}(?!\d)")
 _DOMAINES_NON_CONTACT = ('seloger', 'leboncoin', 'ubiflow', 'logic-immo', 'bienici', 'brevo', 'sendinblue',
                          'sendgrid', 'mailjet', 'mandrillapp', 'amazonses', 'zelyro', 'google.com', 'pap.fr')
 _PREFIXES_NON_CONTACT = ('noreply', 'no-reply', 'no_reply', 'donotreply', 'do-not-reply',
@@ -8195,21 +8321,31 @@ def _coordonnees_fiables(champs, corps, exclure=()):
     return email, telephone
 
 
-def _noter_message(cur, message_id, user_id, source, lead_id=None, sujet=None, analyse=None, detail=None):
+def _noter_message(cur, message_id, user_id, source, lead_id=None, sujet=None, analyse=None, detail=None,
+                   portail=None, annonce=None, annonce_ref=None, corps_spam=None, expediteur_spam=None):
     """Retient un message traité (anti-doublon) et son issue, pour le journal
     de réception. L'objet, tronqué, n'est gardé que 90 jours. `analyse` dit
     comment le message a été lu (voir _ANALYSES_RECEPTION) ; `detail` porte le
-    code et le lien d'une confirmation de transfert Gmail."""
+    code et le lien d'une confirmation de transfert Gmail. `portail` garde le portail d'origine même
+    quand le message est ignoré (statistiques) ; `annonce` et `annonce_ref` disent quelle annonce était visée."""
     if not message_id:
         return
+    if portail is None and source in ('leboncoin', 'seloger', 'portail'):
+        portail = source
     cur.execute("""INSERT INTO inbound_emails (message_id, user_id, source, lead_id, subject, received_at,
-                                               analysis, detail)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING""",
+                                               analysis, detail, portail, annonce, annonce_ref, corps_spam, expediteur_spam)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING""",
                 (message_id, user_id, source, lead_id, _texte_court(sujet, 160), _maintenant(),
-                 analyse, _texte_court(detail, 600)))
+                 analyse, _texte_court(detail, 600), _texte_court(portail, 20),
+                 _texte_court(annonce, 160), _texte_court(annonce_ref, 40),
+                 (corps_spam or None) and corps_spam[:2000], _texte_court(expediteur_spam, 255)))
     if _random.random() < 0.02:
         cur.execute("UPDATE inbound_emails SET subject = NULL WHERE subject IS NOT NULL AND received_at < %s",
                     (_maintenant() - timedelta(days=90),))
+        # Le texte d'un message écarté ne dépend pas que de la tâche de purge : il est aussi effacé ici.
+        cur.execute("""UPDATE inbound_emails SET corps_spam = NULL, expediteur_spam = NULL
+                       WHERE received_at < %s AND (corps_spam IS NOT NULL OR expediteur_spam IS NOT NULL)""",
+                    (_maintenant() - timedelta(days=RETENTION_SPAM_JOURS),))
 
 
 _BALISE_HTML_RE = re.compile(r'<[a-zA-Z!/][^>]{0,200}>')
@@ -8355,7 +8491,19 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
         if message_id:
             _assurer_schema()
             with _base() as (conn, cur):
-                _noter_message(cur, message_id, user_id, 'alerte-portail', sujet=sujet)
+                _noter_message(cur, message_id, user_id, 'alerte-portail', sujet=sujet, portail=portail)
+                conn.commit()
+        return None
+
+    if not mode_test and _est_spam(portail, sujet, corps):
+        # Message indésirable : pas de prospect, mais le journal de réception le montre.
+        if message_id:
+            _assurer_schema()
+            with _base() as (conn, cur):
+                # Le début du message est gardé 30 jours pour permettre « Ce n'est pas du spam » ; un message
+                # écarté ne contient ni téléphone ni adresse e-mail dans ses 2000 premiers caractères.
+                _noter_message(cur, message_id, user_id, 'spam', sujet=sujet, portail=portail,
+                               corps_spam=corps, expediteur_spam=expediteur)
                 conn.commit()
         return None
 
@@ -8372,7 +8520,7 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
 
         reste_leads, _ = _reste(cur, user_id, 'leads')
         if reste_leads == 0:
-            _noter_message(cur, message_id, user_id, 'quota-atteint', sujet=sujet)
+            _noter_message(cur, message_id, user_id, 'quota-atteint', sujet=sujet, portail=portail)
             conn.commit()
             return None
 
@@ -8405,7 +8553,7 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
             # Pas de prospect créé, mais le message est retenu pour ne pas
             # être réexaminé à chaque cycle. On ne facture pas l'extraction
             # utilisée pour ce filtrage : elle n'a pas produit de prospect.
-            _noter_message(cur, message_id, user_id, 'ia-non-contact', sujet=sujet, analyse=analyse)
+            _noter_message(cur, message_id, user_id, 'ia-non-contact', sujet=sujet, analyse=analyse, portail=portail)
             conn.commit()
             return None
 
@@ -8444,7 +8592,7 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
             # (_envoyer_email_completion). On ne le crée pas, mais le message
             # est retenu pour ne pas être réexaminé à chaque cycle — comme
             # pour une alerte.
-            _noter_message(cur, message_id, user_id, 'portail-vide', sujet=sujet, analyse=analyse)
+            _noter_message(cur, message_id, user_id, 'portail-vide', sujet=sujet, analyse=analyse, portail=portail)
             conn.commit()
             return None
 
@@ -8491,7 +8639,16 @@ def _creer_lead_depuis_portail(user_id, portail, expediteur, sujet, corps, messa
             cur.execute("""INSERT INTO lead_notes (lead_id, user_id, kind, body, created_at)
                            VALUES (%s, %s, 'note', %s, %s)""",
                         (lead_id, user_id, notes[:3000], _maintenant()))
-        _noter_message(cur, message_id, user_id, portail, lead_id=lead_id, sujet=sujet, analyse=analyse)
+        titre_annonce, ref_annonce = _annonce_du_message(sujet, corps)
+        if ref_annonce:
+            # Une référence connue de l'agence donne le vrai titre du bien.
+            cur.execute("SELECT title FROM properties WHERE user_id = %s AND lower(reference) = lower(%s) LIMIT 1",
+                        (user_id, ref_annonce))
+            bien = cur.fetchone()
+            if bien and bien['title']:
+                titre_annonce = bien['title']
+        _noter_message(cur, message_id, user_id, portail, lead_id=lead_id, sujet=sujet, analyse=analyse,
+                       portail=portail, annonce=titre_annonce, annonce_ref=ref_annonce)
         conn.commit()
 
     # Après la fermeture de la transaction ci-dessus : _compter_extraction
@@ -9022,7 +9179,7 @@ def gmail_sync_all():
     par un navigateur : protégé par une clé partagée plutôt qu'un jeton de
     session, puisqu'il n'y a personne connecté derrière."""
     cle = (os.getenv("CRON_SECRET") or "").strip()
-    if not cle or not secrets.compare_digest(request.headers.get('X-Cron-Key', ''), cle):
+    if not cle or not secrets.compare_digest(request.headers.get('X-Cron-Key', '').encode('utf-8'), cle.encode('utf-8')):
         return jsonify({"message": "Not found"}), 404
     _assurer_schema()
     with _base() as (conn, cur):
@@ -9173,6 +9330,7 @@ _ISSUES_RECEPTION = {
     'gmail-ignore': "Message Gmail sans lien avec LeBonCoin ou SeLoger : ignoré",
     'quota-atteint': "Quota de prospects de votre forfait atteint : rien créé",
     'gmail-confirmation': "Confirmation de transfert Gmail (voir le code ci-dessus)",
+    'spam': "Message indésirable (spam) : ignoré",
 }
 _ANALYSES_RECEPTION = {
     'erreur': "L'analyse automatique n'a pas répondu : coordonnées lues par des règles simples seulement",
@@ -9193,7 +9351,8 @@ def journal_reception():
         with _base() as (conn, cur):
             jeton = _jeton_capture_mail(cur, request.agency_id)
             conn.commit()
-            cur.execute("""SELECT i.source, i.subject, i.received_at, i.lead_id, i.analysis, i.detail,
+            cur.execute("""SELECT i.id, i.source, i.subject, i.received_at, i.lead_id, i.analysis, i.detail,
+                                  (i.source = 'spam' AND i.corps_spam IS NOT NULL) AS rescapable,
                                   l.name AS lead_name
                            FROM inbound_emails i LEFT JOIN leads l ON l.id = i.lead_id
                            WHERE i.user_id = %s ORDER BY i.received_at DESC, i.id DESC LIMIT 30""",
@@ -9227,6 +9386,8 @@ def journal_reception():
             else:
                 resultat = _ISSUES_RECEPTION.get(r['source'], "Ignoré")
             messages.append({
+                "id": r['id'],
+                "can_rescue": bool(r['rescapable']),
                 "received_at": _iso(r['received_at']),
                 "origin": _ORIGINES_RECEPTION.get(r['source'], ''),
                 "subject": r['subject'] or '',
@@ -9248,6 +9409,316 @@ def journal_reception():
                 "gmail": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET),
             },
         }), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/api/v1/reception/messages/<int:message_id>/not-spam', methods=['POST'])
+@limiter.limit("30 per hour", key_func=_cle_utilisateur)
+@token_required
+def message_pas_spam(message_id):
+    """« Ce n'est pas du spam » : crée le prospect d'un message écarté par le filtre, tant que son texte est
+    encore conservé (30 jours). Le filtre est volontairement prudent, mais l'agence a le dernier mot."""
+    try:
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("""SELECT id, message_id, portail, subject, corps_spam, expediteur_spam, received_at FROM inbound_emails
+                           WHERE id = %s AND user_id = %s AND source = 'spam' FOR UPDATE""",
+                        (message_id, request.agency_id))
+            m = cur.fetchone()
+            if not m:
+                return jsonify({"message": "Message introuvable"}), 404
+            if not m['corps_spam'] or m['received_at'] < _maintenant() - timedelta(days=RETENTION_SPAM_JOURS):
+                return jsonify({"message": "Ce message date de plus de 30 jours : il n'est plus conservé."}), 410
+            cur.execute("DELETE FROM inbound_emails WHERE id = %s", (m['id'],))
+            conn.commit()
+        lead_id = _creer_lead_depuis_portail(request.agency_id, m['portail'] or 'portail', m['expediteur_spam'] or '',
+                                             m['subject'] or '', m['corps_spam'], m['message_id'], mode_test=True)
+        if not lead_id:
+            # Rien n'a été créé (forfait atteint, message vide...) : si le message n'a pas été noté par la création,
+            # il retourne dans le journal comme avant, pour pouvoir réessayer.
+            with _base() as (conn, cur):
+                cur.execute("SELECT 1 FROM inbound_emails WHERE message_id = %s", (m['message_id'],))
+                if not cur.fetchone():
+                    _noter_message(cur, m['message_id'], request.agency_id, 'spam', sujet=m['subject'], portail=m['portail'],
+                                   corps_spam=m['corps_spam'], expediteur_spam=m['expediteur_spam'])
+                    conn.commit()
+            return jsonify({"created": False, "message": "Le prospect n'a pas pu être créé "
+                                                           "(limite de votre forfait atteinte ?)."}), 200
+        return jsonify({"created": True, "lead_id": lead_id}), 200
+    except Exception:
+        return erreur_interne()
+
+
+# ===== CONTACT MANAGER : STATISTIQUES PAR PORTAIL ET PAR ANNONCE, RAPPORT DU LUNDI =====
+# Ce que fait un « contact manager » de diffusion, à partir de ce que Zelyro reçoit déjà : combien de
+# demandes par portail, lesquelles ont donné un prospect, lesquelles ont été écartées (alerte, spam...),
+# quelles annonces attirent le plus, et un rapport envoyé chaque lundi.
+
+_CANAUX_STATS = ('leboncoin', 'seloger', 'portail', 'api')
+_LIBELLE_CANAL = {'leboncoin': 'LeBonCoin', 'seloger': 'SeLoger', 'portail': 'E-mail transféré',
+                  'api': 'API partenaire', 'inconnu': 'Portail non précisé'}
+_ECARTS_STATS = {'alerte-portail': 'alertes', 'spam': 'spam', 'ia-non-contact': 'non_contact',
+                 'portail-vide': 'vides', 'quota-atteint': 'quota'}
+_LIBELLE_ECART = {'alertes': "alerte{s} de portail", 'spam': "spam", 'non_contact': "message{s} qui n'étai{v} pas une demande",
+                  'vides': "message{s} sans coordonnées", 'quota': "message{s} refusé{s} (quota atteint)"}
+_MOIS_FR = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre',
+            'novembre', 'décembre']
+
+
+def _statistiques_reception(cur, agence_id, debut, fin):
+    """Les demandes reçues entre `debut` (inclus) et `fin` (exclu) : totaux, par portail, par annonce
+    et par type de bien. Les exports de biens et les confirmations Gmail n'en font pas partie."""
+    cur.execute("""SELECT source, portail, annonce, annonce_ref, lead_id, analysis FROM inbound_emails
+                   WHERE user_id = %s AND received_at >= %s AND received_at < %s
+                     AND (source = ANY(%s) OR source = ANY(%s))""",
+                (agence_id, debut, fin, list(_CANAUX_STATS), list(_ECARTS_STATS)))
+    lignes = cur.fetchall()
+    total = {"received": 0, "created": 0, "ignored": 0, "spam": 0}
+    ecarts = {}
+    canaux = {}
+    annonces = {}
+    for r in lignes:
+        canal = r['portail'] if r['portail'] in _CANAUX_STATS else (r['source'] if r['source'] in _CANAUX_STATS else 'inconnu')
+        c = canaux.setdefault(canal, {"received": 0, "created": 0, "ignored": 0, "spam": 0})
+        for t in (total, c):
+            t["received"] += 1
+        # Une ligne de canal sans fiche (prospect supprimé depuis, par exemple pour un effacement RGPD) reste
+        # comptée comme prospect créé : les statistiques ne doivent pas bouger quand on supprime une fiche.
+        if r['lead_id'] is not None or r['analysis'] == 'supprime':
+            for t in (total, c):
+                t["created"] += 1
+            cle = r['annonce_ref'] or r['annonce']
+            if cle:
+                a = annonces.setdefault(cle.lower(), {"title": r['annonce'], "reference": r['annonce_ref'],
+                                                      "contacts": 0, "portals": {}})
+                a["contacts"] += 1
+                a["title"] = a["title"] or r['annonce']
+                a["reference"] = a["reference"] or r['annonce_ref']
+                nom = _LIBELLE_CANAL[canal]
+                a["portals"][nom] = a["portals"].get(nom, 0) + 1
+        else:
+            for t in (total, c):
+                t["ignored"] += 1
+            ecart = _ECARTS_STATS.get(r['source'])
+            if ecart:
+                ecarts[ecart] = ecarts.get(ecart, 0) + 1
+            if r['source'] == 'spam':
+                for t in (total, c):
+                    t["spam"] += 1
+    cur.execute("""SELECT COALESCE(l.transaction, 'vente') AS transaction, l.property_type, COUNT(*) AS n
+                   FROM inbound_emails i JOIN leads l ON l.id = i.lead_id
+                   WHERE i.user_id = %s AND i.received_at >= %s AND i.received_at < %s AND i.source = ANY(%s)
+                   GROUP BY 1, 2 ORDER BY n DESC""", (agence_id, debut, fin, list(_CANAUX_STATS)))
+    types = [{"transaction": t['transaction'], "property_type": t['property_type'], "count": t['n']}
+             for t in cur.fetchall()]
+    par_portail = [{"portal": k, "label": _LIBELLE_CANAL[k], **v}
+                   for k, v in sorted(canaux.items(), key=lambda kv: -kv[1]["received"])]
+    par_annonce = sorted(annonces.values(), key=lambda a: (-a["contacts"], a["title"] or a["reference"] or ''))[:10]
+    return {"totals": total, "ignored_reasons": ecarts, "by_portal": par_portail,
+            "by_listing": par_annonce, "by_type": types}
+
+
+@app.route('/api/v1/reception/stats', methods=['GET'])
+@token_required
+def stats_reception():
+    """Statistiques des demandes reçues par l'agence sur 7, 30 ou 90 jours."""
+    try:
+        try:
+            jours = int(request.args.get('days', 30))
+        except ValueError:
+            jours = 30
+        if jours not in (7, 30, 90):
+            jours = 30
+        _assurer_schema()
+        fin = _maintenant() + timedelta(seconds=1)
+        with _base() as (conn, cur):
+            stats = _statistiques_reception(cur, request.agency_id, fin - timedelta(days=jours), fin)
+        stats["days"] = jours
+        return jsonify(stats), 200
+    except Exception:
+        return erreur_interne()
+
+
+def _periode_lisible(debut, fin_incluse):
+    if debut.month == fin_incluse.month:
+        return f"du {debut.day} au {fin_incluse.day} {_MOIS_FR[fin_incluse.month - 1]}"
+    return f"du {debut.day} {_MOIS_FR[debut.month - 1]} au {fin_incluse.day} {_MOIS_FR[fin_incluse.month - 1]}"
+
+
+def _minuit_paris_en_utc(jour):
+    """Minuit (heure de Paris) du jour donné, converti en UTC naïf comme les dates de la base."""
+    from zoneinfo import ZoneInfo
+    return (datetime.combine(jour, datetime.min.time(), tzinfo=ZoneInfo("Europe/Paris"))
+            .astimezone(timezone.utc).replace(tzinfo=None))
+
+
+def _construire_rapport_hebdo(cur, agence_id, aujourdhui):
+    """Le rapport de la semaine écoulée (du lundi au dimanche), ou None s'il n'y a eu aucune demande."""
+    lundi = aujourdhui - timedelta(days=aujourdhui.weekday())
+    # Les dates en base sont en UTC : les bornes de la semaine (lundi 00:00 heure de Paris) y sont converties,
+    # y compris aux changements d'heure (semaines de 167 h ou 169 h).
+    debut = _minuit_paris_en_utc(lundi - timedelta(days=7))
+    fin = _minuit_paris_en_utc(lundi)
+    stats = _statistiques_reception(cur, agence_id, debut, fin)
+    t = stats["totals"]
+    if t["received"] == 0:
+        return None
+    avant = _statistiques_reception(cur, agence_id, _minuit_paris_en_utc(lundi - timedelta(days=14)), debut)["totals"]
+    sections = []
+    accord = lambda n, mot: f"{n} {mot}{'s' if n > 1 else ''}"
+    lignes = [f"{accord(t['received'], 'message')} reçu{'s' if t['received'] > 1 else ''}, dont "
+              f"{accord(t['created'], 'prospect')} créé{'s' if t['created'] > 1 else ''}"]
+    if t["ignored"]:
+        details = []
+        for cle, n in stats["ignored_reasons"].items():
+            modele = _LIBELLE_ECART[cle].format(s='s' if n > 1 else '', v='ent' if n > 1 else 't')
+            details.append(f"{n} {modele}" if cle != 'alertes' else f"{n} {modele}")
+        lignes.append(f"{accord(t['ignored'], 'message')} ignoré{'s' if t['ignored'] > 1 else ''}"
+                      + (" : " + ", ".join(details) if details else ""))
+    if avant["received"]:
+        lignes.append(f"Semaine précédente : {accord(avant['received'], 'message')} reçu{'s' if avant['received'] > 1 else ''}, "
+                      f"dont {accord(avant['created'], 'prospect')} créé{'s' if avant['created'] > 1 else ''}")
+    sections.append({"titre": "Votre semaine", "lignes": lignes, "reste": 0})
+    if stats["by_portal"]:
+        sections.append({"titre": "Par portail", "reste": 0, "lignes": [
+            f"{p['label']} — {accord(p['received'], 'message')}, {accord(p['created'], 'prospect')} créé{'s' if p['created'] > 1 else ''}"
+            for p in stats["by_portal"]]})
+    if stats["by_listing"]:
+        lignes = []
+        for a in stats["by_listing"][:5]:
+            nom = a["title"] or "Annonce"
+            if a["reference"]:
+                nom += f" (réf. {a['reference']})"
+            portails = ", ".join(f"{k} {v}" for k, v in a["portals"].items())
+            lignes.append(f"{nom} — {accord(a['contacts'], 'contact')} ({portails})")
+        sections.append({"titre": "Annonces les plus demandées", "lignes": lignes, "reste": 0})
+    cur.execute("""SELECT COUNT(*) AS n FROM leads WHERE user_id = %s AND created_at >= %s AND created_at < %s
+                   AND status = 'nouveau' AND first_contact_at IS NULL""", (agence_id, debut, fin))
+    a_contacter = cur.fetchone()['n']
+    if a_contacter:
+        sections.append({"titre": "À traiter", "reste": 0, "lignes": [
+            f"{accord(a_contacter, 'prospect')} reçu{'s' if a_contacter > 1 else ''} cette semaine n'{'est' if a_contacter < 2 else 'ont'} pas encore été contacté{'s' if a_contacter > 1 else ''}."]})
+    return {"periode": _periode_lisible(lundi - timedelta(days=7), lundi - timedelta(days=1)),
+            "sections": sections, "nb": t["created"]}
+
+
+def _gabarit_rapport(prenom, periode, sections, site):
+    """Rapport du lundi, en texte et en HTML (listes simples, sobres)."""
+    salut = f"Bonjour {prenom}," if prenom else "Bonjour,"
+    intro = f"Voici le bilan des demandes reçues {periode}."
+    texte = [salut, intro]
+    corps = (f'<p style="margin:0 0 16px;line-height:1.6">{_html.escape(salut)}</p>'
+             f'<p style="margin:0 0 8px;line-height:1.6">{_html.escape(intro)}</p>')
+    for sec in sections:
+        texte.append(sec["titre"] + "\n" + "\n".join("- " + x for x in sec['lignes']))
+        items = "".join(f'<li style="margin:0 0 6px">{_html.escape(x)}</li>' for x in sec['lignes'])
+        corps += (f'<h4 style="margin:22px 0 8px;font-size:14px;color:#3E4F43">{_html.escape(sec["titre"])}</h4>'
+                  f'<ul style="margin:0;padding-left:20px;line-height:1.5;font-size:14px">{items}</ul>')
+    lien = f"{site}/dashboard.html"
+    pied = "Vous ne souhaitez plus recevoir ce rapport ? Décochez « Rapport du lundi » dans Mon compte."
+    texte.append(f"Ouvrir mon tableau de bord : {lien}")
+    texte.append(pied + f" ({site}/compte.html)")
+    corps += (f'<p style="margin:24px 0"><a href="{_html.escape(lien)}" style="background:#4F6353;color:#ffffff;'
+              'text-decoration:none;padding:12px 22px;border-radius:6px;display:inline-block">'
+              'Ouvrir mon tableau de bord</a></p>'
+              f'<p style="margin:0;color:#6A7168;font-size:13px;line-height:1.5">{_html.escape(pied)}</p>')
+    html = ('<div style="font-family:Arial,Helvetica,sans-serif;color:#1F2A24;max-width:560px;margin:0 auto;padding:24px">'
+            + _entete_logo_email() + corps + '</div>')
+    return "\n\n".join(texte) + "\n\nZelyro", html
+
+
+def _envoyer_rapport(utilisateur, rapport):
+    sujet = f"Zelyro — vos demandes {rapport['periode']}"
+    texte, html = _gabarit_rapport(_nom_membre(utilisateur['first_name'], '') if utilisateur['first_name'] else '',
+                                   rapport['periode'], rapport['sections'], _site_url())
+    return bool(_envoyer_email(utilisateur['email'], sujet, texte, html))
+
+
+RAPPORT_LOT_MAX = 50   # agences traitées par appel : l'envoi est séquentiel, la requête ne doit pas dépasser le délai du serveur
+
+
+@app.route('/internal/rapport-hebdo/send', methods=['POST'])
+def rapport_hebdo_send_all():
+    """À appeler chaque lundi matin par la tâche planifiée (même clé que l'e-mail du matin). Seuls les
+    directeurs d'agence le reçoivent, une fois par semaine, et seulement s'il y a eu des demandes."""
+    cle = (os.getenv("CRON_SECRET") or "").strip()
+    if not cle or not secrets.compare_digest(request.headers.get('X-Cron-Key', '').encode('utf-8'), cle.encode('utf-8')):
+        return jsonify({"message": "Not found"}), 404
+    if not _envoi_configure():
+        return jsonify({"message": "Envoi d'e-mails non configuré"}), 503
+    _assurer_schema()
+    aujourdhui = _aujourdhui()
+    lundi = aujourdhui - timedelta(days=aujourdhui.weekday())
+    with _base() as (conn, cur):
+        cur.execute("""
+            SELECT u.id, u.email, u.first_name, u.id AS agence_id, u.rapport_hebdo_sent_on AS precedente
+            FROM users u
+            WHERE u.is_active AND u.agency_owner_id IS NULL AND COALESCE(u.role, 'admin') = 'admin'
+              AND u.rapport_hebdo_enabled
+              AND (u.rapport_hebdo_sent_on IS NULL OR u.rapport_hebdo_sent_on < %s)
+            ORDER BY u.id
+            LIMIT %s
+        """, (lundi, RAPPORT_LOT_MAX))
+        destinataires = cur.fetchall()
+    envoyes = 0
+    for u in destinataires:
+        try:
+            with _base() as (conn, cur):
+                # La semaine est réservée avant l'envoi : deux appels simultanés n'enverraient jamais deux fois.
+                cur.execute("""UPDATE users SET rapport_hebdo_sent_on = %s
+                               WHERE id = %s AND (rapport_hebdo_sent_on IS NULL OR rapport_hebdo_sent_on < %s)
+                               RETURNING id""", (lundi, u['id'], lundi))
+                if not cur.fetchone():
+                    conn.rollback()
+                    continue
+                conn.commit()
+                rapport = _construire_rapport_hebdo(cur, u['agence_id'], aujourdhui)
+                if not rapport:
+                    continue          # aucune demande cette semaine : rien à envoyer, et la semaine reste réservée
+                if _envoyer_rapport(u, rapport):
+                    envoyes += 1
+                else:
+                    cur.execute("UPDATE users SET rapport_hebdo_sent_on = %s WHERE id = %s AND rapport_hebdo_sent_on = %s",
+                                (u['precedente'], u['id'], lundi))
+                    conn.commit()
+        except Exception:
+            app.logger.exception("Rapport du lundi : échec pour l'utilisateur %s", u['id'])
+            # Une exception (base, Brevo, timeout) ne doit pas faire perdre le rapport de la semaine :
+            # la réservation est rendue, le prochain appel de la tâche planifiée réessaiera.
+            try:
+                with _base() as (conn2, cur2):
+                    cur2.execute("UPDATE users SET rapport_hebdo_sent_on = %s WHERE id = %s AND rapport_hebdo_sent_on = %s",
+                                 (u['precedente'], u['id'], lundi))
+                    conn2.commit()
+            except Exception:
+                app.logger.exception("Rapport du lundi : réservation non restituée pour l'utilisateur %s", u['id'])
+    # lot_complet : il peut rester des agences à traiter, la tâche planifiée peut rappeler la route.
+    return jsonify({"destinataires": len(destinataires), "envoyes": envoyes,
+                    "lot_complet": len(destinataires) >= RAPPORT_LOT_MAX}), 200
+
+
+@app.route('/api/v1/rapport-hebdo/preview', methods=['POST'])
+@limiter.limit("10 per hour", key_func=_cle_utilisateur)
+@token_required
+def rapport_hebdo_preview():
+    """Envoie dès maintenant à l'administrateur connecté le rapport de la semaine écoulée."""
+    try:
+        if request.role != 'admin':
+            return jsonify({"message": "Réservé à l'administrateur de l'agence"}), 403
+        if not _envoi_configure():
+            return jsonify({"message": "L'envoi d'e-mails n'est pas encore configuré sur le serveur."}), 503
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("SELECT email, first_name FROM users WHERE id = %s", (request.user_id,))
+            moi = cur.fetchone()
+            rapport = _construire_rapport_hebdo(cur, request.agency_id, _aujourdhui())
+        if not rapport:
+            return jsonify({"sent": False, "message": "Aucune demande reçue la semaine dernière : le rapport "
+                            "n'est envoyé que s'il y a eu de l'activité."}), 200
+        if _envoyer_rapport({"email": moi['email'], "first_name": moi['first_name']}, rapport):
+            return jsonify({"sent": True, "message": f"Rapport envoyé à {moi['email']}."}), 200
+        return jsonify({"sent": False, "message": "L'envoi a échoué, réessayez dans un instant."}), 200
     except Exception:
         return erreur_interne()
 
@@ -10953,6 +11424,7 @@ def stripe_webhook():
 DELAI_PURGE_JOURS = int(os.getenv("DELAI_PURGE_JOURS", "30"))
 RETENTION_JOURNAL_RECEPTION_JOURS = 90
 RETENTION_TECHNIQUE_JOURS = 90
+RETENTION_SPAM_JOURS = 30   # durée pendant laquelle un message écarté peut être récupéré par l'agence
 EXPORT_PHOTOS_MAX_OCTETS = 150 * 1024 * 1024
 
 
@@ -11060,6 +11532,9 @@ def _purger_journaux():
         cur.execute("DELETE FROM password_resets WHERE expires_at < %s", (maintenant - timedelta(hours=24),))
         cur.execute("DELETE FROM inbound_emails WHERE received_at < %s",
                     (maintenant - timedelta(days=RETENTION_JOURNAL_RECEPTION_JOURS),))
+        cur.execute("""UPDATE inbound_emails SET corps_spam = NULL, expediteur_spam = NULL
+                       WHERE received_at < %s AND (corps_spam IS NOT NULL OR expediteur_spam IS NOT NULL)""",
+                    (maintenant - timedelta(days=RETENTION_SPAM_JOURS),))
         cur.execute("DELETE FROM stripe_events WHERE received_at < %s",
                     (maintenant - timedelta(days=RETENTION_TECHNIQUE_JOURS),))
         cur.execute("DELETE FROM invitations WHERE expires_at < %s",
