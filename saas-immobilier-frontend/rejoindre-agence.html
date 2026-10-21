@@ -138,6 +138,12 @@
                             <button type="submit" disabled={loading || !infos}>
                                 {loading ? 'Création…' : 'Créer mon compte'}
                             </button>
+                            <p className="field-hint" style={{ textAlign: 'center', marginTop: '14px' }}>
+                                Ces informations servent uniquement à créer votre compte et à vous connecter à Zelyro au sein de l'agence
+                                qui vous a invité. Elles sont conservées pendant la durée du contrat de l'agence, puis 30 jours.
+                                Pour les faire effacer : <a href="mailto:contact@zelyro.fr" style={{ color: 'inherit' }}>contact@zelyro.fr</a>.
+                                Voir la <a href="/confidentialite.html" style={{ color: 'inherit' }}>politique de confidentialité</a>.
+                            </p>
                         </form>
                     )}
 
