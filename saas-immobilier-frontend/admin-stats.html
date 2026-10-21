@@ -73,10 +73,21 @@
         const appareilLibelle = { ordinateur: 'Ordinateur', mobile: 'Mobile', tablette: 'Tablette' };
 
         // Projections du fond de carte (les mêmes formules que celles du script qui l'a dessiné).
+        function cartePour(vue) {
+            const c = window.ZELYRO_CARTE;
+            return vue === 'france' ? c.france : (vue === 'europe' ? c.europe : c.monde);
+        }
         function projeter(vue, lon, lat) {
-            const m = vue === 'france' ? window.ZELYRO_CARTE.france : window.ZELYRO_CARTE.monde;
+            const m = cartePour(vue);
             if (vue === 'france') {
                 return [m.tx + m.k * lon * Math.PI / 180, m.ty - m.k * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))];
+            }
+            if (vue === 'europe') {
+                // Projection azimutale équivalente de Lambert, centrée sur l'Europe (lon0, lat0).
+                const l = (lon - m.lon0) * Math.PI / 180, p = lat * Math.PI / 180, p0 = m.lat0 * Math.PI / 180;
+                const kk = Math.sqrt(2 / (1 + Math.sin(p0) * Math.sin(p) + Math.cos(p0) * Math.cos(p) * Math.cos(l)));
+                return [m.tx + m.k * kk * Math.cos(p) * Math.sin(l),
+                        m.ty - m.k * kk * (Math.cos(p0) * Math.sin(p) - Math.sin(p0) * Math.cos(p) * Math.cos(l))];
             }
             const l = lon * Math.PI / 180, p = lat * Math.PI / 180, p2 = p * p, p4 = p2 * p2;
             const X = l * (0.8707 - 0.131979 * p2 + p4 * (-0.013791 + p4 * (0.003971 * p2 - 0.001529 * p4)));
@@ -85,8 +96,8 @@
         }
 
         function Carte({ vue, direct, historique }) {
-            const m = vue === 'france' ? window.ZELYRO_CARTE.france : window.ZELYRO_CARTE.monde;
-            const echelle = vue === 'france' ? 1.5 : 1;
+            const m = cartePour(vue);
+            const echelle = vue === 'france' ? 1.5 : (vue === 'europe' ? 1.25 : 1);
             const place = (liste) => liste.map((v) => ({ ...v, xy: projeter(vue, v.lon, v.lat) }))
                 .filter((v) => v.xy[0] >= 0 && v.xy[0] <= m.w && v.xy[1] >= 0 && v.xy[1] <= m.h);
             const hist = place(historique);
@@ -98,7 +109,8 @@
                     <svg className="carte-svg" viewBox={`0 0 ${m.w} ${m.h}`} role="img"
                         aria-label="Carte des villes d'où le site est visité">
                         {vue === 'monde' && <path d={m.contour} fill="var(--surface-2)" />}
-                        <path d={m.d} fill="var(--sage-100)" stroke="#fff" strokeWidth={vue === 'france' ? 1 : 0.5} strokeLinejoin="round" />
+                        {m.d_autres && <path d={m.d_autres} fill="var(--line)" stroke="#fff" strokeWidth="0.6" strokeLinejoin="round" />}
+                        <path d={m.d} fill="var(--sage-100)" stroke="#fff" strokeWidth={vue === 'france' ? 1 : (vue === 'europe' ? 0.7 : 0.5)} strokeLinejoin="round" />
                         {m.d_france && <path d={m.d_france} fill="var(--sage-300)" fillOpacity="0.55" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round" />}
                         {hist.map((v) => (
                             <circle key={'h' + v.pays + v.ville} cx={v.xy[0]} cy={v.xy[1]}
@@ -313,6 +325,7 @@
                                         <h2 className="panel-title">Carte</h2>
                                         <div className="carte-bascule" role="group" aria-label="Fond de carte">
                                             <button className={vue === 'monde' ? 'actif' : ''} onClick={() => setVue('monde')}>Monde</button>
+                                            <button className={vue === 'europe' ? 'actif' : ''} onClick={() => setVue('europe')}>Europe</button>
                                             <button className={vue === 'france' ? 'actif' : ''} onClick={() => setVue('france')}>France</button>
                                         </div>
                                     </div>
