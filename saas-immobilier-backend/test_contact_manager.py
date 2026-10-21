@@ -465,6 +465,35 @@ class FormulaireAutomatique(Base):
         self.envoyer(adresse, expediteur="cm-f7@x.fr", texte="Bonjour, test. Tel : 06 55 44 33 22")
         self.assertEqual(self.mails_formulaire(), [])
 
+    def test_boucle_notification_zelyro_ignoree(self):
+        """Une notification de Zelyro renvoyée par un filtre Gmail ne crée ni prospect ni nouveau mail."""
+        adresse, t = self.adresse("cm-f20@x.fr")
+        avant = len(self.envoyes)
+        with mock.patch.dict(os.environ, {"MAIL_FROM": "contact@zelyro.fr"}):
+            # 1. expéditeur = adresse d'envoi de Zelyro
+            self.envoyer(adresse, expediteur="contact@zelyro.fr", sujet="Nouveau prospect : Thomas Lefèvre",
+                         texte="Thomas Lefèvre vous a contacté. Tel : 06 11 22 33 44")
+            # 2. transféré à la main : sujet et texte de Zelyro
+            self.envoyer(adresse, expediteur="tb@zelyro.fr", sujet="Fwd: Nouveau prospect via SeLoger : Sophie Martin",
+                         texte="Bonjour, Sophie Martin vous a contacté via une annonce SeLoger. Tel : 06 22 33 44 55")
+            # 3. seul le texte trahit l'origine
+            self.envoyer(adresse, expediteur="tb@zelyro.fr", sujet="Fwd: info",
+                         texte="Paul vous a contacté par e-mail, capté automatiquement par Zelyro. Tel : 06 33 44 55 66")
+            # 4. le formulaire envoyé au prospect
+            self.envoyer(adresse, expediteur="tb@zelyro.fr", sujet="Précisez votre recherche — Agence Test",
+                         texte="Bonjour, merci. Tel : 06 44 55 66 77")
+        self.assertEqual(self.leads(t), [])
+        self.assertEqual(len(self.envoyes), avant)
+        n = self.sql("SELECT COUNT(*) FROM inbound_emails WHERE source = 'zelyro-boucle'")[0][0]
+        self.assertGreaterEqual(n, 4)
+
+    def test_mail_normal_de_la_meme_adresse_garde_son_prospect(self):
+        adresse, t = self.adresse("cm-f21@x.fr")
+        with mock.patch.dict(os.environ, {"MAIL_FROM": "contact@zelyro.fr"}):
+            self.envoyer(adresse, expediteur="tb@zelyro.fr", sujet="Demande de visite - maison Senlis",
+                         texte="Bonjour, je veux visiter. Nom : Paul Durand\nTéléphone : 06 11 22 33 44")
+        self.assertEqual(len(self.leads(t)), 1)
+
     def test_plafond_par_jour(self):
         adresse, t = self.adresse("cm-f8@x.fr")
         with mock.patch.object(backend, "FORMULAIRES_AUTO_PAR_JOUR", 2):

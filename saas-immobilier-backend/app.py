@@ -8456,6 +8456,26 @@ def _message_automatique(item, expediteur):
     return local.startswith(_PREFIXES_NON_CONTACT) or local in ('notification', 'notifications', 'newsletter', 'info-noreply')
 
 
+_SUJETS_ZELYRO_RE = re.compile(
+    r"(?i)^\s*(?:nouveau prospect\s*(?::|via\b)|pr[ée]cisez votre recherche\s*[—–-]|votre visite\s*:|visite confirm[ée]e\s*:|"
+    r"votre cl[ée] d'activation zelyro|r[ée]initialisation de votre mot de passe zelyro)")
+_MARQUEURS_ZELYRO = ("capté automatiquement par zelyro", "capte automatiquement par zelyro")
+
+
+def _message_de_zelyro(expediteur, sujet, corps):
+    """Vrai pour un e-mail que Zelyro a lui-même envoyé (notification de nouveau prospect, formulaire « Précisez
+    votre recherche »...) et qui revient vers l'adresse de capture, typiquement parce qu'un filtre de transfert
+    Gmail trop large le renvoie. Sans cette garde : prospect créé, notification envoyée, renvoyée, recréée..."""
+    envoyeur = (os.getenv("MAIL_FROM") or "").strip().lower()
+    if envoyeur and (expediteur or '').strip().lower() == envoyeur:
+        return True
+    sujet_nu = _SUJET_TRANSFERE_RE.sub('', sujet or '')
+    if _SUJETS_ZELYRO_RE.match(sujet_nu):
+        return True
+    debut = (corps or '')[:6000].lower()
+    return any(m in debut for m in _MARQUEURS_ZELYRO)
+
+
 def _traiter_email_entrant(item):
     """Transforme un e-mail entrant (notification LeBonCoin/SeLoger transférée
     par un agent) en prospect. Ne lève jamais : une erreur reste dans les
@@ -8479,6 +8499,13 @@ def _traiter_email_entrant(item):
     expediteur = ((item.get('From') or {}).get('Address') or '').strip()
     portail = _source_portail(expediteur)
     sujet = _texte_court(item.get('Subject'), 255) or ''
+    if _message_de_zelyro(expediteur, sujet, _corps_texte_email(item)[:6000]):
+        # Boucle : on n'en fait ni prospect ni notification, on le retient seulement pour le journal.
+        if message_id:
+            with _base() as (conn, cur):
+                _noter_message(cur, message_id, user_id, 'zelyro-boucle', sujet=sujet)
+                conn.commit()
+        return
     mode_test = False
     if portail == 'portail':
         with _base() as (conn, cur):
@@ -9378,6 +9405,7 @@ _ISSUES_RECEPTION = {
     'quota-atteint': "Quota de prospects de votre forfait atteint : rien créé",
     'gmail-confirmation': "Confirmation de transfert Gmail (voir le code ci-dessus)",
     'spam': "Message indésirable (spam) : ignoré",
+    'zelyro-boucle': "E-mail envoyé par Zelyro lui-même (notification) : ignoré. Vérifiez votre filtre de transfert Gmail.",
 }
 _ANALYSES_RECEPTION = {
     'erreur': "L'analyse automatique n'a pas répondu : coordonnées lues par des règles simples seulement",
