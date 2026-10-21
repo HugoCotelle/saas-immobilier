@@ -12,6 +12,7 @@
 <script>document.documentElement.className+=' js';</script>
 <script src="/societe.js" defer></script>
 <script src="/stats.js" defer></script>
+<script src="/demande-demo.js" defer></script>
 </head>
 <body class="pub">
 <a class="skip-link" href="#contenu">Aller au contenu</a>
@@ -43,11 +44,11 @@
             <a href="/#securite">Sécurité</a>
             <a href="/#tarifs">Tarifs</a>
             <a href="/#faq">FAQ</a>
-            <a class="nav-demo" href="mailto:contact@zelyro.fr?subject=Demande%20de%20d%C3%A9mo%20Zelyro&amp;body=Bonjour%2C%0D%0A%0D%0AJe%20souhaite%20une%20d%C3%A9monstration%20de%20Zelyro.%0D%0A%0D%0AAgence%20%3A%0D%0AVille%20%3A%0D%0AT%C3%A9l%C3%A9phone%20%3A%0D%0A%0D%0AMerci.">Demander une démo</a>
+            <a class="nav-demo" href="mailto:contact@zelyro.fr?subject=Demande%20de%20d%C3%A9mo%20Zelyro" data-demo>Demander une démo</a>
         </nav>
         <div class="header-actions">
             <a class="btn btn-ghost btn-sm" id="nav-login" href="/login.html">Connexion</a>
-            <a class="btn btn-sm btn-demo" href="mailto:contact@zelyro.fr?subject=Demande%20de%20d%C3%A9mo%20Zelyro&amp;body=Bonjour%2C%0D%0A%0D%0AJe%20souhaite%20une%20d%C3%A9monstration%20de%20Zelyro.%0D%0A%0D%0AAgence%20%3A%0D%0AVille%20%3A%0D%0AT%C3%A9l%C3%A9phone%20%3A%0D%0A%0D%0AMerci.">Demander une démo</a>
+            <a class="btn btn-sm btn-demo" href="mailto:contact@zelyro.fr?subject=Demande%20de%20d%C3%A9mo%20Zelyro" data-demo>Demander une démo</a>
             <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Ouvrir le menu"><span class="bars"></span></button>
         </div>
     </div>
@@ -137,7 +138,7 @@
     <p>Zelyro mesure la fréquentation de ses pages publiques (accueil, tarifs, connexion, pages légales, et pages que les agences envoient à leurs prospects) pour savoir combien de personnes visitent le site, d’où elles viennent et quelles pages les intéressent. Pour chaque page affichée, sont enregistrés : le nom de la page (sans la partie de l’adresse qui suit le point d’interrogation, donc sans les identifiants personnels contenus dans les liens envoyés aux prospects), le site ou la campagne d’où vient le lien, le type d’appareil (ordinateur, tablette ou mobile, déduit de la largeur d’écran), la date et l’heure, ainsi que le pays et la ville approximatifs déduits de l’adresse IP.</p>
     <p>L’adresse IP n’est pas enregistrée : elle sert uniquement, sur le moment, à déterminer la ville, puis elle est écartée. Le visiteur n’est reconnu que par une empreinte technique calculée avec la date du jour et une clé secrète. Cette empreinte change chaque jour, ne permet pas de retrouver l’adresse IP et ne permet pas de suivre une personne d’un jour à l’autre. Aucun cookie ni identifiant stocké dans le navigateur n’est utilisé pour cette mesure ; les données ne sont recoupées avec aucune autre (notamment pas avec les comptes ni avec les prospects des agences) et ne sont transmises à aucun tiers. Vous pouvez vous y opposer à tout moment (voir la section 10).</p>
     <h3>Boîte Gmail connectée (facultatif)</h3>
-    <p>Si l’administrateur d’une agence connecte sa boîte Gmail, Zelyro y accède en lecture seule, uniquement pour repérer les messages envoyés par SeLoger et par Leboncoin et en tirer des prospects. Les autres messages ne sont pas lus. Le jeton d’autorisation fourni par Google est conservé chiffré ; il est supprimé et révoqué auprès de Google dès que l’administrateur déconnecte la boîte. Tout ou partie du texte d’un message de portail peut être conservé dans les notes du prospect créé ; les identifiants des messages déjà traités sont conservés pour éviter les doublons.</p>
+    <p>Si l’administrateur d’une agence connecte sa boîte Gmail, Zelyro y accède en lecture seule, uniquement pour repérer les messages envoyés par SeLoger et par Leboncoin et en tirer des prospects. Les autres messages ne sont pas lus. Le jeton d’autorisation fourni par Google est conservé chiffré ; il est supprimé et révoqué auprès de Google dès que l’administrateur déconnecte la boîte. Tout ou partie du texte d’un message de portail peut être conservé dans les notes du prospect créé ; les identifiants des messages déjà traités sont conservés pour éviter les doublons, avec l’objet du message (tronqué), qui alimente le journal de réception visible dans le compte de l’agence et n’est gardé que 90 jours. Un partenaire de l’agence (par exemple une passerelle de diffusion d’annonces) peut aussi lui transmettre des prospects par une interface technique (API), au moyen d’une clé que l’administrateur de l’agence crée et peut supprimer à tout moment ; seule l’empreinte de cette clé est conservée.</p>
     <h3>Messages adressés à Zelyro</h3>
     <p>Lorsque vous nous écrivez, par exemple pour demander une démonstration, nous traitons les informations que vous nous communiquez (adresse e-mail, nom, agence, contenu du message).</p>
 </section>
@@ -188,6 +189,7 @@
                 <tr><td data-label="Prestataire">Brevo</td><td data-label="Rôle">Envoi d’e-mails (messages liés au compte, alertes, e-mail du matin, messages adressés aux prospects au nom de l’agence)</td><td data-label="Données concernées">Adresse e-mail du destinataire et contenu du message envoyé</td><td data-label="Localisation">France</td></tr>
                 <tr><td data-label="Prestataire">Google (API Gmail), si l’agence connecte sa boîte</td><td data-label="Rôle">Accès, en lecture seule et avec l’autorisation de l’agence, aux messages de SeLoger et de Leboncoin</td><td data-label="Données concernées">Jeton d’autorisation ; messages des portails lus pour créer les prospects</td><td data-label="Localisation">États-Unis ou selon l’infrastructure de Google</td></tr>
                 <tr><td data-label="Prestataire">Services de notification des navigateurs et systèmes d’exploitation (Google, Apple, Mozilla, Microsoft selon l’appareil), si l’utilisateur active les notifications</td><td data-label="Rôle">Acheminement des notifications vers l’appareil de l’utilisateur</td><td data-label="Données concernées">Adresse technique d’abonnement et contenu de la notification, chiffré de bout en bout : le service d’acheminement ne peut pas le lire</td><td data-label="Localisation">États-Unis ou selon le fournisseur de l’appareil</td></tr>
+                <tr><td data-label="Prestataire">Stripe Payments Europe, Ltd.</td><td data-label="Rôle">Paiement des abonnements (carte bancaire, prélèvement SEPA) et facturation</td><td data-label="Données concernées">Coordonnées de facturation de l’agence abonnée (nom, adresse e-mail, adresse, numéro de TVA) et moyen de paiement, saisi directement chez Stripe : Zelyro ne voit ni numéro de carte ni IBAN. Aucune donnée de prospect.</td><td data-label="Localisation">Union européenne — Irlande, avec transferts possibles vers les États-Unis encadrés par Stripe</td></tr>
                 <tr><td data-label="Prestataire">Anthropic (si la fonction d’extraction est activée)</td><td data-label="Rôle">Analyse du texte d’un message pour en extraire des critères</td><td data-label="Données concernées">Texte du message soumis</td><td data-label="Localisation">États-Unis</td></tr>
             </tbody>
         </table>
@@ -212,7 +214,7 @@
                 <tr><td data-label="Catégorie">Événements d’activité des prospects</td><td data-label="Durée de conservation">Supprimés avec la fiche du prospect concerné</td></tr>
                 <tr><td data-label="Catégorie">Abonnements aux notifications</td><td data-label="Durée de conservation">Jusqu’à la désactivation des notifications par l’utilisateur, la suppression de son compte ou l’expiration de l’abonnement signalée par le navigateur</td></tr>
                 <tr><td data-label="Catégorie">Accès à la boîte Gmail</td><td data-label="Durée de conservation">Jusqu’à la déconnexion par l’administrateur (l’accès est alors supprimé et révoqué auprès de Google) ou la suppression du compte</td></tr>
-                <tr><td data-label="Catégorie">Identifiants des e-mails de portail déjà traités</td><td data-label="Durée de conservation">Conservés avec le compte pour ne pas traiter deux fois le même message, et supprimés avec lui</td></tr>
+                <tr><td data-label="Catégorie">Identifiants des e-mails de portail déjà traités</td><td data-label="Durée de conservation">Conservés avec le compte pour ne pas traiter deux fois le même message, et supprimés avec lui. L’objet du message, lui, est supprimé au bout de 90 jours</td></tr>
                 <tr><td data-label="Catégorie">Journaux techniques</td><td data-label="Durée de conservation">12 mois</td></tr>
                 <tr><td data-label="Catégorie">Mesure d’audience du site (pages, provenance, ville, appareil)</td><td data-label="Durée de conservation">13 mois, puis suppression automatique. Les données « en direct » (visiteurs présents à l’instant sur le site) sont supprimées au bout de 24 heures</td></tr>
                 <tr><td data-label="Catégorie">Demandes de réinitialisation du mot de passe</td><td data-label="Durée de conservation">Lien valable pendant une durée limitée (30 minutes) ; l’enregistrement de la demande est supprimé dès son utilisation ou, au plus tard, 24 heures après son expiration</td></tr>
@@ -324,7 +326,7 @@
                 <h2>Contact</h2>
                 <ul>
                     <li><a href="mailto:contact@zelyro.fr">contact@zelyro.fr</a></li>
-                    <li><a href="mailto:contact@zelyro.fr?subject=Demande%20de%20d%C3%A9mo%20Zelyro&amp;body=Bonjour%2C%0D%0A%0D%0AJe%20souhaite%20une%20d%C3%A9monstration%20de%20Zelyro.%0D%0A%0D%0AAgence%20%3A%0D%0AVille%20%3A%0D%0AT%C3%A9l%C3%A9phone%20%3A%0D%0A%0D%0AMerci.">Demander une démo</a></li>
+                    <li><a href="mailto:contact@zelyro.fr?subject=Demande%20de%20d%C3%A9mo%20Zelyro" data-demo>Demander une démo</a></li>
                     <li><a href="/login.html">Connexion</a></li>
                     <li><a href="/login.html">Créer un compte</a></li>
                 </ul>
