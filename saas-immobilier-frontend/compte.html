@@ -32,6 +32,9 @@
             const [messageAlertes, setMessageAlertes] = useState(null);
             const [matin, setMatin] = useState(null);          // e-mail du matin : null tant que non chargé
             const [messageMatin, setMessageMatin] = useState(null);
+            const [rapport, setRapport] = useState(null);        // rapport du lundi : null tant que non chargé
+            const [messageRapport, setMessageRapport] = useState(null);
+            const [rapportEnCours, setRapportEnCours] = useState(false);
             const [ia, setIa] = useState(null);                 // analyse par IA : null tant que non chargé
             const [messageIa, setMessageIa] = useState(null);
             const [apercuEnCours, setApercuEnCours] = useState(false);
@@ -96,6 +99,7 @@
                 appel('/auth/profile').then((p) => {
                     setAlertes(p.alerts_enabled !== false);
                     setMatin(p.digest_enabled !== false);
+                    setRapport(p.rapport_hebdo_enabled !== false);
                     setIa(p.ia_enabled === true);
                     // Met à jour ce que le navigateur sait du compte (forfait, rôle, droits d'administration).
                     try {
@@ -244,6 +248,31 @@
                 }
             };
 
+            const changerRapport = async (valeur) => {
+                setRapport(valeur);
+                setMessageRapport(null);
+                try {
+                    await appel('/auth/preferences', { method: 'PUT', body: JSON.stringify({ rapport_hebdo_enabled: valeur }) });
+                    setMessageRapport({ type: 'success', text: valeur ? 'Rapport du lundi activé.' : 'Rapport du lundi désactivé.' });
+                } catch (e) {
+                    setRapport(!valeur);
+                    setMessageRapport({ type: 'error', text: e.message });
+                }
+            };
+
+            const recevoirRapport = async () => {
+                setRapportEnCours(true);
+                setMessageRapport(null);
+                try {
+                    const d = await appel('/api/v1/rapport-hebdo/preview', { method: 'POST' });
+                    setMessageRapport({ type: d.sent ? 'success' : 'info', text: d.message });
+                } catch (e) {
+                    setMessageRapport({ type: 'error', text: e.message });
+                } finally {
+                    setRapportEnCours(false);
+                }
+            };
+
             const changerMatin = async (valeur) => {
                 setMatin(valeur);
                 setMessageMatin(null);
@@ -349,6 +378,20 @@
                 try {
                     setJournal(await appel('/api/v1/reception/journal'));
                     setMessageJournal(null);
+                } catch (e) {
+                    setMessageJournal({ type: 'error', text: e.message });
+                }
+            };
+
+            // « Ce n'est pas du spam » : l'agence récupère un message écarté par le filtre (conservé 30 jours).
+            const pasSpam = async (id) => {
+                try {
+                    const r = await appel(`/api/v1/reception/messages/${id}/not-spam`, { method: 'POST' });
+                    setMessageJournal(r.created
+                        ? { type: 'success', text: 'Message récupéré : le prospect a été créé.' }
+                        : { type: 'error', text: r.message || 'Le prospect n\'a pas pu être créé.' });
+                    const j = await appel('/api/v1/reception/journal');
+                    setJournal(j);
                 } catch (e) {
                     setMessageJournal({ type: 'error', text: e.message });
                 }
@@ -849,6 +892,32 @@
                                 </button>
                             </div>
 
+                            {user && user.role === 'admin' && (
+                                <div className="panel">
+                                    <div className="panel-header">
+                                        <h2 className="panel-title">Rapport du lundi</h2>
+                                    </div>
+                                    <p className="panel-note">
+                                        Chaque lundi matin, un e-mail récapitule la semaine écoulée : les demandes reçues par
+                                        portail, celles qui sont devenues des prospects, les messages écartés (alertes,
+                                        spam, messages sans coordonnées) et les annonces qui ont attiré le plus de contacts.
+                                        Il n'est envoyé que si l'agence a reçu des demandes.
+                                    </p>
+                                    {messageRapport && (
+                                        <div role={messageRapport.type === 'error' ? 'alert' : 'status'} aria-live="polite" className={messageRapport.type === 'error' ? 'error' : messageRapport.type === 'info' ? 'info-box' : 'success'}>{messageRapport.text}</div>
+                                    )}
+                                    <label className="interrupteur">
+                                        <input type="checkbox" checked={rapport === true} disabled={rapport === null}
+                                            onChange={(e) => changerRapport(e.target.checked)} />
+                                        <span>Recevoir le rapport du lundi à l'adresse {user ? user.email : 'de mon compte'}</span>
+                                    </label>
+                                    <button type="button" className="btn secondary petit" style={{ marginTop: '14px' }}
+                                        disabled={rapportEnCours} onClick={recevoirRapport}>
+                                        {rapportEnCours ? 'Envoi…' : "Recevoir le dernier rapport"}
+                                    </button>
+                                </div>
+                            )}
+
                             <div className="panel">
                                 <div className="panel-header">
                                     <h2 className="panel-title">Planning de rendez-vous</h2>
@@ -1295,6 +1364,13 @@
                                                                     {m.created && m.lead_id ? (
                                                                         <a href={`/leads-profile.html?id=${m.lead_id}`}>{m.lead_name || 'Prospect créé'}</a>
                                                                     ) : m.result}
+                                                                    {m.can_rescue && (
+                                                                        <div style={{ marginTop: '6px' }}>
+                                                                            <button type="button" className="btn secondary petit" onClick={() => pasSpam(m.id)}>
+                                                                                Ce n'est pas du spam
+                                                                            </button>
+                                                                        </div>
+                                                                    )}
                                                                     {m.analysis_note && (
                                                                         <div className="field-hint" style={{ marginTop: '2px' }}>{m.analysis_note}</div>
                                                                     )}

@@ -104,6 +104,91 @@
             );
         }
 
+        const ECARTS = [
+            ['alertes', "Alertes de portail (pas une demande)"], ['spam', 'Spam'],
+            ['non_contact', "Messages qui n'étaient pas une demande"], ['vides', 'Messages sans coordonnées'],
+            ['quota', 'Refusés (quota atteint)']
+        ];
+
+        // Ce que l'agence reçoit : par portail, par annonce, et ce qui a été écarté (alertes, spam...).
+        function Reception({ donnees, jours, onJours, etat, onRetry }) {
+            const t = donnees.totals;
+            const taux = t.received ? Math.round((100 * t.created) / t.received) : 0;
+            const ecarts = ECARTS.filter(([c]) => (donnees.ignored_reasons[c] || 0) > 0);
+            return (
+                <div className="panel" style={{ marginBottom: '20px' }}>
+                    <div className="reception-entete">
+                        <div>
+                            <div className="panel-title">Demandes reçues</div>
+                            <div className="panel-note">Ce qui arrive par vos portails et vos e-mails transférés, et ce que Zelyro en fait.</div>
+                        </div>
+                        <div className="periodes" role="group" aria-label="Période">
+                            {[[7, '7 jours'], [30, '30 jours'], [90, '90 jours']].map(([j, nom]) => (
+                                <button key={j} type="button" className={jours === j ? 'periode actif' : 'periode'}
+                                    aria-pressed={jours === j} onClick={() => onJours(j)}>{nom}</button>
+                            ))}
+                        </div>
+                    </div>
+                    {etat === 'chargement' && <p className="panel-note" role="status" aria-live="polite">Chargement…</p>}
+                    {etat === 'erreur' && (
+                        <div className="error" role="alert">
+                            Impossible de charger les demandes reçues pour le moment.{' '}
+                            <button type="button" className="lien-bouton" onClick={onRetry}>Réessayer</button>
+                        </div>
+                    )}
+                    {t.received === 0 ? (
+                        <p className="panel-note" style={{ margin: 0 }}>Aucune demande reçue sur cette période.</p>
+                    ) : (
+                        <>
+                            <div className="reception-chiffres">
+                                <div><strong>{t.received}</strong><span>reçues</span></div>
+                                <div><strong>{t.created}</strong><span>devenues prospects</span></div>
+                                <div><strong>{t.ignored}</strong><span>écartées</span></div>
+                                <div><strong>{taux} %</strong><span>de transformation</span></div>
+                            </div>
+                            <div className="content-grid">
+                                <div>
+                                    <div className="reception-titre">Par portail</div>
+                                    <div className="reception-portails"><Barres lignes={donnees.by_portal.map((p) => [p.portal, `${p.label} · ${p.created} prospect${p.created > 1 ? 's' : ''}`, p.received])} /></div>
+                                    {ecarts.length > 0 && (
+                                        <>
+                                            <div className="reception-titre">Écartées automatiquement</div>
+                                            <ul className="reception-liste">
+                                                {ecarts.map(([c, nom]) => (
+                                                    <li key={c}><span>{nom}</span><strong>{donnees.ignored_reasons[c]}</strong></li>
+                                                ))}
+                                            </ul>
+                                        </>
+                                    )}
+                                </div>
+                                <div>
+                                    <div className="reception-titre">Annonces qui attirent le plus</div>
+                                    {donnees.by_listing.length === 0 ? (
+                                        <p className="panel-note" style={{ margin: 0 }}>
+                                            Les annonces apparaissent dès qu'un message en mentionne une (titre ou référence).
+                                        </p>
+                                    ) : (
+                                        <ul className="reception-liste">
+                                            {donnees.by_listing.map((a, i) => (
+                                                <li key={i}>
+                                                    <span>
+                                                        {a.title || `Réf. ${a.reference}`}
+                                                        {a.title && a.reference ? <em> · réf. {a.reference}</em> : null}
+                                                        <small>{Object.entries(a.portals).map(([n, c]) => `${n} ${c}`).join(' · ')}</small>
+                                                    </span>
+                                                    <strong>{a.contacts}</strong>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                </div>
+                            </div>
+                        </>
+                    )}
+                </div>
+            );
+        }
+
         function Barres({ lignes, classe }) {
             const maxi = Math.max(1, ...lignes.map((l) => l[2]));
             return (
@@ -133,6 +218,10 @@
             // Lu une fois, avant d'être mis à jour : ce qui est postérieur est « nouveau » pour l'agent.
             const [vueAvant] = useState(lireVue);
             const [dormants, setDormants] = useState(null);
+            const [reception, setReception] = useState(null);
+            const [jours, setJours] = useState(30);
+            const [receptionEtat, setReceptionEtat] = useState('ok');      // ok | chargement | erreur
+            const dernierAppelReception = React.useRef(0);                // ignore les réponses devenues obsolètes
             const [tauxSaisi, setTauxSaisi] = useState('');
             const [tauxMessage, setTauxMessage] = useState(null);
 
@@ -146,6 +235,30 @@
                 if (userData) setUser(JSON.parse(userData));
                 chargerTout(token);
             }, []);
+
+            const chargerReception = (j) => {
+                const token = localStorage.getItem('token');
+                if (!token) return;
+                const numero = ++dernierAppelReception.current;
+                setReceptionEtat('chargement');
+                fetch(`${API_URL}/api/v1/reception/stats?days=${j}`, { headers: { 'Authorization': `Bearer ${token}` } })
+                    .then((r) => {
+                        if (r.status === 401) {
+                            localStorage.removeItem('token');
+                            localStorage.removeItem('user');
+                            window.location.replace('/login.html');
+                            return null;
+                        }
+                        return r.ok ? r.json() : Promise.reject(new Error('stats'));
+                    })
+                    .then((d) => {
+                        if (numero !== dernierAppelReception.current || !d) return;   // réponse d'une période déjà quittée
+                        setReception(d);
+                        setReceptionEtat('ok');
+                    })
+                    .catch(() => { if (numero === dernierAppelReception.current) setReceptionEtat('erreur'); });
+            };
+            const changerPeriode = (j) => { setJours(j); chargerReception(j); };
 
             const chargerTout = async (token) => {
                 try {
@@ -178,6 +291,7 @@
                     setRappels(await rRappels.json());
                     if (donnees.commission) setTauxSaisi(String(donnees.commission.rate).replace('.', ','));
                     setError(null);
+                    chargerReception(30);
                     // Les prospects à réveiller se calculent à part : ils n'empêchent pas l'affichage du reste.
                     fetch(`${API_URL}/api/v1/dormants`, { headers: entetes })
                         .then((r) => (r.ok ? r.json() : null))
@@ -472,6 +586,17 @@
                                             <div className="panel-title">Nouveaux prospects par semaine</div>
                                             <div className="panel-note">Les arrivées des {stats.weekly_new.length} dernières semaines, tous canaux confondus.</div>
                                             <Tendance valeurs={stats.weekly_new} />
+                                        </div>
+                                    )}
+
+                                    {reception && <Reception donnees={reception} jours={jours} onJours={changerPeriode}
+                                        etat={receptionEtat} onRetry={() => chargerReception(jours)} />}
+                                    {!reception && receptionEtat === 'erreur' && (
+                                        <div className="panel" style={{ marginBottom: '20px' }}>
+                                            <div className="error" role="alert">
+                                                Impossible de charger les demandes reçues pour le moment.{' '}
+                                                <button type="button" className="lien-bouton" onClick={() => chargerReception(jours)}>Réessayer</button>
+                                            </div>
                                         </div>
                                     )}
 

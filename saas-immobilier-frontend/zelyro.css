@@ -1248,3 +1248,29 @@ body:not(.auth):not(.pub):not(.erreur404)::after {
     body:not(.auth):not(.pub):not(.erreur404)::before { background-size: 300px 300px, auto, auto, auto, auto, auto; background-position: right -120px bottom -100px, 0 0, 0 0, 0 0, 0 0, 0 0; }
 }
 @media print { body::before, body::after { display: none !important; } }
+
+/* ===== Demandes reçues (tableau de bord) ===== */
+.reception-entete { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px 20px; flex-wrap: wrap; margin-bottom: 14px; }
+.periodes { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 999px; overflow: hidden; background: var(--sage-50); }
+.periode { border: 0; background: transparent; color: var(--ink-2); font: inherit; font-size: 13px; padding: 7px 16px; cursor: pointer; min-height: 44px; }
+.periode.actif { background: var(--sage-700); color: #fff; }
+.periode:focus-visible { outline: 2px solid var(--sage-600); outline-offset: -2px; }
+.reception-chiffres { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px; }
+.reception-chiffres > div { background: var(--sage-50); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.reception-chiffres strong { font-family: 'Playfair Display', Georgia, serif; font-size: 26px; line-height: 1.1; color: var(--ink); font-variant-numeric: tabular-nums; }
+.reception-chiffres span { font-size: 13px; color: var(--ink-2); }
+.reception-titre { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin: 6px 0 10px; }
+.reception-titre:not(:first-child) { margin-top: 20px; }
+.reception-liste { list-style: none; margin: 0; padding: 0; }
+.reception-liste li { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 14px; color: var(--ink); }
+.reception-liste li:last-child { border-bottom: 0; }
+.reception-liste li > span { min-width: 0; overflow-wrap: anywhere; }
+.reception-liste li em { font-style: normal; color: var(--ink-2); }
+.reception-liste li small { display: block; font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+.reception-liste li strong { font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) {
+    .reception-chiffres { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.reception-portails .barre-ligne { grid-template-columns: minmax(120px, 42%) 1fr 34px; }
+@media (max-width: 640px) { .reception-portails .barre-ligne { grid-template-columns: 1fr 34px; } .reception-portails .barre-piste { grid-column: 1 / -1; grid-row: 2; } }
+.account-grid > * { min-width: 0; }
