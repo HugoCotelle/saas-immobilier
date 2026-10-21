@@ -842,3 +842,5 @@ body.pub {
 .lp-footer nav { display: flex; flex-wrap: wrap; gap: 8px 20px; }
 .lp-footer a { color: var(--ink-2); }
 @media (max-width: 860px) { .lp-grid { grid-template-columns: 1fr; grid-template-areas: "copie" "carte" "args"; grid-template-rows: auto; row-gap: 28px; } }
+body.lp { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+body.lp main { flex: 1 0 auto; }
