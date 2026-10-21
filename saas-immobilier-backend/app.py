@@ -265,6 +265,7 @@ def _situation_pro(valeur):
             return code
     return None
 # Score à partir duquel un bien est signalé par e-mail à l'agent.
+NOTIFICATIONS_PROSPECT_PAR_HEURE = 10
 ALERTE_SCORE_MIN = int(os.getenv("ALERT_MIN_SCORE", "70"))
 
 
@@ -1610,6 +1611,88 @@ def change_password():
         return jsonify({"message": "Mot de passe modifié", "token": token}), 200
     except Exception:
         return erreur_interne()
+
+
+# ===== DEMANDE DE DÉMONSTRATION (formulaire du site public) =====
+
+DEMO_TAILLES = {'1': "1 personne", '2-5': "2 à 5 personnes", '6-15': "6 à 15 personnes", '16+': "16 personnes et plus"}
+DEMO_CRENEAUX = {'matin': "plutôt le matin", 'apres-midi': "plutôt l'après-midi", 'indifferent': "indifférent"}
+_CARACTERES_CONTROLE_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _ligne_demo(valeur, maxi):
+    """Texte d'une seule ligne : sans retour à la ligne ni caractère de contrôle, tronqué."""
+    v = _CARACTERES_CONTROLE_RE.sub('', str(valeur or ''))
+    return re.sub(r"\s+", " ", v).strip()[:maxi]
+
+
+def _accuse_demande_demo(email, prenom):
+    """Accusé de réception au visiteur. Texte fixe : rien de ce qu'il a saisi n'y est repris, sauf son prénom,
+    pour que le formulaire ne serve pas à faire écrire n'importe quoi à Zelyro."""
+    try:
+        paragraphes = [
+            f"Bonjour {prenom}," if prenom else "Bonjour,",
+            "Nous avons bien reçu votre demande de démonstration de Zelyro.",
+            "Nous revenons vers vous très vite, par e-mail ou par téléphone, pour convenir d'un créneau.",
+            "Si vous n'êtes pas à l'origine de cette demande, ignorez simplement ce message.",
+        ]
+        texte, html = _gabarit_email("Votre demande de démonstration", paragraphes)
+        _envoyer_email(email, "Votre demande de démo Zelyro", texte, html)
+    except Exception:
+        app.logger.exception("Accusé de réception de démo impossible")
+
+
+@app.route('/api/v1/demande-demo', methods=['POST'])
+@limiter.limit("30 per hour")
+@limiter.limit("5 per hour", deduct_when=lambda r: r.status_code == 200)
+@limiter.limit("2 per day", key_func=_cle_email, deduct_when=lambda r: r.status_code == 200)
+def demande_demo():
+    """Demande de démonstration envoyée depuis le site public. Public, donc limité par IP et par adresse, avec un
+    champ piège (« site_web ») que seul un robot remplit. L'équipe reçoit la demande par e-mail, le visiteur un accusé
+    de réception. Si l'envoi à l'équipe échoue on le dit : une demande ne doit pas se perdre en silence."""
+    data = request.get_json(silent=True) or {}
+    if _ligne_demo(data.get('site_web'), 50):
+        return jsonify({"message": "Merci, votre demande a bien été envoyée."}), 200     # robot : on fait semblant
+    nom = _ligne_demo(data.get('nom'), 100)
+    email = _ligne_demo(data.get('email'), 255).lower()
+    agence = _ligne_demo(data.get('agence'), 120)
+    ville = _ligne_demo(data.get('ville'), 80)
+    telephone = _ligne_demo(data.get('telephone'), 30)
+    outil = _ligne_demo(data.get('outil'), 80)
+    message = _CARACTERES_CONTROLE_RE.sub('', str(data.get('message') or '')).strip()[:1500]
+    taille = str(data.get('taille') or '')
+    creneau = str(data.get('creneau') or '')
+    if len(nom) < 2:
+        return jsonify({"message": "Indiquez votre nom."}), 400
+    if not EMAIL_RE.match(email):
+        return jsonify({"message": "Adresse e-mail invalide."}), 400
+    if len(agence) < 2:
+        return jsonify({"message": "Indiquez le nom de votre agence."}), 400
+    if telephone and len(re.sub(r"\D", "", telephone)) < 8:
+        return jsonify({"message": "Numéro de téléphone invalide."}), 400
+    if taille and taille not in DEMO_TAILLES:
+        return jsonify({"message": "Taille d'équipe invalide."}), 400
+    if creneau and creneau not in DEMO_CRENEAUX:
+        return jsonify({"message": "Créneau invalide."}), 400
+    if not _envoi_configure():
+        return jsonify({"message": "L'envoi est momentanément indisponible. Écrivez-nous à contact@zelyro.fr."}), 503
+
+    destinataire = (os.getenv("DEMO_NOTIFY_EMAIL") or "contact@zelyro.fr").strip()
+    lignes = [
+        f"Nom : {nom}", f"E-mail : {email}", f"Téléphone : {telephone or 'non renseigné'}",
+        f"Agence : {agence}", f"Ville : {ville or 'non renseignée'}",
+        f"Taille de l'équipe : {DEMO_TAILLES.get(taille, 'non renseignée')}",
+        f"Outil actuel : {outil or 'non renseigné'}",
+        f"Créneau souhaité : {DEMO_CRENEAUX.get(creneau, 'non renseigné')}",
+    ]
+    if message:
+        lignes.append("Message :\n" + message)
+    texte, html = _gabarit_email("Nouvelle demande de démonstration", lignes)
+    if not _envoyer_email(destinataire, f"Demande de démo Zelyro : {nom} ({agence})", texte, html,
+                          nom_expediteur=nom, repondre_a=(email, nom)):
+        return jsonify({"message": "Votre demande n'a pas pu être envoyée. Écrivez-nous à contact@zelyro.fr."}), 502
+    _lancer_en_arriere_plan(_accuse_demande_demo, email, nom.split(' ')[0][:40])
+    return jsonify({"message": "Merci, votre demande a bien été envoyée. Nous revenons vers vous très vite."}), 200
 
 
 @app.route('/auth/forgot-password', methods=['POST'])
@@ -4712,6 +4795,14 @@ def _alertes_matching(user_id, lead_ids=None, property_ids=None, origine=None):
                 nouveau = next((l for l in prospects if l['id'] in ids_prospects), None)
             if not paires and not nouveau:
                 return
+            if nouveau and not paires:
+                # Frein de secours : au-delà de NOTIFICATIONS_PROSPECT_PAR_HEURE nouveaux prospects en une heure,
+                # on n'envoie plus de notification (un filtre de transfert qui boucle, un import massif...).
+                cur.execute("SELECT COUNT(*) AS n FROM leads WHERE user_id = %s AND created_at > %s",
+                            (user_id, _maintenant() - timedelta(hours=1)))
+                if cur.fetchone()['n'] > NOTIFICATIONS_PROSPECT_PAR_HEURE:
+                    app.logger.warning("Notifications de nouveaux prospects suspendues (trop en une heure) : agence %s", user_id)
+                    return
             paires.sort(key=lambda p: -p[0])
 
             site = _site_url()
@@ -8458,7 +8549,7 @@ def _message_automatique(item, expediteur):
 
 _SUJETS_ZELYRO_RE = re.compile(
     r"(?i)^\s*(?:nouveau prospect\s*(?::|via\b)|pr[ée]cisez votre recherche\s*[—–-]|votre visite\s*:|visite confirm[ée]e\s*:|"
-    r"votre cl[ée] d'activation zelyro|r[ée]initialisation de votre mot de passe zelyro)")
+    r"demande de d[ée]mo zelyro\s*:|votre demande de d[ée]mo zelyro|votre cl[ée] d'activation zelyro|r[ée]initialisation de votre mot de passe zelyro)")
 _MARQUEURS_ZELYRO = ("capté automatiquement par zelyro", "capte automatiquement par zelyro")
 
 

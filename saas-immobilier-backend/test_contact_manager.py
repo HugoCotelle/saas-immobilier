@@ -107,6 +107,80 @@ class ReglesRevue(unittest.TestCase):
         self.assertEqual(backend._minuit_paris_en_utc(date(2026, 1, 5)), datetime(2026, 1, 4, 23, 0))     # heure d'hiver
 
 
+class DemandeDemo(ts.Base):
+    """Formulaire de démonstration du site public."""
+
+    CORPS = {"nom": "Julie Morel", "email": "julie@agence-morel.fr", "agence": "Agence Morel", "ville": "Senlis",
+             "telephone": "06 11 22 33 44", "taille": "2-5", "outil": "Ubiflow", "creneau": "matin",
+             "message": "Bonjour\nOn aimerait voir le matching."}
+
+    def setUp(self):
+        super().setUp()
+        self.envoyes = []
+
+        def faux(destinataire, sujet, texte, html, **kw):
+            self.envoyes.append({"to": destinataire, "sujet": sujet, "texte": texte, "kw": kw})
+            return True
+        for p in (mock.patch.object(backend, "_envoyer_email", side_effect=faux),
+                  mock.patch.object(backend, "_envoi_configure", return_value=True),
+                  mock.patch.object(backend, "_lancer_en_arriere_plan", side_effect=lambda f, *a: f(*a))):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def envoyer(self, **kw):
+        return self.c.post("/api/v1/demande-demo", json={**self.CORPS, **kw})
+
+    def test_demande_complete(self):
+        r = self.envoyer()
+        self.assertEqual(r.status_code, 200)
+        equipe, accuse = self.envoyes
+        self.assertEqual(equipe["to"], "contact@zelyro.fr")
+        self.assertEqual(equipe["sujet"], "Demande de démo Zelyro : Julie Morel (Agence Morel)")
+        for attendu in ("julie@agence-morel.fr", "06 11 22 33 44", "Senlis", "2 à 5 personnes", "Ubiflow",
+                        "plutôt le matin", "On aimerait voir le matching"):
+            self.assertIn(attendu, equipe["texte"])
+        self.assertEqual(equipe["kw"]["repondre_a"], ("julie@agence-morel.fr", "Julie Morel"))
+        self.assertEqual(accuse["to"], "julie@agence-morel.fr")
+        self.assertIn("Bonjour Julie", accuse["texte"])
+        self.assertNotIn("matching", accuse["texte"])          # rien de la saisie, hors prénom
+
+    def test_champs_obligatoires_seulement(self):
+        r = self.c.post("/api/v1/demande-demo", json={"nom": "Paul Roy", "email": "paul@exemple.fr", "agence": "Roy Immo"})
+        self.assertEqual(r.status_code, 200)
+
+    def test_refus(self):
+        for kw in ({"nom": "J"}, {"email": "pas-un-mail"}, {"agence": ""}, {"telephone": "123"},
+                   {"taille": "999"}, {"creneau": "minuit"}):
+            with self.subTest(kw=kw):
+                self.assertEqual(self.envoyer(**kw).status_code, 400)
+        self.assertEqual(self.envoyes, [])
+
+    def test_champ_piege_robot(self):
+        r = self.envoyer(site_web="http://spam.example")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.envoyes, [])
+
+    def test_pas_d_injection_dans_le_sujet(self):
+        self.envoyer(nom="Julie\r\nBcc: x@y.fr", agence="Agence\nMorel")
+        self.assertNotRegex(self.envoyes[0]["sujet"], r"[\r\n]")
+
+    def test_limite_par_adresse(self):
+        self.assertEqual(self.envoyer().status_code, 200)
+        self.assertEqual(self.envoyer().status_code, 200)
+        self.assertEqual(self.envoyer().status_code, 429)
+
+    def test_echec_d_envoi_a_l_equipe_est_signale(self):
+        with mock.patch.object(backend, "_envoyer_email", return_value=False):
+            r = self.envoyer()
+        self.assertEqual(r.status_code, 502)
+        self.assertIn("contact@zelyro.fr", r.get_json()["message"])
+
+    def test_mails_de_demo_ne_rebouclent_pas(self):
+        for sujet in ("Demande de démo Zelyro : Julie Morel (Agence Morel)", "Fwd: Votre demande de démo Zelyro"):
+            self.assertTrue(backend._message_de_zelyro("tb@zelyro.fr", sujet, ""))
+        self.assertFalse(backend._message_de_zelyro("x@exemple.fr", "Demande de démo", ""))
+
+
 class Base(BaseInbound):
     def setUp(self):
         super().setUp()
@@ -493,6 +567,16 @@ class FormulaireAutomatique(Base):
             self.envoyer(adresse, expediteur="tb@zelyro.fr", sujet="Demande de visite - maison Senlis",
                          texte="Bonjour, je veux visiter. Nom : Paul Durand\nTéléphone : 06 11 22 33 44")
         self.assertEqual(len(self.leads(t)), 1)
+
+    def test_frein_notifications_en_rafale(self):
+        adresse, t = self.adresse("cm-f22@x.fr")
+        notifs = lambda: [m for m in self.envoyes if m["sujet"].startswith("Nouveau prospect")]
+        with mock.patch.object(backend, "NOTIFICATIONS_PROSPECT_PAR_HEURE", 3):
+            for i in range(6):
+                self.envoyer(adresse, expediteur=f"rafale{i}@exemple.fr", sujet=f"Visite {i}",
+                             texte=f"Bonjour, je veux visiter. Nom : Paul Durand{i}\nTéléphone : 06 11 22 33 4{i}")
+        self.assertEqual(len(self.leads(t)), 6)
+        self.assertEqual(len(notifs()), 3)
 
     def test_plafond_par_jour(self):
         adresse, t = self.adresse("cm-f8@x.fr")
