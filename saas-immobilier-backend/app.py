@@ -8395,16 +8395,20 @@ def _corps_texte_email(item):
     return ''
 
 
-def _adresse_capture_dans(destinataires):
-    """L'adresse de capture Zelyro parmi les destinataires de l'e-mail, ou
-    None. Un e-mail transféré porte souvent plusieurs destinataires."""
+def _adresse_capture_dans(*listes):
+    """L'adresse de capture Zelyro parmi les destinataires de l'e-mail, ou None. Un message transféré par
+    Gmail ou un autre service garde en « À » son destinataire d'origine : l'adresse de capture ne figure alors
+    que dans les destinataires de l'enveloppe (« Recipients » chez Brevo), donc on les regarde tous. Chaque
+    liste contient des objets {Address: ...} ou de simples chaînes."""
     domaine = '@' + _domaine_capture_mail()
-    for d in (destinataires or []):
-        if not isinstance(d, dict):
-            continue
-        adresse = (d.get('Address') or '').strip().lower()
-        if adresse.endswith(domaine):
-            return adresse
+    for destinataires in listes:
+        if isinstance(destinataires, (str, dict)):
+            destinataires = [destinataires]
+        for d in (destinataires if isinstance(destinataires, list) else []):
+            adresse = d if isinstance(d, str) else (d.get('Address') if isinstance(d, dict) else '')
+            adresse = str(adresse or '').strip().lower().strip('<>')
+            if adresse.endswith(domaine):
+                return adresse
     return None
 
 
@@ -8436,7 +8440,7 @@ def _traiter_email_entrant(item):
     par un agent) en prospect. Ne lève jamais : une erreur reste dans les
     journaux, un e-mail malformé ne doit pas faire échouer les autres."""
     message_id = _texte_court(item.get('MessageId'), 255)
-    adresse_capture = _adresse_capture_dans(item.get('To'))
+    adresse_capture = _adresse_capture_dans(item.get('Recipients'), item.get('To'), item.get('Cc'))
     if not adresse_capture:
         return
     jeton = adresse_capture.split('@', 1)[0]
