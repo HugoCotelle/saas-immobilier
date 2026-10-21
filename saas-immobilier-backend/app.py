@@ -8957,9 +8957,12 @@ def _envoyer_email_completion(user_id, lead_id, nom, email_contact, portail):
             return
         _assurer_schema()
         with _base() as (conn, cur):
-            cur.execute("SELECT company_name FROM users WHERE id = %s", (user_id,))
-            agent = cur.fetchone()
-            agence = (agent or {}).get('company_name') or 'votre agence'
+            cur.execute("SELECT company_name, first_name FROM users WHERE id = %s", (user_id,))
+            agent = cur.fetchone() or {}
+            # Le nom que le prospect connaît : celui de l'agence qui détient le bien (réglage « Agence » du compte),
+            # à défaut le nom de la personne qui tient le compte.
+            agence_nommee = _nom_affiche(agent.get('company_name') or agent.get('first_name'), '')
+            agence = agence_nommee or "l'agence"
             cur.execute("SELECT completion_token, opposition_at FROM leads WHERE id = %s", (lead_id,))
             ligne = cur.fetchone()
             if _prospect_oppose(cur, user_id, email_contact, ligne['opposition_at'] if ligne else None):
@@ -8994,7 +8997,7 @@ def _envoyer_email_completion(user_id, lead_id, nom, email_contact, portail):
         prenom = (nom or '').split(' ')[0] if nom and nom not in _PORTAIL_NOM_DEFAUT.values() else ''
         salutation = f"Bonjour {prenom}," if prenom else "Bonjour,"
         texte, html = _gabarit_email(
-            f"Précisez votre recherche pour {agence}",
+            f"Précisez votre recherche pour {agence}" if agence_nommee else "Précisez votre recherche",
             [salutation,
              f"{contact_phrase} Pour vous proposer rapidement les "
              "biens qui correspondent vraiment à votre projet, merci de préciser en une minute votre "
@@ -9003,13 +9006,17 @@ def _envoyer_email_completion(user_id, lead_id, nom, email_contact, portail):
             ["Ce lien est personnel : ne le transmettez pas.",
              f"Ce message est envoyé automatiquement par Zelyro, le logiciel que {agence} utilise pour répondre à ses "
              "demandes. Si vous n'êtes pas à l'origine de cette demande, ignorez-le : rien ne sera fait.",
-             f"{agence} utilise vos coordonnées pour répondre à votre demande. Vous pouvez vous opposer à "
+             f"{agence if agence_nommee else 'L’agence'} utilise vos coordonnées pour répondre à votre demande. Vous pouvez vous opposer à "
              "tout moment à recevoir ses e-mails" + (f" : {_lien_opposition(lead_id)}" if _lien_opposition(lead_id) else ".")],
             bouton=("Préciser ma recherche", lien),
         )
-        sujet = (f"{agence} — votre demande pour « {_texte_court(titre_bien, 60)} »" if titre_bien
-                 else f"{agence} — précisez votre recherche")
-        envoye = _envoyer_email(email_contact, sujet, texte, html, nom_expediteur=agence)
+        if agence_nommee:
+            sujet = (f"{agence} — votre demande pour « {_texte_court(titre_bien, 60)} »" if titre_bien
+                     else f"{agence} — précisez votre recherche")
+        else:
+            sujet = (f"Votre demande pour « {_texte_court(titre_bien, 60)} »" if titre_bien
+                     else "Précisez votre recherche")
+        envoye = _envoyer_email(email_contact, sujet, texte, html, nom_expediteur=agence_nommee or None)
         if envoye:
             # Visible dans l'historique de la fiche : l'agent sait que le prospect a reçu le lien.
             _assurer_schema()

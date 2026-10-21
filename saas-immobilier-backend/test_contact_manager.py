@@ -610,6 +610,25 @@ class FormulaireAutomatique(Base):
         self.assertNotIn("Annonce :", m["texte"])
         self.assertNotIn("Hello", m["texte"])         # le texte libre du visiteur n'est jamais repris
 
+    def test_nom_de_l_agence_ou_a_defaut_de_la_personne(self):
+        adresse, t = self.adresse("cm-f32@x.fr")
+        self.sql("UPDATE users SET company_name = NULL, first_name = 'Marc Foujols' WHERE email = 'cm-f32@x.fr'")
+        self.envoyer(adresse, sujet="Hello", texte="Bonjour, je veux visiter. Nom : Paul Durand\nTéléphone : 06 11 22 33 44")
+        m = self.mails_formulaire()[0]
+        self.assertEqual(m["sujet"], "Marc Foujols — précisez votre recherche")
+        self.assertIn("Vous avez contacté Marc Foujols.", m["texte"])
+        self.assertEqual(m["kw"]["nom_expediteur"], "Marc Foujols")
+
+    def test_sans_aucun_nom_ni_zelyro_ni_votre_agence(self):
+        adresse, t = self.adresse("cm-f33@x.fr")
+        self.sql("UPDATE users SET company_name = NULL, first_name = NULL WHERE email = 'cm-f33@x.fr'")
+        self.envoyer(adresse, sujet="Hello", texte="Bonjour, je veux visiter. Nom : Paul Durand\nTéléphone : 06 11 22 33 44")
+        m = self.mails_formulaire()[0]
+        self.assertEqual(m["sujet"], "Précisez votre recherche")
+        self.assertIn("Vous avez contacté l'agence.", m["texte"])
+        self.assertIn("L’agence utilise vos coordonnées", m["texte"])
+        self.assertNotIn("votre agence", m["texte"])
+
     def test_plafond_par_jour(self):
         adresse, t = self.adresse("cm-f8@x.fr")
         with mock.patch.object(backend, "FORMULAIRES_AUTO_PAR_JOUR", 2):
