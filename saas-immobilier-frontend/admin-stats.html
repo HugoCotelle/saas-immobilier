@@ -329,7 +329,7 @@
                                             <button className={vue === 'france' ? 'actif' : ''} onClick={() => setVue('france')}>France</button>
                                         </div>
                                     </div>
-                                    <p className="panel-note" style={{ marginBottom: 14 }}>Chaque point est une ville, jamais une personne ni une adresse. La position est celle du centre de la ville.</p>
+                                    <p className="panel-note" style={{ marginBottom: 14 }}>Chaque point est une ville, jamais une personne ni une adresse. La position est arrondie à une dizaine de kilomètres.</p>
                                     <Carte vue={vue} direct={direct.villes} historique={resume ? resume.villes : []} />
                                 </div>
 
