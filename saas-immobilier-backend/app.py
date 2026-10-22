@@ -749,7 +749,6 @@ _DDL_STATS = (
         campagne VARCHAR(80),
         appareil VARCHAR(10),
         pays CHAR(2),
-        region VARCHAR(80),
         ville VARCHAR(80),
         lat REAL,
         lon REAL,
@@ -5131,6 +5130,21 @@ def team_reactivate(employee_id):
         return erreur_interne()
 
 
+def _anonymiser_collaborateur(cur, employe_id, email, agence_id):
+    """Anonymise le compte d'un collaborateur (partagé par team_erase et l'effacement par l'administrateur)."""
+    adresse = (email or '').lower()
+    cur.execute("""UPDATE users SET email = %s, first_name = 'Ancien collaborateur', password_hash = '!',
+                       is_active = FALSE, token_version = token_version + 1, capture_token = NULL,
+                       mail_capture_token = NULL, purged_at = %s WHERE id = %s""",
+                (f"ancien-collaborateur-{employe_id}@purge.invalid", _maintenant(), employe_id))
+    cur.execute("DELETE FROM push_subscriptions WHERE user_id = %s", (employe_id,))
+    cur.execute("DELETE FROM password_resets WHERE user_id = %s", (employe_id,))
+    cur.execute("DELETE FROM team_invitations WHERE agency_owner_id = %s AND lower(email) = %s",
+                (agence_id, adresse))
+    cur.execute("UPDATE leads SET assigned_to = NULL WHERE assigned_to = %s", (employe_id,))
+    cur.execute("UPDATE admin_log SET target = 'compte purgé' WHERE lower(target) = %s", (adresse,))
+
+
 @app.route('/api/v1/team/<int:employee_id>/erase', methods=['POST'])
 @limiter.limit("20 per hour", key_func=_cle_utilisateur)
 @token_required
@@ -5147,17 +5161,7 @@ def team_erase(employee_id):
             e = cur.fetchone()
             if not e:
                 return jsonify({"message": "Compte introuvable"}), 404
-            adresse = (e['email'] or '').lower()
-            cur.execute("""UPDATE users SET email = %s, first_name = 'Ancien collaborateur', password_hash = '!',
-                               is_active = FALSE, token_version = token_version + 1, capture_token = NULL,
-                               mail_capture_token = NULL, purged_at = %s WHERE id = %s""",
-                        (f"ancien-collaborateur-{e['id']}@purge.invalid", _maintenant(), e['id']))
-            cur.execute("DELETE FROM push_subscriptions WHERE user_id = %s", (e['id'],))
-            cur.execute("DELETE FROM password_resets WHERE user_id = %s", (e['id'],))
-            cur.execute("DELETE FROM team_invitations WHERE agency_owner_id = %s AND lower(email) = %s",
-                        (request.agency_id, adresse))
-            cur.execute("UPDATE leads SET assigned_to = NULL WHERE assigned_to = %s", (e['id'],))
-            cur.execute("UPDATE admin_log SET target = 'compte purgé' WHERE lower(target) = %s", (adresse,))
+            _anonymiser_collaborateur(cur, e['id'], e['email'], request.agency_id)
             cur.execute("""INSERT INTO admin_log (admin_email, action, target, detail, created_at)
                            VALUES (%s, 'collaborateur effacé', %s, %s, %s)""",
                         (f"agence:{request.agency_id}", f"compte {e['id']}", f"par le compte {request.user_id}", _maintenant()))
@@ -8853,7 +8857,26 @@ def _page_opposition(contenu):
         + contenu + '</body></html>', mimetype='text/html', headers={'Cache-Control': 'no-store'})
 
 
-def _empreinte_email(email):
+# Empreinte de la liste de suppression : HMAC-SHA256 avec une clé secrète propre à cet usage (une base volée
+# ne permet plus de tester des adresses connues). L'ancienne empreinte (SHA-256 sans clé) reste lue pour ne
+# pas perdre les désinscriptions déjà enregistrées ; elle est migrée vers la nouvelle quand on la rencontre.
+# Clé dédiée (variable OPPOSITION_HMAC_KEY, 32 caractères au moins) : elle ne change pas quand SECRET_KEY est
+# renouvelée. Sans elle, la clé dérive de SECRET_KEY (le renouveler rendrait les empreintes illisibles : les
+# prospects opposés pourraient être recontactés). À définir avant la mise en production, puis à ne plus changer.
+_CLE_EMPREINTE_EMAIL_SECRET = hashlib.sha256(b'zelyro-empreinte-email:' + SECRET_KEY.encode()).digest()
+_cle_dediee_opposition = (os.getenv("OPPOSITION_HMAC_KEY") or "").strip()
+_CLE_EMPREINTE_EMAIL = (hashlib.sha256(b'zelyro-empreinte-email:' + _cle_dediee_opposition.encode()).digest()
+                        if len(_cle_dediee_opposition) >= 32 else _CLE_EMPREINTE_EMAIL_SECRET)
+if os.getenv("RENDER") and len(_cle_dediee_opposition) < 32:
+    app.logger.warning("OPPOSITION_HMAC_KEY absente ou trop courte : la liste des désinscrits dépend de SECRET_KEY")
+
+
+def _empreinte_email(email, cle=None):
+    import hmac
+    return hmac.new(cle or _CLE_EMPREINTE_EMAIL, (email or '').strip().lower().encode('utf-8'), hashlib.sha256).hexdigest()
+
+
+def _empreinte_email_ancienne(email):
     return hashlib.sha256((email or '').strip().lower().encode('utf-8')).hexdigest()
 
 
@@ -8863,9 +8886,20 @@ def _prospect_oppose(cur, agence_id, email, opposition_at=None):
         return True
     if not (email or '').strip():
         return False
-    cur.execute("SELECT 1 FROM contact_opposition WHERE user_id = %s AND email_hash = %s",
-                (agence_id, _empreinte_email(email)))
-    return cur.fetchone() is not None
+    nouvelle = _empreinte_email(email)
+    # Empreintes plus anciennes encore lues : SHA-256 sans clé, et HMAC calculé avec la clé dérivée de SECRET_KEY
+    # (utile si OPPOSITION_HMAC_KEY a été définie après les premières désinscriptions).
+    anciennes = {_empreinte_email_ancienne(email), _empreinte_email(email, _CLE_EMPREINTE_EMAIL_SECRET)} - {nouvelle}
+    cur.execute("SELECT email_hash FROM contact_opposition WHERE user_id = %s AND email_hash = ANY(%s)",
+                (agence_id, [nouvelle, *anciennes]))
+    trouvees = {r['email_hash'].strip() for r in cur.fetchall()}
+    a_migrer = trouvees & anciennes
+    if a_migrer:
+        cur.execute("""INSERT INTO contact_opposition (user_id, email_hash) VALUES (%s, %s)
+                       ON CONFLICT DO NOTHING""", (agence_id, nouvelle))
+        cur.execute("DELETE FROM contact_opposition WHERE user_id = %s AND email_hash = ANY(%s)",
+                    (agence_id, list(a_migrer)))
+    return bool(trouvees)
 
 
 @app.route('/public/opposition/<token>', methods=['GET', 'POST'])
@@ -8957,7 +8991,7 @@ def _envoyer_email_completion(user_id, lead_id, nom, email_contact, portail):
             return
         _assurer_schema()
         with _base() as (conn, cur):
-            cur.execute("SELECT company_name, first_name FROM users WHERE id = %s", (user_id,))
+            cur.execute("SELECT company_name, first_name, email FROM users WHERE id = %s", (user_id,))
             agent = cur.fetchone() or {}
             # Le nom que le prospect connaît : celui de l'agence qui détient le bien (réglage « Agence » du compte),
             # à défaut le nom de la personne qui tient le compte.
@@ -9003,20 +9037,25 @@ def _envoyer_email_completion(user_id, lead_id, nom, email_contact, portail):
              "biens qui correspondent vraiment à votre projet, merci de préciser en une minute votre "
              "budget, le secteur recherché et vos critères."]
             + ([rappel_bien] if rappel_bien else []) +
-            ["Ce lien est personnel : ne le transmettez pas.",
+            [f"Ce lien est personnel : ne le transmettez pas. {agence if agence_nommee else 'L’agence'} est informée lorsque vous l'ouvrez.",
              f"Ce message est envoyé automatiquement par Zelyro, le logiciel que {agence} utilise pour répondre à ses "
              "demandes. Si vous n'êtes pas à l'origine de cette demande, ignorez-le : rien ne sera fait.",
              f"{agence if agence_nommee else 'L’agence'} utilise vos coordonnées pour répondre à votre demande. Vous pouvez vous opposer à "
              "tout moment à recevoir ses e-mails" + (f" : {_lien_opposition(lead_id)}" if _lien_opposition(lead_id) else ".")],
             bouton=("Préciser ma recherche", lien),
         )
+        # L'objet est du texte brut : on en retire balises et caractères de contrôle (le titre vient d'un e-mail externe).
+        titre_objet = _texte_court(re.sub(r"[<>\x00-\x1f\x7f]", " ", titre_bien or '').strip(), 60)
         if agence_nommee:
-            sujet = (f"{agence} — votre demande pour « {_texte_court(titre_bien, 60)} »" if titre_bien
+            sujet = (f"{agence} — votre demande pour « {titre_objet} »" if titre_objet
                      else f"{agence} — précisez votre recherche")
         else:
-            sujet = (f"Votre demande pour « {_texte_court(titre_bien, 60)} »" if titre_bien
+            sujet = (f"Votre demande pour « {titre_objet} »" if titre_objet
                      else "Précisez votre recherche")
-        envoye = _envoyer_email(email_contact, sujet, texte, html, nom_expediteur=agence_nommee or None)
+        # Les réponses du prospect vont à l'agence (adresse du compte), pas à l'adresse d'envoi de Zelyro.
+        repondre_a = (agent.get('email'), agence_nommee) if agent.get('email') else None
+        envoye = _envoyer_email(email_contact, sujet, texte, html, nom_expediteur=agence_nommee or None,
+                                repondre_a=repondre_a)
         if envoye:
             # Visible dans l'historique de la fiche : l'agent sait que le prospect a reçu le lien.
             _assurer_schema()
@@ -10769,13 +10808,11 @@ def _geo_chercher(ip):
 
     pays = str((enr.get('country') or {}).get('iso_code') or '')[:2].upper() or None
     ville = nom(enr.get('city'))
-    sous = enr.get('subdivisions') or []
-    region = nom(sous[0]) if sous and isinstance(sous[0], dict) else None
     lieu = enr.get('location') or {}
     lat, lon = lieu.get('latitude'), lieu.get('longitude')
     ok = ville and isinstance(lat, (int, float)) and isinstance(lon, (int, float))
-    return {"pays": pays, "region": (region or None) and region[:80], "ville": (ville or None) and ville[:80],
-            "lat": round(float(lat), 2) if ok else None, "lon": round(float(lon), 2) if ok else None}
+    return {"pays": pays, "ville": (ville or None) and ville[:80],
+            "lat": round(float(lat), 1) if ok else None, "lon": round(float(lon), 1) if ok else None}
 
 
 # --- Lecture de ce que le navigateur envoie ---
@@ -10872,6 +10909,14 @@ def _purger_stats():
             cur.execute("DELETE FROM site_visites WHERE cree_le < %s",
                         (maintenant - timedelta(days=STATS_CONSERVATION_JOURS),))
             cur.execute("DELETE FROM site_direct WHERE vu_le < %s", (maintenant - timedelta(days=1),))
+            # Minimisation rétroactive (idempotente, sans effet une fois faite) : la colonne « region » (plus jamais
+            # écrite) est supprimée avec ce qu'elle contenait, et la position est arrondie à 0,1° (~10 km) pour
+            # les lignes enregistrées avant ce changement.
+            cur.execute("ALTER TABLE site_visites DROP COLUMN IF EXISTS region")
+            for table in ('site_visites', 'site_direct'):
+                cur.execute(f"""UPDATE {table} SET lat = round(lat::numeric, 1)::real, lon = round(lon::numeric, 1)::real
+                                WHERE lat IS DISTINCT FROM round(lat::numeric, 1)::real
+                                   OR lon IS DISTINCT FROM round(lon::numeric, 1)::real""")
             conn.commit()
     except Exception:
         app.logger.exception("Statistiques : purge impossible")
@@ -10899,14 +10944,13 @@ def stats_vue():
                         (visiteur, page, maintenant - timedelta(minutes=STATS_DOUBLON_MINUTES)))
             if not cur.fetchone():
                 cur.execute("""
-                    INSERT INTO site_visites (visiteur, page, source, campagne, appareil, pays, region, ville, lat, lon, cree_le)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO site_visites (visiteur, page, source, campagne, appareil, pays, ville, lat, lon, cree_le)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (visiteur, page, _source_stats(donnees), _campagne_stats(donnees), appareil,
-                      geo.get('pays'), geo.get('region'), geo.get('ville'), geo.get('lat'), geo.get('lon'), maintenant))
+                      geo.get('pays'), geo.get('ville'), geo.get('lat'), geo.get('lon'), maintenant))
             _marquer_presence(cur, visiteur, page, appareil, geo, maintenant)
             conn.commit()
-        if _random.random() < 0.01:
-            _purger_stats()
+        # La purge (13 mois) est faite chaque jour par /internal/purge, plus par tirage au hasard.
     except Exception:
         app.logger.exception("Statistiques : visite non enregistrée")
     return '', 204
@@ -11646,6 +11690,10 @@ def stripe_webhook():
 DELAI_PURGE_JOURS = int(os.getenv("DELAI_PURGE_JOURS", "30"))
 RETENTION_JOURNAL_RECEPTION_JOURS = 90
 RETENTION_TECHNIQUE_JOURS = 90
+RETENTION_JOURNAL_ADMIN_JOURS = 365           # journal d'administration : 12 mois
+RETENTION_PREUVE_EFFACEMENT_JOURS = 1095      # preuves d'effacement (sans donnée personnelle) : 3 ans
+# Actions du journal d'administration qui prouvent un effacement : gardées 3 ans, les autres 12 mois.
+ACTIONS_PREUVE_EFFACEMENT = ('prospect supprimé', 'compte effacé', 'collaborateur effacé', 'agence purgée')
 RETENTION_SPAM_JOURS = 30   # durée pendant laquelle un message écarté peut être récupéré par l'agence
 EXPORT_PHOTOS_MAX_OCTETS = 150 * 1024 * 1024
 
@@ -11681,48 +11729,55 @@ def _purger_agence(uid):
                 or compte['billing_ended_at'] >= _maintenant() - timedelta(days=DELAI_PURGE_JOURS)):
             app.logger.info("Purge : compte %s ignoré (état changé depuis la sélection)", uid)
             return False
-        cur.execute("SELECT refresh_token_enc FROM gmail_connections WHERE user_id = %s", (uid,))
-        gmail = cur.fetchone()
-        if gmail:
-            _revoquer_jeton_gmail(gmail['refresh_token_enc'], uid)
-        cur.execute("SELECT id, email FROM users WHERE agency_owner_id = %s", (uid,))
-        employes = cur.fetchall()
-        ids = [uid] + [e['id'] for e in employes]
-        adresses = [str(a).lower() for a in [compte['email']] + [e['email'] for e in employes] if a]
+        return _effacer_donnees_agence(conn, cur, uid, compte['email'])
 
-        cur.execute("DELETE FROM leads WHERE user_id = %s", (uid,))
-        fiches = cur.rowcount
-        cur.execute("DELETE FROM properties WHERE user_id = %s", (uid,))
-        biens = cur.rowcount
-        cur.execute("DELETE FROM inbound_emails WHERE user_id = ANY(%s)", (ids,))
-        cur.execute("DELETE FROM gmail_connections WHERE user_id = %s", (uid,))
-        cur.execute("DELETE FROM api_keys WHERE user_id = %s", (uid,))
-        cur.execute("DELETE FROM contact_opposition WHERE user_id = %s", (uid,))
-        cur.execute("DELETE FROM push_subscriptions WHERE user_id = ANY(%s)", (ids,))
-        cur.execute("DELETE FROM team_invitations WHERE agency_owner_id = %s", (uid,))
-        cur.execute("DELETE FROM password_resets WHERE user_id = ANY(%s)", (ids,))
-        cur.execute("""UPDATE admin_log SET target = 'compte purgé' WHERE lower(target) = ANY(%s)""", (adresses,))
-        cur.execute("""UPDATE invitations SET email = NULL, used_email = NULL
-                       WHERE lower(email) = ANY(%s) OR lower(used_email) = ANY(%s)""", (adresses, adresses))
-        if employes:
-            cur.execute("DELETE FROM users WHERE agency_owner_id = %s", (uid,))
 
-        cur.execute("SAVEPOINT suppression_compte")
-        try:
-            cur.execute("DELETE FROM users WHERE id = %s", (uid,))
-            mode = "compte supprimé"
-        except psycopg2.Error:
-            cur.execute("ROLLBACK TO SAVEPOINT suppression_compte")
-            app.logger.warning("Purge : compte %s non supprimable (contrainte), anonymisé à la place", uid)
-            cur.execute("""UPDATE users SET email = %s, first_name = '', company_name = '', password_hash = '!',
-                               capture_token = NULL, mail_capture_token = NULL, is_active = FALSE,
-                               token_version = token_version + 1, purged_at = %s WHERE id = %s""",
-                        (f"purge-{uid}@purge.invalid", _maintenant(), uid))
-            mode = "compte anonymisé"
-        cur.execute("""INSERT INTO admin_log (admin_email, action, target, detail, created_at)
-                       VALUES ('système', 'agence purgée', %s, %s, %s)""",
-                    (f"compte {uid}", f"{fiches} fiches, {biens} biens, {len(employes)} collaborateurs : {mode}", _maintenant()))
-        conn.commit()
+def _effacer_donnees_agence(conn, cur, uid, email, admin_email='système', action='agence purgée', origine=''):
+    """Le corps de l'effacement d'une agence, sans revérifier l'état de l'abonnement (c'est à l'appelant de
+    le faire, sous verrou). Partagé par la purge automatique et par l'outil d'effacement de l'administrateur."""
+    cur.execute("SELECT refresh_token_enc FROM gmail_connections WHERE user_id = %s", (uid,))
+    gmail = cur.fetchone()
+    if gmail:
+        _revoquer_jeton_gmail(gmail['refresh_token_enc'], uid)
+    cur.execute("SELECT id, email FROM users WHERE agency_owner_id = %s", (uid,))
+    employes = cur.fetchall()
+    ids = [uid] + [e['id'] for e in employes]
+    adresses = [str(a).lower() for a in [email] + [e['email'] for e in employes] if a]
+
+    cur.execute("DELETE FROM leads WHERE user_id = %s", (uid,))
+    fiches = cur.rowcount
+    cur.execute("DELETE FROM properties WHERE user_id = %s", (uid,))
+    biens = cur.rowcount
+    cur.execute("DELETE FROM inbound_emails WHERE user_id = ANY(%s)", (ids,))
+    cur.execute("DELETE FROM gmail_connections WHERE user_id = %s", (uid,))
+    cur.execute("DELETE FROM api_keys WHERE user_id = %s", (uid,))
+    cur.execute("DELETE FROM contact_opposition WHERE user_id = %s", (uid,))
+    cur.execute("DELETE FROM push_subscriptions WHERE user_id = ANY(%s)", (ids,))
+    cur.execute("DELETE FROM team_invitations WHERE agency_owner_id = %s", (uid,))
+    cur.execute("DELETE FROM password_resets WHERE user_id = ANY(%s)", (ids,))
+    cur.execute("""UPDATE admin_log SET target = 'compte purgé' WHERE lower(target) = ANY(%s)""", (adresses,))
+    cur.execute("""UPDATE invitations SET email = NULL, used_email = NULL
+                   WHERE lower(email) = ANY(%s) OR lower(used_email) = ANY(%s)""", (adresses, adresses))
+    if employes:
+        cur.execute("DELETE FROM users WHERE agency_owner_id = %s", (uid,))
+
+    cur.execute("SAVEPOINT suppression_compte")
+    try:
+        cur.execute("DELETE FROM users WHERE id = %s", (uid,))
+        mode = "compte supprimé"
+    except psycopg2.Error:
+        cur.execute("ROLLBACK TO SAVEPOINT suppression_compte")
+        app.logger.warning("Purge : compte %s non supprimable (contrainte), anonymisé à la place", uid)
+        cur.execute("""UPDATE users SET email = %s, first_name = '', company_name = '', password_hash = '!',
+                           capture_token = NULL, mail_capture_token = NULL, is_active = FALSE,
+                           token_version = token_version + 1, purged_at = %s WHERE id = %s""",
+                    (f"purge-{uid}@purge.invalid", _maintenant(), uid))
+        mode = "compte anonymisé"
+    cur.execute("""INSERT INTO admin_log (admin_email, action, target, detail, created_at)
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (admin_email, action, f"compte {uid}",
+                 f"{origine}{fiches} fiches, {biens} biens, {len(employes)} collaborateurs : {mode}", _maintenant()))
+    conn.commit()
     return True
 
 
@@ -11763,6 +11818,11 @@ def _purger_journaux():
                     (maintenant - timedelta(days=RETENTION_TECHNIQUE_JOURS),))
         cur.execute("DELETE FROM team_invitations WHERE expires_at < %s",
                     (maintenant - timedelta(days=RETENTION_TECHNIQUE_JOURS),))
+        cur.execute("""DELETE FROM admin_log
+                       WHERE created_at < CASE WHEN action = ANY(%s) THEN %s ELSE %s END""",
+                    (list(ACTIONS_PREUVE_EFFACEMENT),
+                     maintenant - timedelta(days=RETENTION_PREUVE_EFFACEMENT_JOURS),
+                     maintenant - timedelta(days=RETENTION_JOURNAL_ADMIN_JOURS)))
         conn.commit()
 
 
@@ -11777,7 +11837,52 @@ def purge_interne():
         _assurer_schema()
         agences = _purger_agences_resiliees()
         _purger_journaux()
+        _purger_stats()
         return jsonify({"agences_purgees": agences}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/admin/users/<int:user_id>/erase', methods=['POST'])
+@limiter.limit("10 per hour", key_func=_cle_utilisateur)
+@admin_required
+def admin_effacer_compte(user_id):
+    """Effacement définitif d'un compte à la demande de la personne (RGPD art. 17), par l'administrateur de
+    Zelyro. Corps : {"confirm_email": "<adresse exacte du compte>"}. Directeur d'agence : mêmes effacements que
+    la purge de fin de contrat (refusé tant que l'abonnement est actif). Collaborateur : anonymisation, comme
+    team_erase. Irréversible."""
+    try:
+        data = request.get_json(silent=True) or {}
+        confirmation = str(data.get('confirm_email') or '').strip().lower()
+        with _base() as (conn, cur):
+            cur.execute("""SELECT id, email, role, agency_owner_id, billing_status, stripe_subscription_id FROM users
+                           WHERE id = %s AND purged_at IS NULL FOR UPDATE""", (user_id,))
+            c = cur.fetchone()
+            if not c:
+                return jsonify({"message": "Compte introuvable"}), 404
+            if not confirmation or confirmation != (c['email'] or '').strip().lower():
+                return jsonify({"message": "L'adresse e-mail de confirmation ne correspond pas à ce compte"}), 400
+            if _est_admin(c['email']):
+                return jsonify({"message": "Un compte administrateur de Zelyro ne peut pas être effacé ici"}), 403
+            detail_admin = f"par l'administrateur {request.user_email}"
+            if c['agency_owner_id'] is not None:
+                if c['role'] != 'employe':
+                    return jsonify({"message": "Type de compte non pris en charge"}), 400
+                _anonymiser_collaborateur(cur, c['id'], c['email'], c['agency_owner_id'])
+                cur.execute("""INSERT INTO admin_log (admin_email, action, target, detail, created_at)
+                               VALUES (%s, 'compte effacé', %s, %s, %s)""",
+                            (request.user_email, f"compte {c['id']}", f"collaborateur anonymisé, {detail_admin}", _maintenant()))
+                conn.commit()
+            else:
+                # Refus tant qu'un abonnement existe chez Stripe : actif, en essai, en retard, mais aussi impayé,
+                # incomplet ou en pause (il continuerait d'exister sans compte). Seul « canceled » est accepté.
+                if (c['billing_status'] in ('active', 'trialing', 'past_due')
+                        or (c['stripe_subscription_id'] and c['billing_status'] != 'canceled')):
+                    return jsonify({"message": "Un abonnement est encore associé à cette agence chez Stripe : "
+                                               "annulez-le d'abord."}), 409
+                _effacer_donnees_agence(conn, cur, c['id'], c['email'], admin_email=request.user_email,
+                                        action='compte effacé', origine=detail_admin + " : ")
+        return jsonify({"message": "Le compte a été effacé."}), 200
     except Exception:
         return erreur_interne()
 
