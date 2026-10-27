@@ -7272,6 +7272,8 @@ def set_commission_rate():
 # une visite), pourquoi, et tout ce qu'il faut sous la main pour le faire.
 
 TACHES_MAX = 60
+TACHES_A_APPELER_SCORE = 90        # score à partir duquel un prospect est « à appeler maintenant » (vert fluo)
+TACHES_A_APPELER_BONUS = 14       # son motif d'action pèse plus lourd : il passe avant les autres, sauf une visite aujourd'hui
 TACHES_CHAUD_JOURS = 3          # un prospect chaud sans action de l'agence depuis ce délai est à rappeler
 TACHES_RECENT_PROPOSITION_JOURS = 7
 TACHES_ENDORMI_JOURS = 30
@@ -7477,6 +7479,12 @@ def _construire_taches(cur, agence_id, user_id, role):
         liste.sort(key=lambda m: -m['poids'])
         poids = liste[0]['poids']
         action = liste[0]['action']
+        # Un prospect « à appeler maintenant » (score 90 et plus) passe avant les autres tâches : un prospect à 94
+        # ne doit pas attendre derrière un prospect à 84 parce que celui-ci est plus ancien. Une visite prévue
+        # aujourd'hui (poids 100) reste devant, et un simple « bien à proposer » ou prospect endormi n'est pas relevé.
+        if (l['_points'] >= TACHES_A_APPELER_SCORE and 60 <= poids < 100
+                and liste[0]['genre'] in ('evenement', 'relance', 'nouveau', 'chaud', 'visite')):
+            poids = min(99, poids + TACHES_A_APPELER_BONUS)
         a_tel, a_mail = bool((l['phone'] or '').strip()), bool((l['email'] or '').strip())
         if action == 'appeler' and not a_tel:
             action = 'email' if a_mail else 'completer'
