@@ -1274,3 +1274,14 @@ body:not(.auth):not(.pub):not(.erreur404)::after {
 .reception-portails .barre-ligne { grid-template-columns: minmax(120px, 42%) 1fr 34px; }
 @media (max-width: 640px) { .reception-portails .barre-ligne { grid-template-columns: 1fr 34px; } .reception-portails .barre-piste { grid-column: 1 / -1; grid-row: 2; } }
 .account-grid > * { min-width: 0; }
+
+/* Cartes prospects : le rond du score ne passe plus sous la pastille « à appeler » ni sous le bandeau « déjà propriétaire »,
+   et Appeler / WhatsApp deviennent de vrais petits boutons. */
+.lead-card[data-score] .pastille-go { max-width: calc(100% - 66px); }
+.lead-card[data-score] .bandeau-proprio { width: fit-content; max-width: calc(100% - 66px); margin: 0 0 12px; line-height: 1.35; }
+.lead-card[data-score] .pastille-go + .bandeau-proprio { margin-top: 0; }
+.lead-card[data-score] .lead-name { padding-right: 62px; min-height: 48px; display: flex; align-items: center; flex-wrap: wrap; }
+.lead-card[data-score] .pastille-go ~ .lead-name, .lead-card[data-score] .bandeau-proprio ~ .lead-name { min-height: 0; padding-right: 0; display: block; }
+.lead-tags .lien-fiche { display: inline-flex; align-items: center; padding: 6px 14px; border-radius: 999px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.lead-tags .lien-fiche:hover { background: var(--sage-50); text-decoration: none; }
+.lead-footer .lien-fiche { padding: 6px 2px; }
