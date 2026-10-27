@@ -263,6 +263,7 @@ html.anim .carte.n-go{animation:halo 2.6s ease-in-out infinite}
 .ecran-barre i:first-child{background:var(--laiton)}
 .ecran-video video{width:100%;aspect-ratio:16/9;border-radius:16px;background:#0e1a14;object-fit:cover}
 .lire{position:absolute;left:50%;top:calc(50% + 17px);width:96px;height:96px;margin:-48px 0 0 -48px;border-radius:50%;border:0;background:var(--laiton);color:var(--nuit);display:grid;place-items:center;cursor:pointer;box-shadow:0 0 0 12px rgba(212,177,95,.25),0 20px 40px -12px rgba(0,0,0,.6);transition:transform .3s var(--ressort),box-shadow .3s}
+.lire[hidden]{display:none}
 .lire:hover{transform:scale(1.08);box-shadow:0 0 0 18px rgba(212,177,95,.2),0 20px 40px -12px rgba(0,0,0,.6)}
 .lire svg{width:34px;height:34px;margin-left:5px}
 

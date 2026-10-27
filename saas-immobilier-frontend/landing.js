@@ -363,6 +363,8 @@
         b.hidden = false;
         b.addEventListener('click', function () { var p = v.play(); if (p && p.catch) p.catch(function () {}); });
         v.addEventListener('play', function () { b.hidden = true; });
+        v.addEventListener('playing', function () { b.hidden = true; });
+        v.addEventListener('pause', function () { if (!v.seeking) b.hidden = false; });
         v.addEventListener('ended', function () { b.hidden = false; });
     })();
 
