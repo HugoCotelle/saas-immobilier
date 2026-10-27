@@ -71,6 +71,7 @@
         return c;
     }
     var COUL = { fin: 'qc-fin', urg: 'qc-urg', coord: 'qc-coord', dos: 'qc-dos', eng: 'qc-eng' };
+    var ETIQ = { fin: 'Financement', urg: 'Échéance', coord: 'Coordonnées', dos: 'Dossier', eng: 'Engagement' };
 
     /* ---------- Barre du haut : défilement, jauge, menu, connexion ---------- */
     (function () {
@@ -250,8 +251,8 @@
             $$('.carte.montre', scene).forEach(function (c) { c.classList.remove('montre'); });
             el.classList.add('montre');
             var html = '<b><span>' + esc(p.nom) + '</span><span>' + p.q.score + '/100</span></b><ul>' +
-                p.q.lignes.map(function (x) { return '<li' + (x.plafond ? ' class="plafond"' : '') + '><i>' + (x.n > 0 ? '+' : '') + x.n + '</i>' + esc(x.t) + '</li>'; }).join('') +
-                '</ul><p>Règles de calcul de Zelyro pour un projet d’achat.' + (p.proprio ? ' Déjà propriétaire&nbsp;: à proposer pour une estimation.' : '') + '</p>';
+                p.q.lignes.filter(function (x) { return !x.plafond; }).map(function (x) { return '<li><i>✓</i>' + esc(x.t) + '</li>'; }).join('') +
+                '</ul><p>Les raisons de ce score, lisibles par toute l’agence.' + (p.proprio ? ' Déjà propriétaire&nbsp;: à proposer pour une estimation.' : '') + '</p>';
             calc.innerHTML = html;
             calc.hidden = false;
             var rt = tableau.getBoundingClientRect(), rc = el.getBoundingClientRect();
@@ -418,10 +419,9 @@
             pro.setAttribute('aria-hidden', p.proprio ? 'false' : 'true');
             compteur(num, precedent, s, anim === false ? 1 : 600);
             precedent = s;
-            var segs = ['fin', 'urg', 'coord', 'dos', 'eng'].map(function (k) { return '<i class="' + COUL[k] + '" style="flex-grow:' + Math.max(0, q.cat[k]) + '"></i>'; }).join('') + '<i style="flex-grow:' + (100 - s) + '"></i>';
-            barre.innerHTML = segs;
-            lignes.innerHTML = q.lignes.length ? q.lignes.map(function (x) {
-                return '<li><span class="' + COUL[x.c] + '"></span><i>' + (x.n > 0 ? '+' : '') + x.n + '</i>' + esc(x.t) + '</li>';
+            var rempli = $('.q-rempli', barre); if (rempli) rempli.style.width = s + '%';
+            lignes.innerHTML = q.lignes.length ? q.lignes.filter(function (x) { return !x.plafond; }).map(function (x) {
+                return '<li><span class="' + COUL[x.c] + '"></span>' + esc(x.t) + '<em>' + ETIQ[x.c] + '</em></li>';
             }).join('') : '<li class="vide">Aucune information&nbsp;: ce prospect reste en premier contact.</li>';
             if (s >= 90) {
                 defi.textContent = 'Vert fluo : ce prospect passe en tête de votre liste.';
@@ -492,7 +492,7 @@
             compteur(sc, ancien, r.s, 500); ancien = r.s;
             sr.textContent = r.s + ' sur 100';
             raisons.innerHTML = r.exclu ? '<li class="exclu">' + r.exclu + '&nbsp;: le secteur est éliminatoire.</li>' :
-                r.l.map(function (x) { return '<li><i>+' + x[0] + '</i>' + esc(x[1]) + '</li>'; }).join('');
+                r.l.map(function (x) { return '<li><i>✓</i>' + esc(x[1]) + '</li>'; }).join('');
         }
         var boutons = $$('.r-bien', zone);
         function choisir(i, focus) {
