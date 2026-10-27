@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zelyro — Qualification et suivi des prospects pour agences immobilières</title>
+<meta name="description" content="Zelyro qualifie automatiquement les prospects d’une agence immobilière, les rapproche de ses biens avec un score expliqué et organise leur suivi jusqu’à la signature.">
+<meta name="theme-color" content="#F6F2EA">
+<link rel="canonical" href="https://www.zelyro.fr/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Zelyro — Qualification et suivi des prospects pour agences immobilières">
+<meta property="og:description" content="Chaque lead. Chaque bien. Aucune opportunité perdue.">
+<meta property="og:locale" content="fr_FR">
+<meta property="og:url" content="https://www.zelyro.fr/">
+<meta property="og:image" content="https://www.zelyro.fr/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Zelyro — Qualification et suivi des prospects pour agences immobilières">
+<meta property="og:site_name" content="Zelyro">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Zelyro — Qualification et suivi des prospects pour agences immobilières">
+<meta name="twitter:description" content="Chaque lead. Chaque bien. Aucune opportunité perdue.">
+<meta name="twitter:image" content="https://www.zelyro.fr/og-image.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+<link rel="preload" href="/vendor/fonts/unbounded-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/vendor/fonts/albert-sans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/landing.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://www.zelyro.fr/#organization",
+      "name": "Zelyro",
+      "url": "https://www.zelyro.fr/",
+      "logo": "https://www.zelyro.fr/og-image.png",
+      "email": "contact@zelyro.fr",
+      "areaServed": "FR"
+    },
+    {
+      "@type": "SoftwareApplication",
+      "name": "Zelyro",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "url": "https://www.zelyro.fr/",
+      "description": "Zelyro qualifie automatiquement les prospects d’une agence immobilière, les rapproche de ses biens avec un score expliqué et organise leur suivi jusqu’à la signature.",
+      "offers": {
+        "@type": "Offer",
+        "priceCurrency": "EUR",
+        "availability": "https://schema.org/InStock"
+      },
+      "publisher": { "@id": "https://www.zelyro.fr/#organization" }
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "De quoi Zelyro a-t-il besoin pour démarrer ?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "D’un compte et de vos données de travail : vos biens, saisis dans le portefeuille ou importés depuis un fichier Excel ou CSV, et vos prospects, importés depuis un fichier Excel ou CSV, ou reçus par le formulaire de contact de l’agence. Rien n’est à installer, Zelyro s’utilise depuis un navigateur."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Puis-je importer mes prospects existants ?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Oui, par un fichier Excel ou CSV. Chaque prospect importé est qualifié automatiquement à partir des informations présentes dans le fichier : plus le dossier est complet, plus la qualification est précise."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "La qualification repose-t-elle sur de l’intelligence artificielle ?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Non. La qualification des prospects et le score de correspondance reposent sur des règles de calcul explicites, pas sur de l’apprentissage automatique. Vous pouvez donc comprendre pourquoi un prospect est classé à un niveau ou pourquoi un bien obtient un score."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "À qui appartiennent les données ?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "À l’agence. Les prospects et les biens que vous saisissez ou importez restent les vôtres ; Zelyro les traite pour le compte de l’agence, afin de faire fonctionner le service. Vous pouvez supprimer un prospect depuis sa fiche."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Comment demander une démonstration ?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Cliquez sur « Demander une démo » : une page s’ouvre avec un court formulaire, et nous vous répondons très vite. Vous pouvez aussi écrire à contact@zelyro.fr."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+<script>document.documentElement.className+=' js';</script>
+<script src="/stats.js" defer></script>
+<script src="/landing.js" defer></script>
+</head>
+<body>
+<a class="evitement" href="#contenu">Aller au contenu</a>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+<defs>
+<symbol id="i-ok" viewBox="0 0 12 12"><path d="M2.4 6.4l2.4 2.4 4.8-5.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-moins" viewBox="0 0 12 12"><path d="M3 6h6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+<symbol id="i-maison" viewBox="0 0 16 16"><path d="M2.5 7.5L8 3l5.5 4.5V13a.8.8 0 0 1-.8.8H3.3a.8.8 0 0 1-.8-.8z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M6.5 13.8V10h3v3.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+<symbol id="i-fleche" viewBox="0 0 16 16"><path d="M3 8h9.5M8.5 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-pause" viewBox="0 0 16 16"><path d="M5.5 3.5v9M10.5 3.5v9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+<symbol id="i-lecture" viewBox="0 0 16 16"><path d="M5 3.2v9.6L12.6 8z" fill="currentColor"/></symbol>
+<symbol id="i-rejouer" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.8v3h-3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3.5 7.5L12 13.5l8.5-6" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+<symbol id="i-fichier" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M14 3v5h5M9 13h6M9 17h6" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+<symbol id="i-form" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M7 9h10M7 13h10M7 17h5" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+<symbol id="i-api" viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-cloche" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 6.5 2.5 8 2.5 8h-17S6 15.5 6 9z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+<symbol id="i-base" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7.5" ry="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M4.5 6v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6M4.5 12v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+<symbol id="i-bouclier" viewBox="0 0 24 24"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 8-7.5 9.5-4.3-1.5-7.5-5-7.5-9.5V6z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M9 12l2.2 2.2L15.5 10" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+<symbol id="i-cadenas" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9.5" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8 11V8a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+<symbol id="i-cycle" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7M20 4v4.5h-4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+<symbol id="i-ecran" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8.5 20h7M12 16.5V20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+</defs>
+</svg>
+
+<header class="barre" id="barre">
+    <div class="cadre barre-in">
+        <a class="logo" href="/" aria-label="Zelyro, retour à l’accueil"><i aria-hidden="true"></i>Zelyro</a>
+        <nav class="nav" id="nav" aria-label="Navigation principale">
+            <a href="#demo">Démo vidéo</a>
+            <a href="#fonctionnalites">Fonctionnalités</a>
+            <a href="#portails">Comment ça marche</a>
+            <a href="#securite">Sécurité</a>
+            <a href="#tarifs">Tarifs</a>
+            <a href="#faq">FAQ</a>
+            <a class="nav-demo" href="/demo-agences.html">Demander une démo</a>
+        </nav>
+        <div class="barre-actions">
+            <a class="jauge" id="jauge" href="/demo-agences.html" aria-label="Demander une démo" data-niveau="gris">
+                <span class="jauge-anneau" aria-hidden="true"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" class="j-fond"/><circle cx="18" cy="18" r="15" class="j-val" id="jauge-val"/></svg><b id="jauge-num">0</b></span>
+                <span class="jauge-txt" id="jauge-txt">Votre visite</span>
+            </a>
+            <a class="btn btn-contour btn-petit" id="nav-login" href="/login.html">Connexion</a>
+            <a class="btn btn-petit" href="/demo-agences.html">Demander une démo</a>
+            <button class="burger" type="button" aria-expanded="false" aria-controls="nav" aria-label="Ouvrir le menu"><span></span></button>
+        </div>
+    </div>
+    <div class="progression" aria-hidden="true"><i id="progression"></i></div>
+</header>
+
+<main id="contenu">
+
+<!-- ============ HÉROS : LE TRI ============ -->
+<section class="heros" aria-labelledby="titre-heros">
+    <div class="cadre heros-grille">
+        <div class="heros-texte">
+            <h1 id="titre-heros"><span class="l">Chaque lead.</span> <span class="l">Chaque bien.</span> <em class="l">Aucune opportunité perdue.</em></h1>
+            <p class="heros-sous">Zelyro qualifie automatiquement vos prospects, les rapproche des biens de votre agence et vous aide à les relancer au bon moment.</p>
+            <div class="actions">
+                <a class="btn btn-grand btn-aimant" href="/demo-agences.html">Demander une démo<svg aria-hidden="true"><use href="#i-fleche"/></svg></a>
+                <a class="btn btn-grand btn-contour" href="/login.html#inscription">Créer un compte</a>
+            </div>
+            <ul class="heros-points">
+                <li><b>Un score sur 100</b> en cinq couleurs : le vert fluo, c’est à appeler maintenant.</li>
+                <li><b>SeLoger et Leboncoin</b> : vos demandes arrivent toutes seules, déjà qualifiées.</li>
+                <li><b>Chaque agence</b> ne voit que ses propres données.</li>
+            </ul>
+        </div>
+
+        <div class="tableau" id="tableau">
+            <div class="tableau-tete">
+                <div class="bascule" role="group" aria-label="Voir la liste avec ou sans Zelyro">
+                    <button type="button" class="b-sans" aria-pressed="false">Sans Zelyro</button>
+                    <button type="button" class="b-avec" aria-pressed="true">Avec Zelyro</button>
+                </div>
+                <button type="button" class="direct" id="direct" aria-pressed="true" hidden><span class="direct-pt" aria-hidden="true"></span><span class="direct-txt">En direct</span><svg aria-hidden="true"><use href="#i-pause"/></svg></button>
+            </div>
+            <div class="scene" id="scene" data-etat="avec">
+                <article class="carte n-go" data-id="camille" tabindex="0" style="--k:0;--mx:-14px;--my:188px;--mr:3deg;--d:.32s">
+                    <div class="c-corps"><div class="c-l1"><span class="c-src">Leboncoin</span><b class="c-nom">Camille R.</b><span class="c-alerte">À appeler maintenant</span></div><p class="c-det">Appartement · Lille · 420 000 €</p><ul class="c-crit"><li>Financement approuvé</li><li>Achat immédiat</li><li>Dossier complet</li></ul></div>
+                    <div class="c-sc"><span class="c-num">92</span><small>Acheteur actif</small></div>
+                </article>
+                <article class="carte n-vert" data-id="sarah" tabindex="0" style="--k:1;--mx:26px;--my:226px;--mr:-4deg;--d:.22s">
+                    <div class="c-corps"><div class="c-l1"><span class="c-src">SeLoger</span><b class="c-nom">Sarah L.</b></div><p class="c-det">Appartement · Marcq-en-Barœul · 310 000 €</p><ul class="c-crit"><li>Financement approuvé</li><li>Achat sous 3 mois</li><li>Dossier complet</li></ul></div>
+                    <div class="c-sc"><span class="c-num">84</span><small>Acheteur actif</small></div>
+                </article>
+                <article class="carte n-jaune" data-id="julien" tabindex="0" style="--k:2;--mx:-36px;--my:170px;--mr:7deg;--d:.14s">
+                    <div class="c-corps"><div class="c-l1"><span class="c-src">Site de l’agence</span><b class="c-nom">Julien M.</b><span class="c-proprio"><svg aria-hidden="true"><use href="#i-maison"/></svg>Déjà propriétaire</span></div><p class="c-det">Maison · Marcq-en-Barœul · 560 000 €</p><ul class="c-crit"><li>Financement en cours</li><li>Achat sous 6 mois</li><li>Dossier complet</li></ul></div>
+                    <div class="c-sc"><span class="c-num">66</span><small>Projet en cours</small></div>
+                </article>
+                <article class="carte n-orange" data-id="paul" tabindex="0" style="--k:3;--mx:32px;--my:116px;--mr:5deg;--d:.07s">
+                    <div class="c-corps"><div class="c-l1"><span class="c-src">SeLoger</span><b class="c-nom">Paul R.</b><span class="c-proprio"><svg aria-hidden="true"><use href="#i-maison"/></svg>Déjà propriétaire</span></div><p class="c-det">Maison · Roubaix · budget non renseigné</p><ul class="c-crit"><li class="non">Financement en attente</li><li>Achat sous 6 mois</li><li class="non">Budget manquant</li></ul></div>
+                    <div class="c-sc"><span class="c-num">49</span><small>Projet en cours</small></div>
+                </article>
+                <article class="carte n-gris" data-id="sophie" tabindex="0" style="--k:4;--mx:-22px;--my:146px;--mr:-6deg;--d:0s">
+                    <div class="c-corps"><div class="c-l1"><span class="c-src">Leboncoin</span><b class="c-nom">Sophie L.</b></div><p class="c-det">Appartement · budget et secteur non renseignés</p><ul class="c-crit"><li class="non">Financement inconnu</li><li class="non">Achat au-delà de 6 mois</li><li class="non">Dossier incomplet</li></ul></div>
+                    <div class="c-sc"><span class="c-num">13</span><small>Premier contact</small></div>
+                </article>
+            </div>
+            <div class="calcul" id="calcul" aria-live="polite" hidden></div>
+            <ul class="niveaux" aria-label="Couleur selon le score sur 100">
+                <li><i class="pt-go"></i>90 et plus</li><li><i class="pt-vert"></i>80-89</li><li><i class="pt-jaune"></i>65-79</li><li><i class="pt-orange"></i>45-64</li><li><i class="pt-gris"></i>moins de 45</li><li><i class="pt-proprio"></i>propriétaire</li>
+            </ul>
+            <p class="legende"><span class="js-seul">Survolez une fiche pour voir son calcul. </span>Aperçu illustré, données fictives.</p>
+        </div>
+    </div>
+</section>
+
+<!-- ============ LE CONSTAT ============ -->
+<section class="section constat" aria-labelledby="titre-constat">
+    <div class="cadre">
+        <div class="tete">
+            <h2 id="titre-constat">Les demandes arrivent de partout. <em>Les bonnes se perdent en chemin.</em></h2>
+            <p class="chapo">Trois situations que toutes les agences connaissent. Retournez les cartes&nbsp;: voici ce que Zelyro change.</p>
+        </div>
+        <ol class="retournes">
+            <li class="retourne">
+                <button type="button" class="r-in" aria-pressed="false">
+                    <span class="r-face r-avant"><span class="r-n">01</span><span class="r-titre">Aucune priorité claire</span><span class="r-txt">Sans grille commune, on rappelle d’abord le dernier arrivé, pas le prospect le plus avancé dans son projet.</span><span class="r-cta">Avec Zelyro<svg aria-hidden="true"><use href="#i-cycle"/></svg></span></span>
+                    <span class="r-face r-arriere"><span class="r-n">01</span><span class="r-titre">Un score sur 100 pour chacun</span><span class="r-txt">Financement, échéance, dossier&nbsp;: chaque prospect est classé selon des règles lisibles. Le vert fluo passe devant.</span><span class="r-mini"><i class="pt-go"></i><i class="pt-vert"></i><i class="pt-jaune"></i><i class="pt-orange"></i><i class="pt-gris"></i></span></span>
+                </button>
+            </li>
+            <li class="retourne">
+                <button type="button" class="r-in" aria-pressed="false">
+                    <span class="r-face r-avant"><span class="r-n">02</span><span class="r-titre">Des biens et des acheteurs qui ne se rencontrent pas</span><span class="r-txt">Le rapprochement se fait de mémoire et dépend de la personne qui connaît le mieux le portefeuille.</span><span class="r-cta">Avec Zelyro<svg aria-hidden="true"><use href="#i-cycle"/></svg></span></span>
+                    <span class="r-face r-arriere"><span class="r-n">02</span><span class="r-titre">Chaque prospect face à chaque bien</span><span class="r-txt">Un score de correspondance sur 100, avec ses raisons en toutes lettres. Plus besoin de tout avoir en tête.</span><span class="r-mini r-anneau"><b>93</b></span></span>
+                </button>
+            </li>
+            <li class="retourne">
+                <button type="button" class="r-in" aria-pressed="false">
+                    <span class="r-face r-avant"><span class="r-n">03</span><span class="r-titre">Des relances qui glissent</span><span class="r-txt">Sans suivi daté, un prospect intéressé finit par ne plus être rappelé.</span><span class="r-cta">Avec Zelyro<svg aria-hidden="true"><use href="#i-cycle"/></svg></span></span>
+                    <span class="r-face r-arriere"><span class="r-n">03</span><span class="r-titre">Un rappel au bon moment</span><span class="r-txt">Statut, notes datées et date de relance&nbsp;: le prospect revient sous vos yeux le jour prévu.</span><span class="r-mini r-rappel"><svg aria-hidden="true"><use href="#i-cloche"/></svg>Relance&nbsp;: jeudi</span></span>
+                </button>
+            </li>
+        </ol>
+    </div>
+</section>
+
+<!-- ============ DÉMONSTRATION VIDÉO ============ -->
+<section class="section demo" id="demo" aria-labelledby="titre-demo">
+    <div class="cadre demo-grille">
+        <div class="tete">
+            <h2 id="titre-demo">Des demandes éparpillées à la visite programmée, <em>en 34 secondes.</em></h2>
+            <p class="chapo">Du premier message d’un prospect à la visite fixée&nbsp;: voyez ce que Zelyro change dans le quotidien de votre agence. Exemple avec des données fictives.</p>
+        </div>
+        <figure class="ecran-video">
+            <div class="ecran-barre" aria-hidden="true"><i></i><i></i><i></i></div>
+            <video id="demo-video" controls preload="none" playsinline poster="/demo/zelyro-promo-poster.jpg" aria-label="Zelyro en 34 secondes : les demandes qui s’empilent, le prospect à appeler en premier avec son score sur 100, le prospect déjà propriétaire à qui proposer une estimation, le bon bien proposé en un clic.">
+                <source src="/demo/zelyro-promo.mp4" type="video/mp4">
+                Votre navigateur ne lit pas cette vidéo. <a href="/demo/zelyro-promo.mp4">Télécharger la vidéo</a>.
+            </video>
+            <button type="button" class="lire" id="lire" hidden aria-label="Lire la vidéo de démonstration"><svg aria-hidden="true"><use href="#i-lecture"/></svg></button>
+        </figure>
+    </div>
+</section>
+
+<!-- ============ FONCTIONNALITÉS ============ -->
+<div id="fonctionnalites" class="fonctions">
+    <div class="cadre">
+        <div class="tete tete-centre">
+            <h2>Ce que fait Zelyro, <em>concrètement.</em></h2>
+            <p class="chapo">Sept fonctions dans un seul outil, pour suivre chaque prospect de son arrivée à la signature. Les trois premières se testent ici même.</p>
+        </div>
+    </div>
+    <nav class="chapitres" id="chapitres" aria-label="Fonctionnalités">
+        <a href="#qualification" data-c="qualification"><span>01</span>Qualifier</a>
+        <a href="#rapprochement" data-c="rapprochement"><span>02</span>Rapprocher</a>
+        <a href="#estimation" data-c="estimation"><span>03</span>Estimer</a>
+        <a href="#suivi" data-c="suivi"><span>04</span>Suivre</a>
+        <a href="#outils" data-c="outils"><span>05</span>Recevoir et piloter</a>
+    </nav>
+
+    <!-- 01 QUALIFIER -->
+    <section class="section chapitre" id="qualification" aria-labelledby="titre-qualif">
+        <div class="cadre">
+            <div class="tete">
+                <p class="numero">01 · Qualifier</p>
+                <h2 id="titre-qualif">Composez un prospect. <em>Regardez son score.</em></h2>
+                <p class="chapo">Ce sont les vraies règles de calcul de Zelyro pour un projet d’achat. Pas de modèle opaque&nbsp;: chaque point a une raison.</p>
+            </div>
+            <div class="grille-q" id="grille-q">
+                <form class="q-controles" id="q-form" aria-label="Caractéristiques du prospect">
+                    <div class="q-profils" role="group" aria-label="Exemples de prospects">
+                        <span>Partir de&nbsp;:</span>
+                        <button type="button" data-profil="camille">Camille</button>
+                        <button type="button" data-profil="julien">Julien</button>
+                        <button type="button" data-profil="sophie">Sophie</button>
+                        <button type="button" data-profil="vide">Fiche vide</button>
+                    </div>
+                    <fieldset class="q-bloc">
+                        <legend>Financement</legend>
+                        <div class="q-choix">
+                            <label><input type="radio" name="fin" value="approved"><span>Approuvé <i>+36</i></span></label>
+                            <label><input type="radio" name="fin" value="in_progress" checked><span>En cours <i>+22</i></span></label>
+                            <label><input type="radio" name="fin" value="pending"><span>En attente <i>+11</i></span></label>
+                            <label><input type="radio" name="fin" value=""><span>Non renseigné <i>0</i></span></label>
+                        </div>
+                    </fieldset>
+                    <fieldset class="q-bloc">
+                        <legend>Échéance d’achat</legend>
+                        <div class="q-choix">
+                            <label><input type="radio" name="urg" value="immediate"><span>Immédiat <i>+32</i></span></label>
+                            <label><input type="radio" name="urg" value="1-3"><span>Sous 3 mois <i>+25</i></span></label>
+                            <label><input type="radio" name="urg" value="3-6" checked><span>Sous 6 mois <i>+14</i></span></label>
+                            <label><input type="radio" name="urg" value="6plus"><span>Au-delà <i>+4</i></span></label>
+                            <label><input type="radio" name="urg" value=""><span>Inconnue <i>0</i></span></label>
+                        </div>
+                    </fieldset>
+                    <fieldset class="q-bloc">
+                        <legend>Coordonnées et dossier</legend>
+                        <div class="q-choix">
+                            <label><input type="checkbox" name="email" checked><span>E-mail <i>+4</i></span></label>
+                            <label><input type="checkbox" name="tel" checked><span>Téléphone <i>+4</i></span></label>
+                            <label><input type="checkbox" name="budget" checked><span>Budget <i>+5</i></span></label>
+                            <label><input type="checkbox" name="secteur" checked><span>Secteur <i>+4</i></span></label>
+                            <label><input type="checkbox" name="type" checked><span>Type de bien <i>+3</i></span></label>
+                        </div>
+                    </fieldset>
+                    <fieldset class="q-bloc">
+                        <legend>Ce qu’il fait des liens reçus <small>(12 points au plus)</small></legend>
+                        <div class="q-choix">
+                            <label><input type="checkbox" name="eng" value="formulaire_ouvert"><span>Ouvre son formulaire <i>+2</i></span></label>
+                            <label><input type="checkbox" name="eng" value="formulaire_rempli" checked><span>Le remplit <i>+4</i></span></label>
+                            <label><input type="checkbox" name="eng" value="annonces_ouvertes"><span>Ouvre les annonces <i>+3</i></span></label>
+                            <label><input type="checkbox" name="eng" value="interet_bien" checked><span>Demande une visite <i>+6</i></span></label>
+                            <label><input type="checkbox" name="eng" value="rdv_confirme"><span>Fixe un rendez-vous <i>+8</i></span></label>
+                        </div>
+                    </fieldset>
+                    <fieldset class="q-bloc q-bloc-proprio">
+                        <legend class="sr">Situation</legend>
+                        <label class="q-interrupteur"><input type="checkbox" name="proprio" checked><span class="q-int-piste" aria-hidden="true"></span><span>Déjà propriétaire de son logement</span></label>
+                    </fieldset>
+                    <div class="q-mini" id="q-mini" aria-hidden="true" data-niveau="jaune"><span id="q-mini-txt">Projet en cours</span><b id="q-mini-num">66</b></div>
+                </form>
+
+                <div class="q-resultat" id="q-resultat" data-niveau="jaune">
+                    <div class="q-fiche">
+                        <div class="q-fiche-tete">
+                            <span class="q-av" aria-hidden="true">JM</span>
+                            <div><b>Votre prospect</b><span id="q-statut">Projet en cours</span></div>
+                            <span class="q-proprio" id="q-proprio"><svg aria-hidden="true"><use href="#i-maison"/></svg>Déjà propriétaire · à estimer&nbsp;?</span>
+                        </div>
+                        <div class="q-score" aria-live="polite"><span class="q-num" id="q-num">66</span><span class="q-sur">/100</span></div>
+                        <p class="q-appel" id="q-appel">À appeler maintenant</p>
+                        <div class="q-barre" id="q-barre" aria-hidden="true"><i class="qc-fin" style="flex-grow:22"></i><i class="qc-urg" style="flex-grow:14"></i><i class="qc-coord" style="flex-grow:8"></i><i class="qc-dos" style="flex-grow:12"></i><i class="qc-eng" style="flex-grow:10"></i><i style="flex-grow:34"></i></div>
+                        <ul class="q-lignes" id="q-lignes"><li><span class="qc-fin"></span><i>+22</i>Financement en cours</li><li><span class="qc-urg"></span><i>+14</i>Achat sous 6 mois</li><li><span class="qc-coord"></span><i>+4</i>E-mail renseigné</li><li><span class="qc-coord"></span><i>+4</i>Téléphone renseigné</li><li><span class="qc-dos"></span><i>+5</i>Budget renseigné</li><li><span class="qc-dos"></span><i>+4</i>Secteur renseigné</li><li><span class="qc-dos"></span><i>+3</i>Type de bien renseigné</li><li><span class="qc-eng"></span><i>+4</i>A rempli son formulaire</li><li><span class="qc-eng"></span><i>+6</i>A demandé une visite</li></ul>
+                    </div>
+                    <p class="q-defi" id="q-defi">Encore 24 points pour passer au vert fluo.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 02 RAPPROCHER -->
+    <section class="section chapitre ch-sombre" id="rapprochement" aria-labelledby="titre-rappr">
+        <div class="cadre">
+            <div class="tete">
+                <p class="numero">02 · Rapprocher</p>
+                <h2 id="titre-rappr">Quel bien pour Julien&nbsp;? <em>Zelyro vous le dit, et pourquoi.</em></h2>
+                <p class="chapo">Choisissez un bien, puis faites varier son prix. Le score de correspondance sur 100 et ses raisons suivent les règles de Zelyro, en vente comme en location.</p>
+            </div>
+            <div class="grille-r">
+                <div class="r-prospect">
+                    <span class="r-etiquette">Le prospect</span>
+                    <b>Julien M.</b>
+                    <ul>
+                        <li>Cherche une <strong>maison</strong></li>
+                        <li>À <strong>Marcq-en-Barœul</strong></li>
+                        <li>Budget <strong>560 000 €</strong></li>
+                        <li>Financement en cours, achat sous 6 mois</li>
+                    </ul>
+                </div>
+                <div class="r-biens" role="radiogroup" aria-label="Biens du portefeuille" id="r-biens">
+                    <button type="button" class="r-bien" role="radio" aria-checked="true" data-bien="0"><span class="r-ill r-ill-maison" aria-hidden="true"></span><b>Maison 5 pièces</b><span>Marcq-en-Barœul · 142 m²</span><em>545 000 €</em></button>
+                    <button type="button" class="r-bien" role="radio" aria-checked="false" data-bien="1"><span class="r-ill r-ill-maison2" aria-hidden="true"></span><b>Maison 4 pièces</b><span>Marcq-en-Barœul · 118 m²</span><em>640 000 €</em></button>
+                    <button type="button" class="r-bien" role="radio" aria-checked="false" data-bien="2"><span class="r-ill r-ill-appart" aria-hidden="true"></span><b>Appartement 4 pièces</b><span>Marcq-en-Barœul · 104 m²</span><em>520 000 €</em></button>
+                    <button type="button" class="r-bien" role="radio" aria-checked="false" data-bien="3"><span class="r-ill r-ill-maison3" aria-hidden="true"></span><b>Maison 5 pièces</b><span>Roubaix · 150 m²</span><em>530 000 €</em></button>
+                </div>
+                <div class="r-resultat">
+                    <div class="r-anneau-grand" aria-hidden="true">
+                        <svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" class="ra-fond"/><circle cx="60" cy="60" r="52" class="ra-val" id="ra-val"/></svg>
+                        <b id="r-score">93</b>
+                    </div>
+                    <p class="r-score-txt" aria-live="polite"><span class="sr">Score de correspondance&nbsp;: </span><span id="r-score-sr">93 sur 100</span></p>
+                    <ul class="r-raisons" id="r-raisons">
+                        <li><i>+20</i>Budget très proche du prix (écart de 3 %)</li>
+                        <li><i>+30</i>Même type de bien&nbsp;: Maison</li>
+                        <li><i>+20</i>Secteur recherché&nbsp;: Marcq-en-Barœul</li>
+                        <li><i>+15</i>Financement en cours</li>
+                        <li><i>+8</i>Achat prévu sous 3 à 6 mois</li>
+                    </ul>
+                    <label class="r-prix" for="r-prix">Prix du bien&nbsp;: <output id="r-prix-val" for="r-prix">545 000 €</output></label>
+                    <input type="range" id="r-prix" min="320000" max="800000" step="5000" value="545000">
+                </div>
+            </div>
+            <p class="note-sombre">Le secteur est le seul critère éliminatoire&nbsp;: un budget et un type qui collent ne rattrapent pas une autre ville. Données fictives.</p>
+        </div>
+    </section>
+
+    <!-- 03 ESTIMER -->
+    <section class="section chapitre" id="estimation" aria-labelledby="titre-estim">
+        <div class="cadre grille-e">
+            <div class="tete">
+                <p class="numero">03 · Estimer</p>
+                <h2 id="titre-estim">Julien est déjà propriétaire. <em>Que vaut son bien&nbsp;?</em></h2>
+                <p class="chapo">Saisissez l’adresse de son bien&nbsp;: Zelyro calcule une fourchette de valeur à partir des ventes réelles des environs (base DVF, publiée par l’État). Un outil interne pour préparer l’appel. L’estimation est indicative et se confirme en visite.</p>
+                <div class="e-panneau">
+                    <div class="e-tete"><span>Exemple d’estimation</span><span>T3 · 68 m²</span></div>
+                    <div class="e-fourchette"><span id="e-bas">276 000 €</span><span class="e-a">à</span><span id="e-haut">345 000 €</span></div>
+                    <div class="e-regle" aria-hidden="true"><i class="e-plage"></i><i class="e-centre"></i></div>
+                    <p class="e-centrale">Valeur centrale&nbsp;: <b>315 000 €</b> · 4 600 €/m²</p>
+                    <div class="e-meta"><span class="e-ok">Fiabilité correcte</span><span><b id="e-nb">39</b> ventes comparables</span><span>dans 300 m</span></div>
+                </div>
+            </div>
+            <figure class="e-carte" id="e-carte">
+                <svg viewBox="0 0 520 440" role="img" aria-label="Carte illustrée : le bien estimé au centre et 39 ventes comparables dans un rayon de 300 mètres, données fictives.">
+                    <g class="e-rues" aria-hidden="true">
+                        <path d="M-10 92 C 120 110, 260 70, 540 120"/><path d="M-10 300 C 150 270, 330 340, 540 290"/>
+                        <path d="M120 -10 C 140 140, 90 300, 130 460"/><path d="M360 -10 C 330 120, 400 280, 350 460"/>
+                        <path d="M-10 200 L 540 228"/><path d="M240 -10 L 262 460"/>
+                        <path class="e-petite" d="M20 30 L 220 60"/><path class="e-petite" d="M300 390 L 520 360"/><path class="e-petite" d="M420 40 L 500 200"/><path class="e-petite" d="M30 380 L 180 340"/>
+                    </g>
+                    <circle class="e-rayon" cx="256" cy="214" r="168"/>
+                    <g id="e-points"></g>
+                    <g class="e-pin" transform="translate(256 214)"><circle r="22" class="e-pin-halo"/><circle r="11" class="e-pin-c"/><path d="M-5 1 L0 -4 L5 1 V6 H-5z" class="e-pin-m"/></g>
+                </svg>
+                <div class="e-info" id="e-info" hidden></div>
+                <figcaption>Illustration, données fictives. <span class="js-seul">Survolez une vente.</span></figcaption>
+            </figure>
+        </div>
+    </section>
+
+    <!-- 04 SUIVRE -->
+    <section class="section chapitre ch-creme2" id="suivi" aria-labelledby="titre-suivi">
+        <div class="cadre">
+            <div class="tete">
+                <p class="numero">04 · Suivre</p>
+                <h2 id="titre-suivi">De la première demande <em>à la signature.</em></h2>
+                <p class="chapo">Chaque prospect avance par statut&nbsp;: Nouveau, Contacté, Visite, Offre, Signé ou Perdu. Des notes datées gardent l’historique, et des rappels indiquent quand recontacter. Faites avancer Julien.</p>
+            </div>
+            <div class="s-piste" id="s-piste">
+                <ol class="s-etapes" id="s-etapes">
+                    <li data-e="0" class="fait">Nouveau</li>
+                    <li data-e="1">Contacté</li>
+                    <li data-e="2">Visite</li>
+                    <li data-e="3">Offre</li>
+                    <li data-e="4">Signé</li>
+                </ol>
+                <div class="s-rail" aria-hidden="true"><i id="s-rail"></i><span class="s-jeton" id="s-jeton">JM</span></div>
+                <div class="s-bas">
+                    <ul class="s-journal" id="s-journal" aria-live="polite">
+                        <li><time>Note</time><span>Demande reçue depuis le site de l’agence&nbsp;: maison à Marcq-en-Barœul.</span></li>
+                    </ul>
+                    <div class="s-boutons">
+                        <button type="button" class="btn" id="s-suivant">Étape suivante<svg aria-hidden="true"><use href="#i-fleche"/></svg></button>
+                        <button type="button" class="btn btn-contour" id="s-perdu">Marquer perdu</button>
+                        <button type="button" class="btn-lien" id="s-zero"><svg aria-hidden="true"><use href="#i-rejouer"/></svg>Recommencer</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 05 RECEVOIR ET PILOTER -->
+    <section class="section chapitre" id="outils" aria-labelledby="titre-outils">
+        <div class="cadre">
+            <div class="tete">
+                <p class="numero">05 · Recevoir et piloter</p>
+                <h2 id="titre-outils">Tout arrive au même endroit. <em>Vous voyez tout.</em></h2>
+            </div>
+            <div class="bento">
+                <article class="b-carte b-sources">
+                    <h3>Portails, import et formulaire de contact</h3>
+                    <p>Les demandes SeLoger et Leboncoin détectées dans votre boîte Gmail deviennent des prospects. Importez vos prospects existants depuis un fichier Excel ou CSV. Chaque agence dispose d’un formulaire de contact hébergé, et votre logiciel peut envoyer prospects et biens par API, avec une clé propre à votre agence.</p>
+                    <div class="flux" aria-hidden="true">
+                        <span class="f-src"><svg><use href="#i-mail"/></svg>Mails des portails</span>
+                        <span class="f-src"><svg><use href="#i-fichier"/></svg>prospects.csv</span>
+                        <span class="f-src"><svg><use href="#i-form"/></svg>Formulaire de l’agence</span>
+                        <span class="f-src"><svg><use href="#i-api"/></svg>API</span>
+                        <span class="f-cible">Vos prospects, déjà qualifiés</span>
+                    </div>
+                </article>
+                <article class="b-carte b-alerte">
+                    <h3>Alertes par e-mail</h3>
+                    <p>Quand un bien correspond à un prospect, vous recevez un e-mail. Inutile de surveiller vous-même chaque nouvelle entrée du portefeuille.</p>
+                    <div class="courriel" aria-hidden="true">
+                        <span class="co-ic"><svg><use href="#i-cloche"/></svg></span>
+                        <div><b>Un bien correspond à Julien M.</b><span>Maison 5 pièces, score de 93 sur 100.</span></div>
+                        <small>Exemple</small>
+                    </div>
+                </article>
+                <article class="b-carte b-bord">
+                    <h3>Tableau de bord et portefeuille de biens</h3>
+                    <p>Une vue d’ensemble de l’activité. Le portefeuille rassemble vos biens (type, prix, surface, adresse), ajoutés un par un, importés depuis l’export CSV de votre logiciel, envoyés par e-mail ou par API.</p>
+                    <div class="bord" aria-hidden="true">
+                        <div class="bd-tuile bd-pipe"><b>Pipeline par statut</b><span class="bd-barres"><i style="--v:.92"></i><i style="--v:.64"></i><i style="--v:.42"></i><i style="--v:.24"></i><i style="--v:.12"></i></span></div>
+                        <div class="bd-tuile bd-src"><b>Prospects par source</b><span class="bd-donut"></span></div>
+                        <div class="bd-tuile"><b>Délai moyen de première réponse</b><span class="bd-hor"></span></div>
+                        <div class="bd-tuile"><b>Taux de conversion</b><span class="bd-entonnoir"><i></i><i></i><i></i></span></div>
+                    </div>
+                    <small class="b-ex">Illustration.</small>
+                </article>
+            </div>
+        </div>
+    </section>
+</div>
+
+<!-- ============ COMMENT ÇA MARCHE ============ -->
+<section class="section portails ch-sombre" id="portails" aria-labelledby="titre-portails">
+    <div class="cadre">
+        <div class="tete">
+            <h2 id="titre-portails">Un mail de portail entre. <em>Un prospect qualifié sort.</em></h2>
+            <p class="chapo">Fini le copier-coller depuis votre messagerie&nbsp;: les mails de demande de contact SeLoger et Leboncoin deviennent des prospects déjà qualifiés, rapprochés de vos biens.</p>
+        </div>
+        <div class="p-machine" id="p-machine" data-etape="0">
+            <div class="p-mail">
+                <div class="p-mail-tete"><svg aria-hidden="true"><use href="#i-mail"/></svg><div><b>Nouvelle demande de contact</b><span>reçue via un portail · exemple</span></div></div>
+                <p>Bonjour, je suis intéressé par <mark data-c="bien">la maison de 5 pièces à Marcq-en-Barœul</mark>. Notre <mark data-c="fin">prêt est en cours de validation</mark> et nous souhaitons <mark data-c="urg">acheter d’ici six mois</mark>, avec un <mark data-c="budget">budget de 560 000 €</mark>. Pouvez-vous me rappeler&nbsp;?</p>
+                <p class="p-sign"><mark data-c="nom">Julien M.</mark> · <mark data-c="tel">06 •• •• •• 12</mark> · <mark data-c="mail">julien.m@exemple.fr</mark></p>
+            </div>
+            <div class="p-fleche" aria-hidden="true"><span></span></div>
+            <div class="p-fiche">
+                <div class="p-fiche-tete"><b>Prospect créé</b><span class="p-sc n-orange" id="p-sc">56 <small>Projet en cours</small></span></div>
+                <dl>
+                    <div data-c="nom"><dt>Nom</dt><dd>Julien M.</dd></div>
+                    <div data-c="tel"><dt>Téléphone</dt><dd>06 •• •• •• 12</dd></div>
+                    <div data-c="mail"><dt>E-mail</dt><dd>julien.m@exemple.fr</dd></div>
+                    <div data-c="bien"><dt>Recherche</dt><dd>Maison · Marcq-en-Barœul</dd></div>
+                    <div data-c="budget"><dt>Budget</dt><dd>560 000 €</dd></div>
+                    <div data-c="fin"><dt>Financement</dt><dd>En cours</dd></div>
+                    <div data-c="urg"><dt>Échéance</dt><dd>Sous 6 mois</dd></div>
+                </dl>
+                <p class="p-match"><svg aria-hidden="true"><use href="#i-ok"/></svg>Rapproché de vos biens</p>
+            </div>
+        </div>
+        <ol class="p-etapes" id="p-etapes">
+            <li data-e="1"><h3>Connectez votre boîte Gmail, ou transférez les mails</h3><p>Autorisez Zelyro à lire, en lecture seule, les notifications de SeLoger et de Leboncoin. Sans Gmail, transférez simplement ces mails à Zelyro.</p></li>
+            <li data-e="2"><h3>Zelyro lit le message et crée le prospect</h3><p>Nom, coordonnées, bien concerné, budget, projet&nbsp;: les informations utiles sont extraites du texte. Les alertes «&nbsp;nouvelles annonces&nbsp;» sont ignorées.</p></li>
+            <li data-e="3"><h3>Il est qualifié, rapproché de vos biens et relancé</h3><p>Le prospect apparaît avec son niveau et son score. S’il a laissé son e-mail, un message l’invite à préciser sa recherche.</p></li>
+        </ol>
+        <button type="button" class="btn-lien btn-lien-clair" id="p-rejouer" hidden><svg aria-hidden="true"><use href="#i-rejouer"/></svg>Rejouer</button>
+        <ul class="p-notes">
+            <li><h3>Lecture seule, uniquement les portails</h3><p>L’accès à votre boîte Gmail ne sert qu’à repérer les messages envoyés par SeLoger et Leboncoin. Vous pouvez le déconnecter à tout moment depuis votre compte.</p></li>
+            <li><h3>Un quota qui ne compte que l’utile</h3><p>Une extraction n’est décomptée que lorsqu’un mail devient un prospect. Les alertes et les mails sans demande de contact ne consomment rien de votre forfait.</p></li>
+            <li><h3>L’IA lit, les règles qualifient</h3><p>L’analyse par intelligence artificielle est facultative&nbsp;: activée par défaut, vous pouvez la désactiver dans votre compte. Elle sert uniquement à lire le texte des mails. La qualification et le score restent des règles de calcul lisibles.</p></li>
+        </ul>
+    </div>
+</section>
+
+<!-- ============ SIMULATEUR ============ -->
+<section class="section simu" id="simulateur" aria-labelledby="titre-simu">
+    <div class="cadre">
+        <div class="tete">
+            <h2 id="titre-simu">Combien vous coûte <em>une demande sans réponse&nbsp;?</em></h2>
+            <p class="chapo">Un outil pour raisonner avec vos propres chiffres, pas une promesse de résultat&nbsp;: les valeurs de départ sont de simples hypothèses, remplacez-les par celles de votre agence. Tout le calcul se fait dans votre navigateur.</p>
+        </div>
+        <div class="simu-grille">
+            <form class="simu-form" id="simu-form" aria-label="Hypothèses du simulateur">
+                <div class="champ">
+                    <label for="s-leads">Demandes reçues par mois <output for="s-leads" id="o-leads">60</output></label>
+                    <input id="s-leads" type="range" min="0" max="600" step="5" value="60">
+                </div>
+                <div class="champ">
+                    <label for="s-perdues">Part des demandes qui restent sans suite, faute de réponse rapide <output for="s-perdues" id="o-perdues">20 %</output></label>
+                    <input id="s-perdues" type="range" min="0" max="80" step="1" value="20">
+                </div>
+                <div class="champ">
+                    <label for="s-rattrapees">Part de ces demandes qu’un suivi organisé permettrait de rattraper <output for="s-rattrapees" id="o-rattrapees">25 %</output></label>
+                    <input id="s-rattrapees" type="range" min="0" max="100" step="1" value="25">
+                    <small>C’est l’hypothèse la plus incertaine&nbsp;: à vous de la fixer prudemment.</small>
+                </div>
+                <div class="champ">
+                    <label for="s-transfo">Part des demandes suivies qui finissent en vente <output for="s-transfo" id="o-transfo">3 %</output></label>
+                    <input id="s-transfo" type="range" min="0" max="20" step="0.5" value="3">
+                </div>
+                <div class="champ">
+                    <label for="s-commission">Commission moyenne par vente <output for="s-commission" id="o-commission">6 000 € HT</output></label>
+                    <input id="s-commission" type="range" min="1000" max="30000" step="500" value="6000">
+                </div>
+                <div class="champ">
+                    <label for="s-forfait">Forfait comparé</label>
+                    <select id="s-forfait">
+                        <option value="29">Essentiel : 29 € HT / mois</option>
+                        <option value="49" selected>Agence : 49 € HT / mois</option>
+                        <option value="79">Réseau : 79 € HT / mois</option>
+                    </select>
+                </div>
+            </form>
+            <div class="simu-resultat" aria-live="polite">
+                <p class="sr-titre">Avec vos hypothèses</p>
+                <dl class="sr-lignes">
+                    <div><dt>Demandes sans suite par mois</dt><dd id="r-perdues">12</dd></div>
+                    <div><dt>Dont rattrapées grâce à un suivi organisé</dt><dd id="r-rattrapees">3</dd></div>
+                    <div><dt>Ventes supplémentaires par an</dt><dd id="r-ventes">1,1</dd></div>
+                </dl>
+                <div class="sr-total"><span>Commission supplémentaire par an</span><b id="r-commission">6 480 €</b></div>
+                <figure class="sr-graph">
+                    <svg viewBox="0 0 400 150" id="sr-graph" role="img" aria-label="Sur douze mois, le cumul de la commission supplémentaire comparé au cumul du prix du forfait."><g id="sr-barres"></g><path id="sr-cout" class="sr-cout"/></svg>
+                    <figcaption><span class="lg-gain"></span>Commission cumulée, en moyenne <span class="lg-cout"></span>Forfait cumulé</figcaption>
+                </figure>
+                <div class="sr-seuil">
+                    <p class="sr-titre">Seuil de rentabilité</p>
+                    <p id="r-seuil">Le forfait coûte 588 € HT par an, soit 0,1 vente de 6 000 € : une seule vente supplémentaire par an le couvre.</p>
+                    <p class="sr-note">Ce seuil ne dépend que de votre commission moyenne et du prix du forfait, pas d’une hypothèse sur Zelyro.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ============ SÉCURITÉ ============ -->
+<section class="section securite ch-sombre" id="securite" aria-labelledby="titre-securite">
+    <div class="cadre">
+        <div class="tete">
+            <h2 id="titre-securite">Vos données, <em>séparées de celles des autres agences.</em></h2>
+            <p class="chapo">Un fichier de prospects contient des données personnelles&nbsp;: il demande un traitement rigoureux. Voici, en clair, où elles vont. Touchez chaque étape.</p>
+        </div>
+        <div class="circuit" id="circuit">
+            <svg class="circuit-fils" viewBox="0 0 1000 120" preserveAspectRatio="none" aria-hidden="true"><path id="fil" d="M60 60 H940"/><circle r="5" class="paquet"><animateMotion dur="5s" repeatCount="indefinite"><mpath href="#fil"/></animateMotion></circle><circle r="5" class="paquet p2"><animateMotion dur="5s" begin="2.5s" repeatCount="indefinite"><mpath href="#fil"/></animateMotion></circle></svg>
+            <button type="button" class="noeud" aria-pressed="true" data-n="0"><svg aria-hidden="true"><use href="#i-ecran"/></svg><b>Votre navigateur</b><span>Connexion chiffrée</span></button>
+            <button type="button" class="noeud" aria-pressed="false" data-n="1"><svg aria-hidden="true"><use href="#i-ecran"/></svg><b>Interface web</b><span>Vercel</span></button>
+            <button type="button" class="noeud" aria-pressed="false" data-n="2"><svg aria-hidden="true"><use href="#i-base"/></svg><b>Base et API</b><span>Render · Francfort</span></button>
+            <button type="button" class="noeud" aria-pressed="false" data-n="3"><svg aria-hidden="true"><use href="#i-mail"/></svg><b>E-mails</b><span>Brevo · France</span></button>
+        </div>
+        <div class="circuit-detail" id="circuit-detail" aria-live="polite">
+            <div data-n="0"><h3>Un espace par agence</h3><p>Chaque agence ne voit que ses propres prospects, ses biens et ses statistiques. Les mots de passe sont stockés sous forme hachée, jamais en clair.</p></div>
+            <div data-n="1"><h3>L’interface, servie par Vercel</h3><p>Vercel sert les pages de l’interface web et ne reçoit que des données techniques de connexion.</p></div>
+            <div data-n="2"><h3>Vos prospects et vos biens, dans l’Union européenne</h3><p>Base de données et API chez Render, à Francfort (Allemagne). Ils restent à votre agence&nbsp;: Zelyro les traite pour votre compte et ne les partage pas avec d’autres agences.</p></div>
+            <div data-n="3"><h3>Les e-mails partent via Brevo, en France</h3><p>Alertes, réinitialisation de mot de passe par lien à durée limitée, messages aux prospects&nbsp;: tout passe par Brevo, société française.</p></div>
+        </div>
+        <ul class="garanties">
+            <li><svg aria-hidden="true"><use href="#i-base"/></svg><h3>Base de données dans l’Union européenne</h3><p>Render, à Francfort. E-mails via Brevo, en France.</p></li>
+            <li><svg aria-hidden="true"><use href="#i-bouclier"/></svg><h3>Un espace par agence</h3><p>Chaque agence ne voit que ses propres prospects, ses biens et ses statistiques.</p></li>
+            <li><svg aria-hidden="true"><use href="#i-cadenas"/></svg><h3>Mots de passe protégés</h3><p>Stockés sous forme hachée, jamais en clair.</p></li>
+            <li><svg aria-hidden="true"><use href="#i-cadenas"/></svg><h3>Accès Gmail en lecture seule</h3><p>Clés d’accès chiffrées dans la base, accès retirable à tout moment.</p></li>
+            <li><svg aria-hidden="true"><use href="#i-mail"/></svg><h3>Réinitialisation par e-mail</h3><p>En cas d’oubli, un lien à durée limitée est envoyé à l’adresse du compte.</p></li>
+            <li><svg aria-hidden="true"><use href="#i-cycle"/></svg><h3>Sessions invalidées</h3><p>Quand le mot de passe change, les sessions déjà ouvertes cessent de fonctionner.</p></li>
+            <li><svg aria-hidden="true"><use href="#i-base"/></svg><h3>Des données qui restent à l’agence</h3><p>Un accord de sous-traitance (article 28 du RGPD) fait partie des conditions générales. L’agence peut supprimer un prospect depuis sa fiche.</p></li>
+        </ul>
+        <div class="liens-legaux">
+            <a href="/confidentialite.html">Politique de confidentialité</a>
+            <a href="/accord-sous-traitance.html">Accord de sous-traitance (DPA)</a>
+            <a href="/cgu.html">Conditions générales d’utilisation</a>
+        </div>
+    </div>
+</section>
+
+<!-- ============ TARIFS ============ -->
+<section class="section tarifs" id="tarifs" aria-labelledby="titre-tarifs">
+    <div class="cadre">
+        <div class="tete tete-centre">
+            <h2 id="titre-tarifs">Un forfait qui grandit <em>avec votre agence.</em></h2>
+            <p class="chapo">Sans engagement, résiliable à tout moment. Chaque forfait inclut la qualification automatique, le rapprochement avec vos biens, le suivi des prospects, les alertes par e-mail et le formulaire de contact hébergé.</p>
+        </div>
+        <div class="t-curseur">
+            <label for="t-volume">Prospects par mois dans votre agence <output id="t-volume-val" for="t-volume">500</output></label>
+            <input type="range" id="t-volume" min="20" max="6000" step="10" value="500">
+            <p id="t-reco" aria-live="polite">Le forfait <b>Agence</b> couvre jusqu’à 1 500 prospects par mois.</p>
+        </div>
+        <div class="forfaits">
+            <article class="forfait" data-f="1">
+                <h3><a href="/tarifs.html#essentiel">Essentiel</a></h3>
+                <p class="f-pour">Pour démarrer, seul ou en petite équipe.</p>
+                <p class="f-prix"><b>29&nbsp;€</b><span>&nbsp;HT / mois</span></p>
+                <ul>
+                    <li><svg aria-hidden="true"><use href="#i-ok"/></svg>300 prospects par mois</li>
+                    <li><svg aria-hidden="true"><use href="#i-ok"/></svg>100 biens dans le portefeuille</li>
+                    <li><svg aria-hidden="true"><use href="#i-ok"/></svg>200 e-mails de suivi par mois</li>
+                    <li><svg aria-hidden="true"><use href="#i-ok"/></svg>100 extractions par mois</li>
+                </ul>
+                <a class="btn btn-contour" href="/login.html#inscription">Créer un compte</a>
+                <p class="f-note">Activation rapide de votre accès, en général sous un jour ouvré.</p>
+            </article>
+            <article class="forfait reco" data-f="2">
+                <p class="f-badge">Le plus choisi</p>
+                <h3><a href="/tarifs.html#agence">Agence</a></h3>
+                <p class="f-pour">Pour une agence avec plusieurs agents actifs.</p>
+                <p class="f-prix"><b>49&nbsp;€</b><span>&nbsp;HT / mois</span></p>
+                <ul>
+                    <li><svg aria-hidden="true"><use href="#i-ok"/></svg>1&nbsp;500 prospects par mois</li>
+                    <li><svg aria-hidden="true"><use href="#i-ok"/></svg>400 biens dans le portefeuille</li>
+                    <li><svg aria-hidden="true"><use href="#i-ok"/></svg>1&nbsp;000 e-mails de suivi par mois</li>
+                    <li><svg aria-hidden="true"><use href="#i-ok"/></svg>500 extractions par mois</li>
+                </ul>
+                <a class="btn" href="/login.html#inscription">Créer un compte</a>
+                <p class="f-note">Activation rapide de votre accès, en général sous un jour ouvré.</p>
+            </article>
+            <article class="forfait" data-f="3">
+                <h3><a href="/tarifs.html#reseau">Réseau</a></h3>
+                <p class="f-pour">Pour un réseau multi-agences ou un fort volume.</p>
+                <p class="f-prix"><b>79&nbsp;€</b><span>&nbsp;HT / mois</span></p>
+                <ul>
+                    <li><svg aria-hidden="true"><use href="#i-ok"/></svg>6&nbsp;000 prospects par mois</li>
+                    <li><svg aria-hidden="true"><use href="#i-ok"/></svg>1&nbsp;500 biens dans le portefeuille</li>
+                    <li><svg aria-hidden="true"><use href="#i-ok"/></svg>4&nbsp;000 e-mails de suivi par mois</li>
+                    <li><svg aria-hidden="true"><use href="#i-ok"/></svg>2&nbsp;000 extractions par mois</li>
+                </ul>
+                <a class="btn btn-contour" href="mailto:contact@zelyro.fr?subject=Question%20sur%20le%20forfait%20R%C3%A9seau%20Zelyro&amp;body=Bonjour%2C%0D%0A%0D%0AJe%20souhaite%20des%20informations%20sur%20le%20forfait%20R%C3%A9seau.%0D%0A%0D%0AAgence%20%3A%0D%0ANombre%20d%27agences%20%3A%0D%0A%0D%0AMerci.">Nous contacter</a>
+            </article>
+        </div>
+        <p class="t-extraction"><b>Une extraction</b>, c’est la lecture automatique d’un message (un mail SeLoger ou Leboncoin, par exemple) pour en tirer un prospect. Elle n’est décomptée que si elle crée un prospect&nbsp;: les alertes et les mails qui ne sont pas une demande de contact ne comptent pas.</p>
+        <p class="t-comparer"><a class="btn btn-contour btn-petit" href="/tarifs.html">Comparer tous les forfaits en détail<svg aria-hidden="true"><use href="#i-fleche"/></svg></a></p>
+        <p class="t-note">Besoin d’un volume différent, ou de plusieurs agences reliées entre elles&nbsp;? <a href="mailto:contact@zelyro.fr?subject=Augmentation%20ou%20personnalisation%20de%20mon%20forfait%20Zelyro&amp;body=Bonjour%2C%0D%0A%0D%0AJe%20souhaite%20%C3%A9changer%20sur%20une%20augmentation%20ou%20une%20personnalisation%20de%20mon%20forfait%20Zelyro.%0D%0A%0D%0AAgence%20%3A%20%0D%0AForfait%20actuel%20%3A%20%0D%0ABesoin%20%3A%20%0D%0A%0D%0AMerci.">Écrivez-nous</a>, nous construisons un forfait sur mesure.</p>
+    </div>
+</section>
+
+<!-- ============ FAQ ============ -->
+<section class="section faq" id="faq" aria-labelledby="titre-faq">
+    <div class="cadre faq-grille">
+        <div class="tete">
+            <h2 id="titre-faq">Ce que l’on nous demande <em>le plus souvent.</em></h2>
+            <p class="chapo">Une autre question&nbsp;? <a href="mailto:contact@zelyro.fr">contact@zelyro.fr</a></p>
+        </div>
+        <div class="questions">
+            <details>
+                <summary>De quoi Zelyro a-t-il besoin pour démarrer&nbsp;?</summary>
+                <div class="rep"><p>D’un compte et de vos données de travail&nbsp;: vos biens, saisis dans le portefeuille ou importés depuis un fichier Excel ou CSV, et vos prospects, reçus de SeLoger et Leboncoin via votre boîte Gmail, importés depuis un fichier Excel ou CSV, ou reçus par le formulaire de contact de l’agence. Rien n’est à installer, Zelyro s’utilise depuis un navigateur.</p></div>
+            </details>
+            <details>
+                <summary>Puis-je importer mes prospects existants&nbsp;?</summary>
+                <div class="rep"><p>Oui, par un fichier Excel ou CSV. Chaque prospect importé est qualifié automatiquement à partir des informations présentes dans le fichier&nbsp;: plus le dossier est complet, plus la qualification est précise.</p></div>
+            </details>
+            <details>
+                <summary>Comment mes demandes SeLoger et Leboncoin arrivent-elles dans Zelyro&nbsp;?</summary>
+                <div class="rep"><p>Soit en connectant votre boîte Gmail (accès en lecture seule, limité aux messages de SeLoger et de Leboncoin), soit en transférant ces mails à Zelyro. Chaque demande de contact devient un prospect, qualifié et rapproché de vos biens. Les alertes «&nbsp;nouvelles annonces&nbsp;» sont ignorées.</p></div>
+            </details>
+            <details>
+                <summary>Qu’est-ce qu’une «&nbsp;extraction&nbsp;» dans les forfaits&nbsp;?</summary>
+                <div class="rep"><p>C’est la lecture automatique d’un message pour en tirer les informations d’un prospect&nbsp;: un mail de portail ou un texte collé dans l’outil. Elle n’est décomptée que si elle aboutit à un prospect. Les alertes et les mails sans demande de contact ne consomment rien.</p></div>
+            </details>
+            <details>
+                <summary>La qualification repose-t-elle sur de l’intelligence artificielle&nbsp;?</summary>
+                <div class="rep"><p>La qualification des prospects et le score de correspondance reposent sur des règles de calcul explicites, pas sur de l’apprentissage automatique&nbsp;: vous pouvez comprendre pourquoi un prospect est classé à un niveau ou pourquoi un bien obtient un score. L’intelligence artificielle intervient seulement en amont (activée par défaut, vous pouvez la désactiver dans votre compte), pour lire le texte d’un mail de portail ou d’un message collé et en extraire les informations.</p></div>
+            </details>
+            <details>
+                <summary>Où sont hébergées mes données&nbsp;?</summary>
+                <div class="rep"><p>Votre base de prospects et de biens est hébergée chez Render, à Francfort, en Allemagne. Les e-mails sont envoyés par Brevo, société française. Zelyro agit comme sous-traitant de votre agence pour les données de vos prospects, dans le cadre d’un accord de sous-traitance publié sur le site&nbsp;: <a href="/accord-sous-traitance.html">consulter l’accord</a>.</p></div>
+            </details>
+            <details>
+                <summary>À qui appartiennent les données&nbsp;?</summary>
+                <div class="rep"><p>À l’agence. Les prospects et les biens que vous saisissez ou importez restent les vôtres&nbsp;; Zelyro les traite pour le compte de l’agence, afin de faire fonctionner le service. Vous pouvez supprimer un prospect depuis sa fiche. Le détail figure dans la <a href="/confidentialite.html">politique de confidentialité</a> et dans les <a href="/cgu.html">conditions générales d’utilisation</a>.</p></div>
+            </details>
+            <details>
+                <summary>Comment demander une démonstration&nbsp;?</summary>
+                <div class="rep"><p>Cliquez sur <a href="/demo-agences.html">«&nbsp;Demander une démo&nbsp;»</a>&nbsp;: une page s’ouvre avec un court formulaire, et nous vous répondons très vite. Vous pouvez aussi nous écrire à <a href="mailto:contact@zelyro.fr">contact@zelyro.fr</a>.</p></div>
+            </details>
+        </div>
+    </div>
+</section>
+
+<!-- ============ APPEL FINAL ============ -->
+<section class="section final" aria-labelledby="titre-final">
+    <div class="cadre">
+        <div class="final-carte" id="final-carte">
+            <div class="final-texte">
+                <h2 id="titre-final">Voyez Zelyro à l’œuvre <em>dans votre agence.</em></h2>
+                <p>Demandez une démonstration, ou créez votre compte pour prendre l’outil en main.</p>
+                <div class="actions">
+                    <a class="btn btn-grand btn-clair btn-aimant" href="/demo-agences.html">Demander une démo<svg aria-hidden="true"><use href="#i-fleche"/></svg></a>
+                    <a class="btn btn-grand btn-contour-clair" href="/login.html#inscription">Créer un compte</a>
+                </div>
+            </div>
+            <div class="final-pile" aria-hidden="true">
+                <span class="fp fp-gris"><b>Sophie L.</b><i>13</i></span>
+                <span class="fp fp-orange"><b>Paul R.</b><i>49</i></span>
+                <span class="fp fp-jaune"><b>Julien M.</b><i>66</i></span>
+                <span class="fp fp-go"><b>Camille R.</b><i>92</i></span>
+            </div>
+        </div>
+    </div>
+</section>
+
+</main>
+
+<footer class="pied">
+    <div class="cadre">
+        <div class="pied-grille">
+            <div>
+                <a class="logo logo-clair" href="/" aria-label="Zelyro, retour à l’accueil"><i aria-hidden="true"></i>Zelyro</a>
+                <p class="pied-dev">Chaque lead. Chaque bien. Aucune opportunité perdue.</p>
+            </div>
+            <div class="pied-col">
+                <h2>Produit</h2>
+                <ul>
+                    <li><a href="/#fonctionnalites">Fonctionnalités</a></li>
+                    <li><a href="/#portails">Comment ça marche</a></li>
+                    <li><a href="/#simulateur">Simulateur</a></li>
+                    <li><a href="/#securite">Sécurité</a></li>
+                    <li><a href="/#tarifs">Tarifs</a></li>
+                    <li><a href="/#faq">FAQ</a></li>
+                </ul>
+            </div>
+            <div class="pied-col">
+                <h2>Informations légales</h2>
+                <ul>
+                    <li><a href="/mentions-legales.html">Mentions légales</a></li>
+                    <li><a href="/confidentialite.html">Politique de confidentialité</a></li>
+                    <li><a href="/confidentialite.html#audience">Mesure d’audience (refuser)</a></li>
+                    <li><a href="/cgu.html">Conditions générales d’utilisation</a></li>
+                    <li><a href="/accord-sous-traitance.html">Accord de sous-traitance (DPA)</a></li>
+                </ul>
+            </div>
+            <div class="pied-col">
+                <h2>Contact</h2>
+                <ul>
+                    <li><a href="mailto:contact@zelyro.fr">contact@zelyro.fr</a></li>
+                    <li><a href="/demo-agences.html">Demander une démo</a></li>
+                    <li><a href="/login.html">Connexion</a></li>
+                    <li><a href="/login.html#inscription">Créer un compte</a></li>
+                </ul>
+            </div>
+        </div>
+        <div class="pied-bas">
+            <span>© 2026 Zelyro</span>
+            <span>Logiciel destiné aux professionnels de l’immobilier.</span>
+        </div>
+    </div>
+</footer>
+</body>
+</html>
