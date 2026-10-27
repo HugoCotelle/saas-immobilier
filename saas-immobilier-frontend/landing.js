@@ -101,7 +101,7 @@
         try {
             if (localStorage.getItem('token')) {
                 var a = $('#nav-login');
-                if (a) { a.textContent = 'Accéder à mon espace'; a.setAttribute('href', '/taches.html'); }
+                if (a) { a.textContent = 'Mon espace'; a.setAttribute('href', '/taches.html'); }
                 $$('a.logo').forEach(function (l) { l.setAttribute('href', '/taches.html'); l.setAttribute('aria-label', 'Zelyro, mes tâches du jour'); });
             }
         } catch (e) { /* stockage indisponible : on garde « Connexion » */ }

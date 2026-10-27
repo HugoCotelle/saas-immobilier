@@ -738,10 +738,13 @@ html:not(.anim) .fp-go{--y:-117px}html:not(.anim) .fp-jaune{--y:-39px}html:not(.
   .s-bas{grid-template-columns:minmax(0,1fr)}
   .s-boutons{justify-content:flex-start}
 }
+@media (max-width:360px){.barre .jauge{display:none!important}}
 @media (max-width:640px){
   body{font-size:17px}
-  .barre .btn-contour{display:none}
+  .barre-in{gap:10px}
+  .barre-actions{gap:8px}
   .barre .btn-petit{padding:0 14px;font-size:14px}
+  .barre .btn-contour{display:inline-flex;white-space:nowrap}
   .logo{font-size:24px}
   .scene{--pas:176px;--h:166px}
   .carte{padding:10px 10px 10px 18px}
