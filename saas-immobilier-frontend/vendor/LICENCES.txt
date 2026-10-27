@@ -8,3 +8,5 @@ Playfair Display (variable, latin)    Licence SIL OFL 1.1   https://fonts.google
 Unbounded (variable, latin)           Licence SIL OFL 1.1   https://fonts.google.com/specimen/Unbounded
 Albert Sans (variable, latin)         Licence SIL OFL 1.1   https://fonts.google.com/specimen/Albert+Sans
 qrcode-generator 1.4.4 (Kazuhiko Arase)   Licence MIT   https://github.com/kazuhikoarase/qrcode-generator
+
+Photos des biens de la page d accueil (dossier photos-biens) : Pexels, licence Pexels (usage commercial libre, attribution non obligatoire). Identifiants des photos : 5997993, 3098515, 323780, 1115804. Source : https://www.pexels.com/license/
