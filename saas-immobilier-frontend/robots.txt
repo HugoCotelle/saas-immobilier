@@ -12,6 +12,7 @@ Disallow: /matching.html
 Disallow: /propositions.html
 Disallow: /prospects.html
 Disallow: /admin.html
+Disallow: /admin-devis.html
 Disallow: /formulaire.html
 
 Sitemap: https://www.zelyro.fr/sitemap.xml

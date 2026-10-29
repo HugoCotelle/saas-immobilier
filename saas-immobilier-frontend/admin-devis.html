@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZELYRO - Générateur de devis</title>
+<meta name="theme-color" content="#F6F2EA">
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="zelyro.css">
+<style>
+#devis-app{--dv-cream:#F6F2EA;--dv-green:#1F3A2E;--dv-sage:#4F6353;--dv-gold:#D4B15F;--dv-ink:#1F2A24;--dv-grey:#6B7468;--dv-line:#E3DCCB;font-family:'Albert Sans',-apple-system,'Helvetica Neue',Arial,sans-serif;color:var(--dv-ink)}
+#devis-app,#devis-app *{box-sizing:border-box}
+#devis-app .dv-app{display:grid;grid-template-columns:400px 1fr;gap:0;min-height:100vh}
+#devis-app .dv-panel{background:#fff;border-right:1px solid var(--dv-line);padding:22px 22px 40px;height:100vh;overflow:auto;position:sticky;top:0}
+#devis-app .dv-panel h1{font-family:'Playfair Display',Georgia,serif;font-size:22px;margin:0 0 4px;color:var(--dv-green);font-weight:600}
+#devis-app .dv-panel .dv-sub{font-size:13px;color:var(--dv-grey);margin:0 0 16px;line-height:1.4}
+#devis-app .dv-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:10px;padding:12px 16px;font:600 14px 'Albert Sans',sans-serif;cursor:pointer}
+#devis-app .dv-btn-main{background:var(--dv-green);color:#fff;width:100%}
+#devis-app .dv-btn-main:hover{background:#17301f}
+#devis-app .dv-btn-ghost{background:transparent;color:var(--dv-sage);padding:8px 0;font-weight:500;font-size:13px}
+#devis-app .dv-tip{font-size:12px;color:var(--dv-grey);margin:8px 0 0;line-height:1.45}
+#devis-app fieldset{border:0;padding:0;margin:20px 0 0}
+#devis-app legend{font:600 11px 'Albert Sans';letter-spacing:.14em;text-transform:uppercase;color:var(--dv-sage);padding:0;margin-bottom:10px;width:100%;border-bottom:1px solid var(--dv-line);padding-bottom:6px}
+#devis-app label{display:block;font-size:12px;color:var(--dv-grey);margin:10px 0 4px}
+#devis-app input,#devis-app select{width:100%;font:14px 'Albert Sans',sans-serif;color:var(--dv-ink);padding:9px 10px;border:1px solid #D5CDB8;border-radius:8px;background:#FFFDF6}
+#devis-app input:focus,#devis-app select:focus{outline:2px solid var(--dv-gold);outline-offset:0;border-color:var(--dv-gold)}
+#devis-app .dv-row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+#devis-app details{margin-top:20px;border-top:1px solid var(--dv-line);padding-top:12px}
+#devis-app summary{cursor:pointer;font:600 11px 'Albert Sans';letter-spacing:.14em;text-transform:uppercase;color:var(--dv-sage)}
+#devis-app .dv-warn{margin-top:14px;background:#FFF6DD;border:1px solid #E8D69A;border-radius:10px;padding:10px 12px;font-size:12.5px;line-height:1.45;color:#5b4a14}
+#devis-app .dv-warn b{font-weight:600}
+#devis-app .dv-stage{padding:28px 20px 60px;overflow:auto;display:flex;justify-content:center;align-items:flex-start}
+#devis-app .dv-sheet{width:210mm;min-height:296.5mm;background:#fff;box-shadow:0 8px 30px rgba(31,58,46,.18);padding:9mm 16mm 6mm;display:flex;flex-direction:column;font-size:9.2pt;line-height:1.4;position:relative}
+#devis-app .dv-sh-head{display:flex;justify-content:space-between;align-items:flex-start}
+#devis-app .dv-brand .dv-name{font-family:'Playfair Display',Georgia,serif;font-size:26pt;color:var(--dv-green);font-weight:600;line-height:1}
+#devis-app .dv-brand .dv-dia{color:var(--dv-sage);font-size:15pt;margin-right:7px;vertical-align:5px}
+#devis-app .dv-brand .dv-tag{font-size:8pt;color:var(--dv-grey);margin-top:6px;max-width:75mm;line-height:1.35}
+#devis-app .dv-doc{text-align:right}
+#devis-app .dv-doc-t{font-family:'Playfair Display',Georgia,serif;font-size:22pt;letter-spacing:.22em;color:var(--dv-green);line-height:1;margin-right:-.22em}
+#devis-app .dv-doc dl{margin:6px 0 0;display:grid;grid-template-columns:auto auto;gap:2px 12px;justify-content:end;font-size:8.8pt}
+#devis-app .dv-doc dt{color:var(--dv-grey)}
+#devis-app .dv-doc dd{margin:0;font-weight:600;text-align:right}
+#devis-app .dv-rule{height:2px;background:var(--dv-gold);margin:4mm 0 3.5mm}
+#devis-app .dv-parties{display:grid;grid-template-columns:1fr 1fr;gap:5mm}
+#devis-app .dv-party{background:var(--dv-cream);border-radius:3px;padding:2.8mm 5mm}
+#devis-app .dv-party h4{margin:0 0 5px;font:600 7.5pt 'Albert Sans';letter-spacing:.18em;text-transform:uppercase;color:var(--dv-sage)}
+#devis-app .dv-party .dv-n{font-weight:700;font-size:10.8pt;color:var(--dv-green);margin:0 0 2px}
+#devis-app .dv-party p{margin:0;font-size:8.6pt;line-height:1.45}
+#devis-app .dv-party .dv-k{color:var(--dv-grey)}
+#devis-app .dv-ph{color:#B1B5A8;font-style:italic}
+#devis-app h3{break-after:avoid;font-family:'Playfair Display',Georgia,serif;font-weight:500;font-size:12.5pt;color:var(--dv-green);margin:3.4mm 0 1.6mm;padding-bottom:1mm;border-bottom:1px solid var(--dv-line)}
+#devis-app .dv-objet{margin:0;font-size:8.8pt;line-height:1.35}
+#devis-app table{width:100%;border-collapse:collapse;font-size:9pt}
+#devis-app thead th{background:var(--dv-green);color:#fff;font:600 8pt 'Albert Sans';text-transform:none;padding:5.5px 9px;text-align:right}
+#devis-app thead th:first-child{text-align:left}
+#devis-app tbody td{padding:3.5px 9px;border-bottom:1px solid var(--dv-line);vertical-align:top;text-align:right;white-space:nowrap}
+#devis-app tbody td:first-child{text-align:left;white-space:normal;width:54%}
+#devis-app tbody .dv-d1{font-weight:600;color:var(--dv-ink)}
+#devis-app tbody .dv-d2{font-size:7.8pt;color:var(--dv-grey);margin-top:1px;line-height:1.35}
+#devis-app tbody .dv-empty td{color:#B1B5A8;font-style:italic;text-align:left}
+#devis-app .dv-totals{margin:2.5mm 0 0 auto;width:78mm;font-size:9.4pt}
+#devis-app .dv-totals div{display:flex;justify-content:space-between;padding:3.5px 10px;border-bottom:1px solid var(--dv-line)}
+#devis-app .dv-totals .dv-ttc{background:var(--dv-green);color:#fff;font-weight:700;font-size:10.6pt;border:0;margin-top:2px;padding:8px 10px}
+#devis-app .dv-cond{display:grid;grid-template-columns:34mm 1fr 28mm 1fr;column-gap:6mm;margin:0;font-size:8.8pt}
+#devis-app .dv-cond dt,#devis-app .dv-cond dd{margin:0;padding:3px 0;border-bottom:1px solid var(--dv-line)}
+#devis-app .dv-cond dt{color:var(--dv-grey)}
+#devis-app .dv-cond dd{font-weight:500}
+#devis-app .dv-legal{break-inside:avoid;font-size:6.9pt;color:var(--dv-grey);line-height:1.35;margin:2mm 0 0}
+#devis-app .dv-legal p{margin:0 0 3px}
+#devis-app .dv-sign{break-inside:avoid;display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin-top:2mm;flex:1 1 auto;margin-bottom:3mm}
+#devis-app .dv-box{border:1px solid var(--dv-line);border-radius:3px;padding:2.2mm 4.5mm;min-height:26mm;font-size:8.4pt}
+#devis-app .dv-box h5{margin:0 0 4px;font:600 7.5pt 'Albert Sans';letter-spacing:.18em;text-transform:uppercase;color:var(--dv-sage)}
+#devis-app .dv-box .dv-who{font-weight:600}
+#devis-app .dv-box .dv-g{color:var(--dv-grey)}
+#devis-app .dv-intro{font-size:8.6pt;margin:0 0 2mm}
+#devis-app .dv-foot{margin-top:auto;padding-top:2mm;text-align:center;font-size:7.2pt;color:var(--dv-grey);line-height:1.5}
+#devis-app .dv-foot span{display:block}
+@media (max-width:1100px){#devis-app .dv-app{grid-template-columns:1fr}
+#devis-app .dv-panel{height:auto;position:static}
+}
+@media print{@page{size:A4;margin:0}
+#devis-app,#devis-app *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+#devis-app .dv-panel{display:none!important}
+#devis-app .dv-app{display:block}
+#devis-app .dv-stage{padding:0;display:block;overflow:visible}
+#devis-app .dv-sheet{box-shadow:none;margin:0;width:210mm;min-height:295mm;height:auto;overflow:visible}
+#devis-app .dv-noprint{display:none!important}
+}
+
+#devis-app :where(*){letter-spacing:normal;text-transform:none}
+#devis-app label{font-weight:400;font-size:12px;margin:10px 0 4px;color:var(--dv-grey)}
+#devis-app input,#devis-app select{height:auto;margin:0;box-shadow:none}
+#devis-app .dv-sheet{flex:none}
+@font-face{font-family:'Albert Sans';src:url('vendor/fonts/albert-sans-latin-wght-normal.woff2') format('woff2');font-weight:100 900;font-style:normal;font-display:swap}
+#devis-app .dv-app{grid-template-columns:400px minmax(0,1fr);gap:28px;align-items:start}
+#devis-app .dv-panel{height:auto;max-height:calc(100vh - 100px);position:sticky;top:84px;border:1px solid var(--dv-line);border-radius:14px;padding:22px 22px 30px;background:#fff}
+#devis-app .dv-stage{padding:0;overflow:auto}
+#devis-app .dv-sheet{margin:0 auto}
+#devis-gate{max-width:1200px;margin:0 auto;padding:48px 24px;color:#6B7468;font-size:15px}
+@media (max-width:1100px){#devis-app .dv-app{grid-template-columns:minmax(0,1fr)}#devis-app .dv-panel{position:static;max-height:none}}
+@media print{
+ header,#devis-gate,.devis-titre{display:none!important}
+ body{background:#fff!important}
+ .container{padding:0!important;max-width:none!important;margin:0!important}
+ #devis-app .dv-app{display:block}
+ #devis-app .dv-sheet{zoom:1!important}
+ #devis-app .dv-stage{overflow:visible}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-content">
+    <div class="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style="color:inherit;text-decoration:none">ZELYRO</a></div>
+    <nav>
+      <a href="/taches.html">À faire</a>
+      <a href="/prospects.html">Leads</a>
+      <a href="/biens.html">Biens</a>
+      <a href="/matching.html">Matching</a>
+      <a href="/propositions.html">Propositions</a>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/compte.html">Compte</a>
+      <a href="/admin.html" class="active">Admin</a>
+    </nav>
+    <div class="user-info"><span class="user-email" id="devis-user"></span><button class="logout-btn" id="devis-logout" type="button">Déconnexion</button></div>
+  </div>
+</header>
+<div class="container">
+  <div class="devis-titre">
+    <h1 class="page-title">Générateur de devis</h1>
+    <p class="page-subtitle">Réservé à l’équipe Zelyro. Choisis le forfait et les options : les totaux se calculent seuls et le devis s’enregistre en PDF.</p>
+    <div class="btn-ligne" style="margin:4px 0 24px"><a class="btn secondary petit" href="/admin.html">Retour à l’administration</a></div>
+  </div>
+  <div id="devis-gate">Vérification de ton accès…</div>
+  <div id="devis-app" hidden>
+<div class="dv-app">
+<aside class="dv-panel">
+ <h1>Devis Zelyro</h1>
+ <p class="dv-sub">Remplis les menus : le devis à droite se met à jour et les totaux se calculent tout seuls.</p>
+ <button class="dv-btn dv-btn-main" id="print">Enregistrer en PDF</button>
+ <p class="dv-tip">Dans la fenêtre d’impression, choisis « Enregistrer au format PDF » comme destination.</p>
+ <div class="dv-warn" id="warn" hidden></div>
+
+ <fieldset><legend>Client</legend>
+  <label for="c_nom">Agence (raison sociale)</label><input id="c_nom" autocomplete="off">
+  <div class="dv-row2"><div><label for="c_forme">Forme juridique</label><input id="c_forme" list="formes" autocomplete="off"><datalist id="formes"><option>SAS</option><option>SARL</option><option>SASU</option><option>EURL</option><option>SCI</option><option>SA</option><option>Entreprise individuelle</option></datalist></div>
+  <div><label for="c_siren">SIREN</label><input id="c_siren" inputmode="numeric" autocomplete="off"></div></div>
+  <label for="c_adr">Adresse</label><input id="c_adr" autocomplete="off">
+  <label for="c_tva">N° de TVA intracommunautaire</label><input id="c_tva" autocomplete="off">
+  <label for="c_contact">Contact (nom, fonction)</label><input id="c_contact" autocomplete="off">
+  <div class="dv-row2"><div><label for="c_mail">E-mail</label><input id="c_mail" type="email" autocomplete="off"></div>
+  <div><label for="c_tel">Téléphone</label><input id="c_tel" autocomplete="off"></div></div>
+ </fieldset>
+
+ <fieldset><legend>Prestations</legend>
+  <label for="formule">Formule de facturation</label><select id="formule"></select>
+  <label for="forfait">Forfait</label><select id="forfait"></select>
+  <div class="dv-row2"><div><label for="duree">Durée</label><select id="duree"></select></div>
+  <div><label for="debut">Début de l’abonnement</label><input id="debut" type="date"></div></div>
+  <div class="dv-row2"><div><label for="comptes">Comptes en plus (5 € HT / mois)</label><select id="comptes"></select></div>
+  <div><label for="install">Installation (50 € HT)</label><select id="install"></select></div></div>
+  <label for="a_nom">Autre prestation (facultatif)</label><input id="a_nom" placeholder="Ex. formation de l’équipe" autocomplete="off">
+  <div class="dv-row2"><div><label for="a_qte">Quantité</label><input id="a_qte" type="number" min="0" step="1"></div>
+  <div><label for="a_pu">Prix unitaire HT (€)</label><input id="a_pu" type="number" min="0" step="0.01"></div></div>
+ </fieldset>
+
+ <fieldset><legend>Conditions</legend>
+  <div class="dv-row2"><div><label for="tva">Taux de TVA</label><select id="tva"></select></div>
+  <div><label for="valid">Validité du devis</label><select id="valid"></select></div></div>
+  <div class="dv-row2"><div><label for="mode">Mode de règlement</label><select id="mode"></select></div>
+  <div><label for="delai">Délai de règlement</label><select id="delai"></select></div></div>
+  <div class="dv-row2"><div><label for="num">N° du devis</label><input id="num" autocomplete="off"></div>
+  <div><label for="emis">Date d’émission</label><input id="emis" type="date"></div></div>
+  <label for="signe">Signataire pour Zelyro</label><select id="signe"></select>
+ </fieldset>
+
+ <details id="zel"><summary>Informations Zelyro (à compléter une fois)</summary>
+  <label for="z_siege">Siège social</label><input id="z_siege" autocomplete="off">
+  <div class="dv-row2"><div><label for="z_siren">SIREN</label><input id="z_siren" autocomplete="off"></div>
+  <div><label for="z_rcs">N° RCS Paris</label><input id="z_rcs" autocomplete="off"></div></div>
+  <div class="dv-row2"><div><label for="z_tva">N° de TVA intracom.</label><input id="z_tva" autocomplete="off"></div>
+  <div><label for="z_tel">Téléphone</label><input id="z_tel" autocomplete="off"></div></div>
+  <label for="z_iban">IBAN et BIC</label><input id="z_iban" autocomplete="off">
+  <p class="dv-tip">Ces informations sont gardées dans ce navigateur : tu ne les saisis qu’une fois. Elles apparaissent sur le devis dès qu’elles sont remplies.</p>
+ </details>
+ <button class="dv-btn dv-btn-ghost" id="reset">Nouveau devis (tout vider)</button>
+</aside>
+
+<main class="dv-stage"><article class="dv-sheet" id="sheet"></article></main>
+</div>
+
+</div>
+</div>
+
+<script>
+
+// ---- Tarifs (à modifier ici si les prix changent) ----
+var TARIFS={
+ forfaits:{essentiel:{nom:'Essentiel',prix:29,comptes:2},agence:{nom:'Agence',prix:49,comptes:5},reseau:{nom:'Réseau',prix:79,comptes:10}},
+ compte:5, install:50,
+ formules:{mensuelle:{lib:'Mensuelle sans engagement',remise:0,detail:'Facturation mensuelle, sans engagement',court:'mensuel sans engagement'},
+           engage:{lib:'Mensuelle avec engagement de 12 mois (-5 %)',remise:.05,detail:'Facturation mensuelle, engagement de 12 mois (remise de 5 %)',court:'mensuel, engagement 12 mois (-5 %)'},
+           annuelle:{lib:'Annuelle prépayée (-10 %)',remise:.10,detail:'Facturation annuelle prépayée, engagement de 12 mois (remise de 10 %)',court:'annuel prépayé (-10 %)'}},
+ tva:[['0.2','20 %'],['0.1','10 %'],['0.055','5,5 %'],['0','Non applicable']],
+ modes:['Prélèvement SEPA','Virement bancaire','Carte bancaire'],
+ delais:['À réception de facture','15 jours','30 jours'],
+ signataires:['Hugo Cotelle, Président','Tom Bonvalot, Directeur général']
+};
+var $=function(i){return document.getElementById(i)};
+var esc=function(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})};
+var eur=new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR'});
+var m=function(n){return eur.format(n).replace(/[\u202f\u00a0]/g,'\u00a0')};
+function opts(sel,list,ph){ // list: [value,label]
+  var h=ph?'<option value="">'+ph+'</option>':'';
+  list.forEach(function(x){h+='<option value="'+esc(x[0])+'">'+esc(x[1])+'</option>'});
+  $(sel).innerHTML=h;
+}
+opts('formule',Object.keys(TARIFS.formules).map(function(k){return[k,TARIFS.formules[k].lib]}),'Choisir…');
+opts('forfait',Object.keys(TARIFS.forfaits).map(function(k){var f=TARIFS.forfaits[k];return[k,f.nom+' · '+f.prix+' € HT / mois · '+f.comptes+' comptes inclus']}),'Choisir…');
+var du=[];for(var i=1;i<=12;i++)du.push([String(i),i+' mois']);du.push(['24','24 mois'],['36','36 mois']);opts('duree',du,'Choisir…');
+var cp=[];for(i=0;i<=20;i++)cp.push([String(i),i===0?'Aucun':String(i)]);opts('comptes',cp);
+opts('install',[['non','Non'],['oui','Oui']]);
+opts('tva',TARIFS.tva);
+opts('valid',[['15','15 jours'],['30','30 jours'],['60','60 jours']]);$('valid').value='30';
+opts('mode',TARIFS.modes.map(function(x){return[x,x]}),'Choisir…');
+opts('delai',TARIFS.delais.map(function(x){return[x,x]}),'Choisir…');
+opts('signe',TARIFS.signataires.map(function(x){return[x,x]}),'Choisir…');
+
+function iso(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function parse(s){if(!s)return null;var p=s.split('-');return new Date(+p[0],+p[1]-1,+p[2])}
+function fd(d){return d?String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear():''}
+function addDays(d,n){var x=new Date(d);x.setDate(x.getDate()+n);return x}
+function addMonths(d,n){var x=new Date(d);var day=x.getDate();x.setDate(1);x.setMonth(x.getMonth()+n);var last=new Date(x.getFullYear(),x.getMonth()+1,0).getDate();x.setDate(Math.min(day,last));return x}
+
+var ZKEYS=['z_siege','z_siren','z_rcs','z_tva','z_tel','z_iban'];
+var ZDEF={z_siege:'59 rue de Ponthieu, bureau 326, 75008 Paris'};
+function load(){
+  var s={};try{s=JSON.parse(localStorage.getItem('zelyro_devis_zel')||'{}')}catch(e){}
+  ZKEYS.forEach(function(k){$(k).value=(s[k]!=null?s[k]:(ZDEF[k]||''))});
+}
+function save(){var s={};ZKEYS.forEach(function(k){s[k]=$(k).value});try{localStorage.setItem('zelyro_devis_zel',JSON.stringify(s))}catch(e){}}
+
+function j(a){return a.filter(Boolean).join(' · ')}
+function line(k,v,cls){return v?'<p><span class="dv-k">'+k+'</span>'+esc(v)+'</p>':''}
+function render(){
+  var f=TARIFS.forfaits[$('forfait').value], fo=TARIFS.formules[$('formule').value];
+  var mois=parseInt($('duree').value,10)||0;
+  var debut=parse($('debut').value), fin=(debut&&mois)?addDays(addMonths(debut,mois),-1):null;
+  var rows='',ht=0;
+  // ligne forfait
+  if(f&&mois){
+    var pu=Math.round(f.prix*(1-(fo?fo.remise:0))*100)/100, tot=Math.round(pu*mois*100)/100; ht+=tot;
+    var sub=[f.comptes+' comptes utilisateurs inclus'];
+    if(fo)sub.push(fo.court);
+    if(debut&&fin)sub.push('du '+fd(debut)+' au '+fd(fin));
+    rows+='<tr><td><div class="dv-d1">Forfait '+f.nom+' : abonnement à Zelyro</div><div class="dv-d2">'+esc(sub.join(' · '))+'</div></td><td>'+mois+' mois</td><td>'+m(pu)+' / mois</td><td>'+m(tot)+'</td></tr>';
+  } else {
+    rows+='<tr class="dv-empty dv-noprint"><td colspan="4">Choisis un forfait et une durée pour afficher la ligne d’abonnement.</td></tr>';
+  }
+  // comptes
+  var nc=parseInt($('comptes').value,10)||0;
+  if(nc>0&&mois){
+    var tc=Math.round(nc*TARIFS.compte*mois*100)/100; ht+=tc;
+    rows+='<tr><td><div class="dv-d1">Compte utilisateur supplémentaire</div><div class="dv-d2">Au-delà des comptes inclus, '+m(TARIFS.compte)+' HT par compte et par mois</div></td><td>'+nc+' × '+mois+' mois</td><td>'+m(TARIFS.compte)+' / mois</td><td>'+m(tc)+'</td></tr>';
+  } else if(nc>0){
+    rows+='<tr class="dv-empty dv-noprint"><td colspan="4">Choisis une durée pour calculer les comptes supplémentaires.</td></tr>';
+  }
+  // installation
+  if($('install').value==='oui'){
+    ht+=TARIFS.install;
+    rows+='<tr><td><div class="dv-d1">Installation et mise en service</div><div class="dv-d2">Frais uniques, facturés une seule fois</div></td><td>1</td><td>'+m(TARIFS.install)+'</td><td>'+m(TARIFS.install)+'</td></tr>';
+  }
+  // autre
+  var an=$('a_nom').value.trim(), aq=parseFloat($('a_qte').value), ap=parseFloat($('a_pu').value);
+  if(an&&aq>0&&ap>=0){
+    var ta=Math.round(aq*ap*100)/100; ht+=ta;
+    rows+='<tr><td><div class="dv-d1">'+esc(an)+'</div></td><td>'+aq.toString().replace('.',',')+'</td><td>'+m(ap)+'</td><td>'+m(ta)+'</td></tr>';
+  }
+  ht=Math.round(ht*100)/100;
+  var tx=parseFloat($('tva').value); var tvam=Math.round(ht*tx*100)/100, ttc=Math.round((ht+tvam)*100)/100;
+  var tvaLib=tx>0?'TVA ('+TARIFS.tva.filter(function(x){return parseFloat(x[0])===tx})[0][1]+')':'TVA non applicable';
+
+  var emis=parse($('emis').value), vj=parseInt($('valid').value,10)||30, val=emis?addDays(emis,vj):null;
+  var cn=$('c_nom').value.trim();
+  var cl='<h4>Client</h4><p class="dv-n">'+(cn?esc(cn):'<span class="dv-ph">Raison sociale de l’agence</span>')+'</p>'
+    +line('',j([$('c_forme').value.trim(),$('c_siren').value.trim()&&('SIREN '+$('c_siren').value.trim())]))
+    +line('',$('c_adr').value.trim())
+    +line('',$('c_tva').value.trim()&&('TVA intracommunautaire : '+$('c_tva').value.trim()))
+    +line('',$('c_contact').value.trim()&&('Contact : '+$('c_contact').value.trim()))
+    +line('',j([$('c_mail').value.trim(),$('c_tel').value.trim()]));
+  var em='<h4>Émetteur</h4><p class="dv-n">Zelyro SAS</p><p>Société par actions simplifiée au capital de 1 000 €</p>'
+    +line('',$('z_siege').value.trim())
+    +line('',j([$('z_siren').value.trim()&&('SIREN '+$('z_siren').value.trim()),$('z_rcs').value.trim()&&('RCS Paris '+$('z_rcs').value.trim())]))
+    +line('',$('z_tva').value.trim()&&('TVA intracommunautaire : '+$('z_tva').value.trim()))
+    +line('',j([$('z_tel').value.trim(),'contact@zelyro.fr']));
+
+  var cond='';
+  var fol=fo?fo.lib:'';
+  if(fol)cond+='<dt>Formule de facturation</dt><dd>'+esc(fol)+'</dd>';
+  if(debut)cond+='<dt>Mise en service</dt><dd>'+fd(debut)+'</dd>';
+  if($('mode').value)cond+='<dt>Mode de règlement</dt><dd>'+esc($('mode').value)+'</dd>';
+  if($('delai').value)cond+='<dt>Délai de règlement</dt><dd>'+esc($('delai').value)+'</dd>';
+  if($('z_iban').value.trim())cond+='<dt>Coordonnées bancaires</dt><dd>'+esc($('z_iban').value.trim())+'</dd>';
+  if(!cond)cond='<dt class="dv-noprint">Conditions</dt><dd class="dv-noprint dv-ph">Choisis la formule, le mode et le délai de règlement.</dd>';
+
+  var signe=$('signe').value;
+  var foot='Zelyro SAS · SAS au capital de 1 000 € · '+esc($('z_siege').value.trim()||'59 rue de Ponthieu, 75008 Paris')
+    +($('z_siren').value.trim()?' · SIREN '+esc($('z_siren').value.trim()):'');
+
+  $('sheet').innerHTML=
+  '<div class="dv-sh-head"><div class="dv-brand"><div><span class="dv-dia">◆</span><span class="dv-name">Zelyro</span></div><div class="dv-tag">Logiciel de qualification et de suivi des prospects pour agences immobilières</div></div>'
+  +'<div class="dv-doc"><div class="dv-doc-t">DEVIS</div><dl><dt>N°</dt><dd>'+esc($('num').value||'—')+'</dd><dt>Date d’émission</dt><dd>'+(emis?fd(emis):'—')+'</dd><dt>Valable jusqu’au</dt><dd>'+(val?fd(val):'—')+'</dd></dl></div></div>'
+  +'<div class="dv-rule"></div>'
+  +'<div class="dv-parties"><div class="dv-party">'+em+'</div><div class="dv-party">'+cl+'</div></div>'
+  +'<h3>Objet du devis</h3><p class="dv-objet">Abonnement au logiciel Zelyro : accès web pour l’agence, qualification automatique des prospects, rapprochement avec les biens, suivi et tâches du jour.</p>'
+  +'<h3>Détail des prestations</h3><table><thead><tr><th>Désignation</th><th>Qté</th><th>Prix unitaire HT</th><th>Total HT</th></tr></thead><tbody>'+rows+'</tbody></table>'
+  +'<div class="dv-totals"><div><span>Total HT</span><span>'+m(ht)+'</span></div><div><span>'+tvaLib+'</span><span>'+m(tvam)+'</span></div><div class="dv-ttc"><span>Total TTC</span><span>'+m(ttc)+'</span></div></div>'
+  +'<h3>Conditions</h3><dl class="dv-cond">'+cond+'</dl>'
+  +'<div class="dv-legal"><p>Pénalités de retard : en cas de retard de paiement, des pénalités sont exigibles dès le lendemain de la date d’échéance, à un taux égal à trois fois le taux d’intérêt légal, ainsi qu’une indemnité forfaitaire de 40 € pour frais de recouvrement (articles L. 441-10 et D. 441-5 du Code de commerce). Aucun escompte n’est accordé pour paiement anticipé.</p>'
+  +'<p>Conditions applicables : le présent devis est soumis aux conditions générales d’utilisation de Zelyro, disponibles sur www.zelyro.fr/cgu.html. L’abonnement est ouvert aux agences immobilières sur activation par Zelyro. Montants exprimés en euros, hors taxes sauf mention contraire.</p></div>'
+  +'<h3>Bon pour accord</h3><p class="dv-intro">Pour accepter ce devis, merci de le retourner daté et signé, précédé de la mention « Bon pour accord ».</p>'
+  +'<div class="dv-sign"><div class="dv-box"><h5>Pour Zelyro SAS</h5><div class="dv-who">'+(signe?esc(signe):'&nbsp;')+'</div><div class="dv-g" style="margin-top:6px">Date :</div><div class="dv-g" style="margin-top:4px">Signature :</div></div>'
+  +'<div class="dv-box"><h5>Pour le client</h5><div class="dv-g">Nom et qualité du signataire :</div><div class="dv-g" style="margin-top:6px">Date :</div><div class="dv-g" style="margin-top:4px">Signature précédée de la mention « Bon pour accord » :</div></div></div>'
+  +'<div class="dv-foot"><span>'+foot+'</span><span>contact@zelyro.fr · www.zelyro.fr</span></div>';
+
+  // alertes
+  var miss=[];
+  if(!$('z_siren').value.trim())miss.push('SIREN de Zelyro');
+  if(!$('z_rcs').value.trim())miss.push('n° RCS de Zelyro');
+  if(!$('z_tva').value.trim())miss.push('n° de TVA de Zelyro');
+  if(!$('z_tel').value.trim())miss.push('téléphone de Zelyro');
+  if(!$('z_iban').value.trim())miss.push('IBAN et BIC de Zelyro');
+  var w=$('warn');
+  if(miss.length){w.hidden=false;w.innerHTML='<b>Pas encore sur le devis :</b> '+miss.join(', ')+'. Ouvre « Informations Zelyro » en bas du panneau pour les ajouter.'}else{w.hidden=true}
+}
+// durée imposée par la formule
+$('formule').addEventListener('change',function(){
+  var v=$('formule').value, d=parseInt($('duree').value,10)||0;
+  if((v==='engage'||v==='annuelle')&&d<12)$('duree').value='12';
+  if(v==='mensuelle'&&!d)$('duree').value='1';
+  render();
+});
+document.querySelectorAll('input,select').forEach(function(el){
+  el.addEventListener('input',function(){if(el.id.indexOf('z_')===0)save();render()});
+  el.addEventListener('change',function(){if(el.id.indexOf('z_')===0)save();render()});
+});
+$('print').addEventListener('click',function(){window.print()});
+$('reset').addEventListener('click',function(){
+  ['c_nom','c_forme','c_siren','c_adr','c_tva','c_contact','c_mail','c_tel','debut','a_nom','a_qte','a_pu'].forEach(function(k){$(k).value=''});
+  ['formule','forfait','duree','mode','delai','signe'].forEach(function(k){$(k).value=''});
+  $('comptes').value='0';$('install').value='non';$('tva').value='0.2';$('valid').value='30';
+  init2();render();
+});
+function init2(){var t=new Date();$('emis').value=iso(t);$('num').value='DEV-'+t.getFullYear()+'-001'}
+load();init2();render();
+
+// aperçu à l'échelle de la colonne (écran seulement)
+(function(){var st=document.querySelector('.dv-stage'),sh=document.getElementById('sheet');
+ function fit(){if(!st||!sh)return;var w=st.clientWidth;if(!w)return;sh.style.zoom=Math.min(1,w/794).toFixed(3)}
+ window.addEventListener('resize',fit);window.addEventListener('devis-visible',fit);setTimeout(fit,50)})();
+
+// ---- Accès réservé à l'équipe : même contrôle que la page Administration ----
+(function(){
+  var API='https://saas-immobilier-921a.onrender.com';
+  function sortir(){try{localStorage.removeItem('token');localStorage.removeItem('user')}catch(e){}window.location.replace('/login.html')}
+  document.getElementById('devis-logout').addEventListener('click',sortir);
+  var tok=null;try{tok=localStorage.getItem('token')}catch(e){}
+  if(!tok){window.location.replace('/login.html');return}
+  try{var u=JSON.parse(localStorage.getItem('user')||'null');if(u&&u.email)document.getElementById('devis-user').textContent=u.email}catch(e){}
+  fetch(API+'/admin/overview',{headers:{'Authorization':'Bearer '+tok}}).then(function(r){
+    if(r.status===401){sortir();return}
+    if(r.status===404||r.status===403){document.getElementById('devis-gate').innerHTML='Cette page est réservée à l’équipe Zelyro.<br><a href="/prospects.html" style="color:#4F6353">Retour à mes prospects</a>';return}
+    if(!r.ok)throw new Error('http '+r.status);
+    document.getElementById('devis-gate').hidden=true;
+    document.getElementById('devis-app').hidden=false;window.dispatchEvent(new Event('devis-visible'));
+  }).catch(function(){document.getElementById('devis-gate').textContent='Impossible de vérifier ton accès pour le moment. Recharge la page dans un instant.'});
+})();
+</script>
+</body>
+</html>
