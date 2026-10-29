@@ -8,7 +8,7 @@
  */
 (function () {
     var SOCIETE = {
-        adresse: '59 rue de Ponthieu, bureau 326, 75008 Paris',          // ex. '12 rue de la Paix, 75002 Paris'
+        adresse: '59 rue de Ponthieu, 75008 Paris',          // ex. '12 rue de la Paix, 75002 Paris'
         siren: '',            // 9 chiffres, ex. '123 456 789'
         rcs_ville: 'Paris',        // ville du greffe, ex. 'Paris'
         capital: '1 000 €',          // ex. '1 000 €'

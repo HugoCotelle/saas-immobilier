@@ -235,7 +235,7 @@ function addDays(d,n){var x=new Date(d);x.setDate(x.getDate()+n);return x}
 function addMonths(d,n){var x=new Date(d);var day=x.getDate();x.setDate(1);x.setMonth(x.getMonth()+n);var last=new Date(x.getFullYear(),x.getMonth()+1,0).getDate();x.setDate(Math.min(day,last));return x}
 
 var ZKEYS=['z_siege','z_siren','z_rcs','z_tva','z_tel','z_iban'];
-var ZDEF={z_siege:'59 rue de Ponthieu, bureau 326, 75008 Paris'};
+var ZDEF={z_siege:'59 rue de Ponthieu, 75008 Paris'};
 function load(){
   var s={};try{s=JSON.parse(localStorage.getItem('zelyro_devis_zel')||'{}')}catch(e){}
   ZKEYS.forEach(function(k){$(k).value=(s[k]!=null?s[k]:(ZDEF[k]||''))});
