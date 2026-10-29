@@ -38,8 +38,18 @@ cpt = [0]
 def ev(type_, obj):
     cpt[0] += 1
     return {"id": f"evt_{cpt[0]}_{time.time_ns()}", "type": type_, "data": {"object": obj}}
-def post(e, **kw):
-    p = json.dumps(e).encode(); return c.post('/stripe/webhook', data=p, headers=signe(p, **kw))
+class _Frais:
+    def __init__(s, d): s.d = d
+    def to_dict(s): return s.d
+def post(e, frais=None, **kw):
+    """Les événements subscription.created/updated relisent l'abonnement chez Stripe : par défaut le test
+    renvoie l'objet de l'événement lui-même ; `frais` simule un état plus récent côté Stripe."""
+    p = json.dumps(e).encode()
+    if e["type"] in ("customer.subscription.created", "customer.subscription.updated"):
+        retour = frais if frais is not None else e["data"]["object"]
+        with mock.patch.object(stripe.Subscription, "retrieve", return_value=_Frais(retour)):
+            return c.post('/stripe/webhook', data=p, headers=signe(p, **kw))
+    return c.post('/stripe/webhook', data=p, headers=signe(p, **kw))
 def row(uid):
     cur.execute("""SELECT plan,is_active,billing_status,billing_formula,billing_commit_end,billing_period_end,extra_seats,
                    billing_suspended,token_version,stripe_customer_id,stripe_subscription_id,billing_cancel_at_period_end
@@ -108,6 +118,15 @@ ok(x[0] == 'reseau' or x[0] == 'agence', f"retour aux métadonnées si le tarif 
 post(ev("customer.subscription.deleted", {"id": "sub_t", "customer": "cus_t", "status": "canceled",
       "metadata": {"user_id": str(team), "kind": "plan", "plan": "agence", "formule": "mensuel"}, "items": {"data": []}}))
 ok(row(team)[1] is True, "compte équipe non suspendu")
+# 7b événements hors ordre : c'est l'état ACTUEL chez Stripe qui compte, pas celui de l'événement
+old = sub(id="sub_old", status="canceled")
+post(ev("customer.subscription.updated", old)); x = row(agence)
+ok(x[1] is True and x[10] == 'sub_plan2', "ancien abonnement annulé (updated) : l'abonnement en cours n'est pas touché")
+stale = sub(id="sub_plan2", status="active")
+post(ev("customer.subscription.updated", stale), frais=dict(stale, status="canceled")); x = row(agence)
+ok(x[1] is False and x[7] is True, f"updated(active) rejoué alors que Stripe dit annulé -> accès coupé: {x[1], x[7]}")
+post(ev("customer.subscription.updated", sub(id="sub_plan2", status="canceled")), frais=sub(id="sub_plan2", status="active")); x = row(agence)
+ok(x[1] is True and x[2] == 'active', f"updated(canceled) périmé alors que Stripe dit actif -> accès rétabli: {x[1], x[2]}")
 # 8 checkout.session.completed
 cur.execute("UPDATE users SET stripe_customer_id=NULL, billing_status=NULL, stripe_subscription_id=NULL WHERE id=%s", (agence,)); conn.commit()
 full = dict(sub(id="sub_plan3", default_payment_method="pm_1", metadata={"user_id": str(agence), "kind": "plan", "plan": "essentiel", "formule": "mensuel"}, items={"data": [{"id": "si_1", "quantity": 1, "price": {"lookup_key": "zelyro_essentiel_mensuel"}}]}))
@@ -121,12 +140,21 @@ with mock.patch.object(stripe.Subscription, "retrieve", return_value=Fake(full))
     ok(r.status_code == 200, f"checkout.session.completed -> {r.status_code}")
     ok(modif.call_args and modif.call_args.kwargs["invoice_settings"]["default_payment_method"] == "pm_1", "moyen de paiement par défaut enregistré")
 x = row(agence); ok(x[0] == 'essentiel' and x[2] == 'active', f"forfait après paiement: {x[:3]}")
+# 8b second abonnement payé alors qu'un autre est déjà suivi : ignoré et tracé, l'abonnement suivi n'est pas remplacé
+dup = dict(full, id="sub_dup", metadata={"user_id": str(agence), "kind": "plan", "plan": "reseau", "formule": "mensuel"},
+           items={"data": [{"id": "si_d", "quantity": 1, "price": {"lookup_key": "zelyro_reseau_mensuel"}}]})
+post(ev("customer.subscription.created", dup)); x = row(agence)
+ok(x[10] == 'sub_plan3' and x[0] == 'essentiel', f"abonnement en double ignoré: {x[0], x[10]}")
 
 # 9 routes
 H = lambda uid: {"Authorization": f"Bearer {tok(uid)}"}
 cur.execute("UPDATE users SET billing_status=NULL, stripe_subscription_id=NULL WHERE id=%s", (agence,)); conn.commit()
 ok(c.post('/api/v1/billing/checkout', json={"plan": "agence", "formule": "mensuel"}, headers=H(emp)).status_code == 403, "employé -> 403")
 ok(c.post('/api/v1/billing/checkout', json={"plan": "gratuit", "formule": "mensuel"}, headers=H(agence)).status_code == 400, "forfait inconnu -> 400")
+with mock.patch.object(appz, "STRIPE_WEBHOOK_SECRET", ""):
+    ok(c.post('/api/v1/billing/checkout', json={"plan": "agence", "formule": "mensuel"}, headers=H(agence)).status_code == 503, "sans secret de webhook : paiement refusé (503)")
+    ok(c.post('/api/v1/billing/seats', json={"quantity": 1}, headers=H(agence)).status_code == 503, "sans secret de webhook : comptes supplémentaires refusés (503)")
+    ok(c.get('/api/v1/billing', headers=H(agence)).get_json()["configured"] is False, "sans secret de webhook : facturation non configurée")
 class O:  # objet minimal façon StripeObject
     def __init__(s, **k): s.__dict__.update(k)
 with mock.patch.object(stripe.Price, "list", return_value=Fake({"data": [{"id": "price_1"}]})), \
@@ -134,6 +162,7 @@ with mock.patch.object(stripe.Price, "list", return_value=Fake({"data": [{"id": 
     r = c.post('/api/v1/billing/checkout', json={"plan": "agence", "formule": "annuel"}, headers=H(agence))
     ok(r.status_code == 200 and r.get_json()["url"].startswith("https://checkout"), f"checkout -> {r.status_code}")
     k = cs.call_args.kwargs
+    ok(k["expires_at"] - int(time.time()) >= 30 * 60, "session de paiement à expiration courte (30 min minimum chez Stripe)")
     ok(k["line_items"] == [{"price": "price_1", "quantity": 1, "tax_rates": ["txr_tva"]}] and k["customer"] == "cus_1"
        and k["subscription_data"]["metadata"]["formule"] == "annuel" and "sepa_debit" in k["payment_method_types"], "paramètres Checkout")
 cur.execute("UPDATE users SET billing_status='active', stripe_subscription_id='sub_plan3' WHERE id=%s", (agence,)); conn.commit()
@@ -142,8 +171,25 @@ ok(c.post('/api/v1/billing/checkout', json={"plan": "agence", "formule": "mensue
 cur.execute("UPDATE users SET billing_formula='engage', billing_commit_end=%s WHERE id=%s", (datetime.utcnow()+timedelta(days=100), agence)); conn.commit()
 with mock.patch.object(stripe.billing_portal.Session, "create", return_value=O(url="https://portal.test")) as ps:
     r = c.post('/api/v1/billing/portal', headers=H(agence)); ok(r.status_code == 200 and ps.call_args.kwargs["configuration"] == "bpc_engage", "portail engagé pendant l'engagement")
+    ps.reset_mock()
+    with mock.patch.dict(os.environ, {"STRIPE_PORTAL_CONFIG_ENGAGE": ""}):
+        r = c.post('/api/v1/billing/portal', headers=H(agence))
+        ok(r.status_code == 503 and not ps.called, f"engagement sans configuration « engagé » : portail refusé, pas de repli ({r.status_code})")
     cur.execute("UPDATE users SET billing_commit_end=%s WHERE id=%s", (datetime.utcnow()-timedelta(days=1), agence)); conn.commit()
     r = c.post('/api/v1/billing/portal', headers=H(agence)); ok(ps.call_args.kwargs["configuration"] == "bpc_flex", "portail souple après l'engagement")
+# compte suspendu pour impayé : pas de session, mais un lien vers le portail de paiement
+cur.execute("UPDATE users SET password_hash=%s, is_active=FALSE, billing_suspended=TRUE, stripe_customer_id='cus_1' WHERE id=%s",
+            (appz.generate_password_hash('MotDePasse123'), agence)); conn.commit()
+with mock.patch.object(stripe.billing_portal.Session, "create", return_value=O(url="https://billing.stripe.test/p")):
+    r = c.post('/auth/login', json={"email": "agence@t.test", "password": "MotDePasse123"}); j = r.get_json()
+    ok(r.status_code == 403 and j.get("code") == "billing_suspended" and j.get("billing_url", "").startswith("https://") and "token" not in j,
+       f"suspendu pour impayé : 403 avec lien de régularisation, sans jeton ({r.status_code})")
+    r = c.post('/auth/login', json={"email": "agence@t.test", "password": "mauvais-mot-de-passe"})
+    ok(r.status_code == 401 and "billing_url" not in r.get_json(), "mauvais mot de passe : aucun lien révélé")
+cur.execute("UPDATE users SET is_active=FALSE, billing_suspended=FALSE WHERE id=%s", (agence,)); conn.commit()
+r = c.post('/auth/login', json={"email": "agence@t.test", "password": "MotDePasse123"})
+ok(r.status_code == 403 and r.get_json().get("code") == "suspended" and "billing_url" not in r.get_json(), "suspendu par l'équipe : pas de lien de paiement")
+cur.execute("UPDATE users SET is_active=TRUE WHERE id=%s", (agence,)); conn.commit()
 # comptes supplémentaires
 seat_sub = O(**{})
 def mk_sub(q): return Fake({"id": "sub_seats9", "customer": "cus_1", "status": "active", "start_date": start, "current_period_end": end,
@@ -155,9 +201,49 @@ with mock.patch.object(stripe.Price, "list", return_value=Fake({"data": [{"id": 
     ok(r.status_code == 200 and r.get_json()["extra_seats"] == 2, f"ajout de 2 comptes -> {r.get_json()}")
     ok(sc.call_args.kwargs["default_tax_rates"] == ["txr_tva"], "TVA appliquée aux comptes supplémentaires")
 with mock.patch.object(stripe.Subscription, "retrieve", return_value=mk_sub(2)), \
-     mock.patch.object(stripe.Subscription, "modify", return_value=mk_sub(5)):
+     mock.patch.object(stripe.Subscription, "modify", return_value=mk_sub(5)) as md:
     r = c.post('/api/v1/billing/seats', json={"quantity": 5}, headers=H(agence)); ok(r.get_json()["extra_seats"] == 5, "passage à 5 comptes")
+    ok(md.call_args.kwargs["proration_behavior"] == "always_invoice" and md.call_args.kwargs["payment_behavior"] == "error_if_incomplete",
+       "ajout de comptes : prorata facturé tout de suite, hausse refusée si le paiement échoue")
+with mock.patch.object(stripe.Subscription, "retrieve", return_value=mk_sub(5)), \
+     mock.patch.object(stripe.Subscription, "modify", return_value=mk_sub(3)) as md:
+    c.post('/api/v1/billing/seats', json={"quantity": 3}, headers=H(agence))
+    ok(md.call_args.kwargs["proration_behavior"] == "create_prorations" and "payment_behavior" not in md.call_args.kwargs,
+       "baisse de comptes : crédit reporté sur la prochaine facture")
+with mock.patch.object(stripe.Subscription, "retrieve", return_value=mk_sub(3)), \
+     mock.patch.object(stripe.Subscription, "modify", side_effect=stripe.APIConnectionError("panne")):
+    ok(c.post('/api/v1/billing/seats', json={"quantity": 6}, headers=H(agence)).status_code == 502, "panne Stripe -> 502 (pas « paiement refusé »)")
+with mock.patch.object(stripe.Subscription, "retrieve", return_value=mk_sub(3)), \
+     mock.patch.object(stripe.Subscription, "modify", side_effect=stripe.InvalidRequestError("paiement non abouti", "payment_behavior")):
+    ok(c.post('/api/v1/billing/seats', json={"quantity": 6}, headers=H(agence)).status_code == 402, "paiement non abouti -> 402")
+# clé de test sur l'hébergeur : paiement refusé, sauf préproduction explicite
+with mock.patch.dict(os.environ, {"RENDER": "1"}):
+    ok(c.post('/api/v1/billing/checkout', json={"plan": "agence", "formule": "mensuel"}, headers=H(agence)).status_code == 503,
+       "clé de test sur l'hébergeur : paiement refusé (503)")
+    with mock.patch.dict(os.environ, {"STRIPE_ALLOW_TEST_KEY": "1"}):
+        ok(c.get('/api/v1/billing', headers=H(agence)).get_json()["configured"] is True, "STRIPE_ALLOW_TEST_KEY=1 : autorisé en préproduction")
+# événement d'un autre mode que la clé (réel reçu avec une clé de test) : ignoré
+avant = row(agence)
+r = post(dict(ev("customer.subscription.updated", sub(id="sub_plan3", status="canceled")), livemode=True))
+ok(r.status_code == 200 and r.get_json().get("ignored") == "livemode" and row(agence)[:3] == avant[:3], "événement livemode avec une clé de test : ignoré")
 ok(c.post('/api/v1/billing/seats', json={"quantity": 999}, headers=H(agence)).status_code == 400, "quantité hors limites -> 400")
 r = c.get('/api/v1/billing', headers=H(emp)); j = r.get_json()
 ok(r.status_code == 200 and j["can_manage"] is False and j["subscription"]["status"] == "active", f"GET billing (employé): {j}")
+# remboursement et litige : tracés dans le journal, équipe prévenue, aucun accès coupé
+def dernier_journal(action):
+    cur.execute("SELECT target, detail FROM admin_log WHERE admin_email='stripe' AND action=%s ORDER BY created_at DESC LIMIT 1", (action,))
+    r = cur.fetchone(); conn.commit(); return r
+avant = row(agence)
+with mock.patch.object(appz, "_lancer_en_arriere_plan") as alerte:
+    r = post(ev("charge.refunded", {"id": "ch_1", "customer": "cus_1", "amount": 2900, "amount_refunded": 2900, "currency": "eur"}))
+    j = dernier_journal('remboursement')
+    ok(r.status_code == 200 and j and j[0] == 'agence@t.test' and '29.00' in j[1], f"remboursement journalisé: {j}")
+    ok(alerte.called and "remboursement" in alerte.call_args.args[1], "remboursement : l'équipe est prévenue")
+    with mock.patch.object(stripe.Charge, "retrieve", return_value=Fake({"customer": "cus_1"})):
+        r = post(ev("charge.dispute.created", {"id": "dp_1", "charge": "ch_1", "amount": 2900, "currency": "eur",
+                                               "reason": "fraudulent", "status": "needs_response"}))
+    j = dernier_journal('litige ouvert')
+    ok(r.status_code == 200 and j and j[0] == 'agence@t.test' and 'fraudulent' in j[1], f"litige journalisé: {j}")
+ok(row(agence)[:3] == avant[:3], "remboursement / litige : aucune coupure automatique")
+
 print("\nRÉSULTAT:", "ÉCHEC" if ok.failed else "TOUT PASSE")

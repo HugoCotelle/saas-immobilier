@@ -4967,7 +4967,7 @@ def _limite_comptes(cur, agency_id):
         # Forfait inconnu : comme _forfait(), on retombe sur le plus petit
         # (PLANS_PAR_DEFAUT ne porte pas max_users, d'ou la valeur en dur).
         return 2 + (r['extra_seats'] if r else 0), PLANS_PAR_DEFAUT[0][1]
-    # Les comptes supplémentaires (15 € HT / mois) s'ajoutent à ceux du forfait.
+    # Les comptes supplémentaires (5 € HT / mois) s'ajoutent à ceux du forfait.
     return (None if r['max_users'] is None else r['max_users'] + r['extra_seats']), r['label']
 
 
@@ -11133,13 +11133,13 @@ if stripe is not None and STRIPE_SECRET_KEY:
 # Les tarifs vivent dans Stripe, retrouvés par leur « lookup key » :
 #   zelyro_<forfait>_<formule>     avec forfait = essentiel | agence | reseau
 #                                  et formule = mensuel | engage | annuel
-#   zelyro_siege_mensuel           compte supplémentaire (15 € HT / mois)
+#   zelyro_siege_mensuel           compte supplémentaire (5 € HT / mois)
 # Le script stripe_setup.py les crée.
 
 FORMULES = ('mensuel', 'engage', 'annuel')
 PLANS_PAYANTS = ('essentiel', 'agence', 'reseau')
 CLE_PRIX_SIEGE = 'zelyro_siege_mensuel'
-PRIX_SIEGE_HT = 15
+PRIX_SIEGE_HT = 5
 ENGAGEMENT_MOIS = 12
 SIEGES_SUPPLEMENTAIRES_MAX = 50
 _STATUTS_ACCES = ('active', 'trialing')
@@ -11383,7 +11383,7 @@ def billing_portail():
 @agency_admin_required
 def billing_sieges():
     """Fixe le nombre de comptes utilisateurs en plus de ceux du forfait
-    (15 € HT par mois et par compte). Abonnement mensuel à part, quelle que
+    (5 € HT par mois et par compte). Abonnement mensuel à part, quelle que
     soit la formule du forfait, pour que l'ajout prenne effet tout de suite."""
     try:
         data = request.get_json(silent=True) or {}
