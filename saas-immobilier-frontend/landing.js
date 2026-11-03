@@ -202,17 +202,17 @@
         var scene = $('#scene'), tableau = $('#tableau'), calc = $('#calcul');
         if (!scene) return;
         var P = {
-            camille: { nom: 'Camille R.', src: 'Leboncoin', det: 'Appartement · Lille · 420 000 €', fin: 'approved', urg: 'immediate', email: 1, tel: 1, budget: 1, secteur: 1, type: 1, eng: ['formulaire_rempli'] },
-            sarah: { nom: 'Sarah L.', src: 'SeLoger', det: 'Appartement · Marcq-en-Barœul · 310 000 €', fin: 'approved', urg: '1-3', email: 1, tel: 1, budget: 1, secteur: 1, type: 1, eng: ['annonces_ouvertes'] },
-            julien: { nom: 'Julien M.', src: 'Site de l’agence', det: 'Maison · Marcq-en-Barœul · 560 000 €', fin: 'in_progress', urg: '3-6', email: 1, tel: 1, budget: 1, secteur: 1, type: 1, eng: ['interet_bien', 'formulaire_rempli'], proprio: 1 },
-            paul: { nom: 'Paul R.', src: 'SeLoger', det: 'Maison · Roubaix · budget non renseigné', fin: 'pending', urg: '3-6', email: 1, tel: 1, budget: 0, secteur: 1, type: 1, eng: ['interet_bien', 'annonces_ouvertes'], proprio: 1 },
+            camille: { nom: 'Camille R.', src: 'Leboncoin', det: 'Appartement · Paris 11e · 520 000 €', fin: 'approved', urg: 'immediate', email: 1, tel: 1, budget: 1, secteur: 1, type: 1, eng: ['formulaire_rempli'] },
+            sarah: { nom: 'Sarah L.', src: 'SeLoger', det: 'Appartement · Boulogne-Billancourt · 680 000 €', fin: 'approved', urg: '1-3', email: 1, tel: 1, budget: 1, secteur: 1, type: 1, eng: ['annonces_ouvertes'] },
+            julien: { nom: 'Julien M.', src: 'Site de l’agence', det: 'Maison · Montreuil · 840 000 €', fin: 'in_progress', urg: '3-6', email: 1, tel: 1, budget: 1, secteur: 1, type: 1, eng: ['interet_bien', 'formulaire_rempli'], proprio: 1 },
+            paul: { nom: 'Paul R.', src: 'SeLoger', det: 'Maison · Bagnolet · budget non renseigné', fin: 'pending', urg: '3-6', email: 1, tel: 1, budget: 0, secteur: 1, type: 1, eng: ['interet_bien', 'annonces_ouvertes'], proprio: 1 },
             sophie: { nom: 'Sophie L.', src: 'Leboncoin', det: 'Appartement · budget et secteur non renseignés', fin: '', urg: '6plus', email: 1, tel: 0, budget: 0, secteur: 0, type: 1, eng: ['formulaire_ouvert'] },
-            nadia: { nom: 'Nadia B.', src: 'SeLoger', det: 'Appartement · Lille · 285 000 €', fin: 'approved', urg: 'immediate', email: 1, tel: 1, budget: 1, secteur: 1, type: 1, eng: ['rdv_confirme'] },
-            thomas: { nom: 'Thomas G.', src: 'Leboncoin', det: 'Maison · Tourcoing · 320 000 €', fin: 'in_progress', urg: '1-3', email: 1, tel: 1, budget: 1, secteur: 1, type: 1, eng: ['annonces_ouvertes'] },
+            nadia: { nom: 'Nadia B.', src: 'SeLoger', det: 'Appartement · Paris 15e · 590 000 €', fin: 'approved', urg: 'immediate', email: 1, tel: 1, budget: 1, secteur: 1, type: 1, eng: ['rdv_confirme'] },
+            thomas: { nom: 'Thomas G.', src: 'Leboncoin', det: 'Maison · Saint-Denis · 520 000 €', fin: 'in_progress', urg: '1-3', email: 1, tel: 1, budget: 1, secteur: 1, type: 1, eng: ['annonces_ouvertes'] },
             ines: { nom: 'Inès K.', src: 'Leboncoin', det: 'Appartement · budget et secteur non renseignés', fin: '', urg: '6plus', email: 1, tel: 1, budget: 0, secteur: 0, type: 1, eng: [] },
-            marc: { nom: 'Marc V.', src: 'SeLoger', det: 'Maison · Villeneuve-d’Ascq · 410 000 €', fin: 'approved', urg: '1-3', email: 0, tel: 1, budget: 1, secteur: 1, type: 1, eng: ['interet_bien'], proprio: 1 },
-            lea: { nom: 'Léa D.', src: 'Site de l’agence', det: 'Appartement · Lille · 230 000 €', fin: 'pending', urg: '3-6', email: 1, tel: 1, budget: 1, secteur: 1, type: 1, eng: ['formulaire_ouvert'] },
-            antoine: { nom: 'Antoine P.', src: 'SeLoger', det: 'Appartement · Lille · 350 000 €', fin: 'approved', urg: 'immediate', email: 1, tel: 1, budget: 1, secteur: 1, type: 1, eng: ['interet_bien'] }
+            marc: { nom: 'Marc V.', src: 'SeLoger', det: 'Maison · Le Perreux-sur-Marne · 790 000 €', fin: 'approved', urg: '1-3', email: 0, tel: 1, budget: 1, secteur: 1, type: 1, eng: ['interet_bien'], proprio: 1 },
+            lea: { nom: 'Léa D.', src: 'Site de l’agence', det: 'Appartement · Paris 19e · 350 000 €', fin: 'pending', urg: '3-6', email: 1, tel: 1, budget: 1, secteur: 1, type: 1, eng: ['formulaire_ouvert'] },
+            antoine: { nom: 'Antoine P.', src: 'SeLoger', det: 'Appartement · Paris 12e · 610 000 €', fin: 'approved', urg: 'immediate', email: 1, tel: 1, budget: 1, secteur: 1, type: 1, eng: ['interet_bien'] }
         };
         Object.keys(P).forEach(function (k) { var q = qualifier(P[k]); P[k].q = q; });
         var file = ['nadia', 'thomas', 'ines', 'marc', 'lea', 'antoine', 'paul', 'sarah', 'sophie', 'julien', 'camille'];
@@ -449,12 +449,12 @@
     /* ---------- 02 Rapprocher : quel bien pour Julien ? ---------- */
     (function () {
         var zone = $('#r-biens'); if (!zone) return;
-        var LEAD = { budget: 560000, type: 'Maison', secteur: 'Marcq-en-Barœul', fin: 'in_progress', urg: '3-6' };
+        var LEAD = { budget: 840000, type: 'Maison', secteur: 'Montreuil', fin: 'in_progress', urg: '3-6' };
         var BIENS = [
-            { type: 'Maison', ville: 'Marcq-en-Barœul', prix: 545000 },
-            { type: 'Maison', ville: 'Marcq-en-Barœul', prix: 640000 },
-            { type: 'Appartement', ville: 'Marcq-en-Barœul', prix: 520000 },
-            { type: 'Maison', ville: 'Roubaix', prix: 530000 }
+            { type: 'Maison', ville: 'Montreuil', prix: 815000 },
+            { type: 'Maison', ville: 'Montreuil', prix: 960000 },
+            { type: 'Appartement', ville: 'Montreuil', prix: 780000 },
+            { type: 'Maison', ville: 'Bagnolet', prix: 795000 }
         ];
         var choisi = 0, prix = BIENS[0].prix;
         var curseur = $('#r-prix'), sortie = $('#r-prix-val'), val = $('#ra-val'), sc = $('#r-score'), sr = $('#r-score-sr'), raisons = $('#r-raisons'), boite = $('.r-resultat');
@@ -523,7 +523,7 @@
         for (var i = 0; i < 39; i++) {
             var a = alea() * Math.PI * 2, d = 34 + Math.sqrt(alea()) * 128;
             var x = 256 + Math.cos(a) * d, y = 214 + Math.sin(a) * d;
-            var surf = Math.round(38 + alea() * 58), m2 = Math.round((4600 + (alea() + alea() - 1) * 650) / 10) * 10;
+            var surf = Math.round(38 + alea() * 58), m2 = Math.round((6500 + (alea() + alea() - 1) * 900) / 10) * 10;
             var an = 2023 + Math.floor(alea() * 3), maison = alea() < 0.18;
             var c = doc.createElementNS(ns, 'circle');
             c.setAttribute('cx', x.toFixed(1)); c.setAttribute('cy', y.toFixed(1)); c.setAttribute('r', 6);
@@ -600,7 +600,7 @@
         zero.addEventListener('click', function () {
             s = 0; fini = false; piste.classList.remove('signe', 'perdu');
             journal.innerHTML = '';
-            ajout('Note', 'Demande reçue depuis le site de l’agence : maison à Marcq-en-Barœul.');
+            ajout('Note', 'Demande reçue depuis le site de l’agence : maison à Montreuil.');
             maj();
         });
         maj();
