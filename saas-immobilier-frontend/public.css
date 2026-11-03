@@ -844,3 +844,147 @@ body.pub {
 @media (max-width: 860px) { .lp-grid { grid-template-columns: 1fr; grid-template-areas: "copie" "carte" "args"; grid-template-rows: auto; row-gap: 28px; } }
 body.lp { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
 body.lp main { flex: 1 0 auto; }
+
+
+/* ==========================================================================
+   REFONTE ÉDITORIALE CONTRASTÉE (alignée sur la page d'accueil)
+   Noir / blanc / gris froid + vert fluo seul. Plus de crème, de laiton,
+   ni d'italique serif. Ne concerne que les pages publiques (public.css).
+   ========================================================================== */
+@font-face{font-family:"Unbounded";src:url("/vendor/fonts/unbounded-latin-wght-normal.woff2") format("woff2");font-weight:200 900;font-display:swap}
+@font-face{font-family:"Albert Sans";src:url("/vendor/fonts/albert-sans-latin-wght-normal.woff2") format("woff2");font-weight:100 900;font-display:swap}
+@font-face{font-family:"Playfair Display";src:url("/vendor/fonts/playfair-display-latin-wght-normal.woff2") format("woff2");font-weight:400 900;font-display:swap}
+
+:root {
+    --bg: #F3F4F1; --surface: #FFFFFF; --surface-2: #E8EAE5;
+    --line: #DADCD6; --line-strong: #B9BDB5;
+    --ink: #0A0D0B; --ink-2: #383D39; --ink-3: #585D59;
+    --sage-50: #EEF0EC; --sage-100: #E3E5E0; --sage-300: #B7BBB6; --sage-600: #0A0D0B; --sage-700: #000000;
+    --muted: #585D59;
+    --deep: #0A0D0B; --deep-2: #151916; --deep-line: rgba(242, 243, 240, .16);
+    --on-deep: #F2F3F0; --on-deep-muted: #B2B7B2;
+    --deep-green: #0A0D0B; --deep-green-2: #070908;
+    --laiton: #39FF14; --laiton-ink: #0A0D0B;
+    --cold: #585D59; --cold-bg: #ECEDEA; --gris-bg: #ECEDEA; --gris-bord: #A8ACA6;
+    --radius: 8px; --radius-sm: 6px; --radius-lg: 8px;
+    --shadow-hover: 0 10px 24px -12px rgba(10, 13, 11, .3);
+    --shadow-card: 0 1px 2px rgba(10, 13, 11, .05), 0 6px 16px -8px rgba(10, 13, 11, .12);
+    --shadow-lift: 0 2px 4px rgba(10, 13, 11, .06), 0 18px 36px -16px rgba(10, 13, 11, .24);
+    --titre: "Unbounded", "Helvetica Neue", Arial, sans-serif;
+    --serif: "Unbounded", "Helvetica Neue", Arial, sans-serif;
+    --logo-font: "Playfair Display", Georgia, "Times New Roman", serif;
+    --sans: "Albert Sans", "Helvetica Neue", Arial, sans-serif;
+}
+body.pub, body.lp { background: var(--bg); color: var(--ink); font-size: 17px; font-family: var(--sans); }
+.pub :focus-visible { outline: 2px solid var(--ink); }
+::selection { background: var(--laiton); color: var(--ink); }
+
+/* Titres : Unbounded, serrés, sans italique */
+.pub h1, .pub h2, .pub h3 { font-family: var(--titre); font-weight: 700; letter-spacing: -.04em; line-height: 1.08; color: var(--ink); text-wrap: balance; }
+.pub h1 em, .pub h2 em, .pub h3 em, .hero h1 em, .lp-copy h1 em, .lp-merci h1 em {
+    font-style: normal; font-weight: 700; color: inherit; padding: 0 .04em;
+    background: linear-gradient(transparent 58%, var(--laiton) 58% 90%, transparent 90%);
+}
+.lp-copy h1 em { display: inline; }
+.deep h2 em, .final-card h2 em { color: var(--laiton); background: none; padding: 0; }
+.est-range span, .foot-tag { font-style: normal; font-family: var(--sans); }
+.foot-tag { font-weight: 600; }
+
+/* En-tête, logo, navigation */
+header.site-header, .site-header { background: rgba(243, 244, 241, .94); border-bottom: 1px solid var(--line); }
+.logo { font-family: var(--logo-font); font-weight: 500; font-size: 27px; letter-spacing: .005em; text-transform: none; line-height: 1; gap: 11px; }
+.logo::before { width: 13px; height: 13px; border-radius: 3px; background: var(--sage-600); }
+.site-nav a { font-family: var(--sans); font-size: 15.5px; font-weight: 600; color: var(--ink-2); }
+.site-nav a::after { height: 2px; background: var(--laiton); border-radius: 2px; }
+.site-nav a:hover { color: var(--ink); }
+
+/* Boutons : carrés doux, noir plein, contour */
+.btn, .pub .btn, .pub a.btn {
+    border-radius: 6px; font-family: var(--sans); font-weight: 700; font-size: 15px; letter-spacing: 0;
+    background: var(--ink); border: 2px solid var(--ink); color: #fff;
+}
+.btn:hover, .pub a.btn:hover { background: #000; border-color: #000; color: #fff; transform: none; box-shadow: 0 10px 24px -10px rgba(10, 13, 11, .5); }
+.btn-lg { padding: 15px 28px; font-size: 16.5px; border-radius: 6px; }
+.btn-sm { padding: 9px 16px; font-size: 14px; }
+.pub a.btn.btn-ghost { background: transparent; color: var(--ink); border: 2px solid var(--ink); }
+.pub a.btn.btn-ghost:hover { background: var(--ink); color: #fff; border-color: var(--ink); }
+.pub a.btn.btn-light { background: var(--laiton); border-color: var(--laiton); color: var(--ink); }
+.btn.btn-light:hover { background: #9BFF85; border-color: #9BFF85; }
+.menu-toggle { border: 2px solid var(--ink); border-radius: 6px; }
+@media (max-width: 900px) {
+    .site-nav a.nav-demo { border-radius: 6px; background: var(--ink); border-color: var(--ink); }
+    .site-nav a.nav-demo:hover { background: #000; }
+    .js .site-nav.open { background: var(--surface); box-shadow: 0 24px 40px -24px rgba(10, 13, 11, .3); }
+    .logo { font-size: 24px; }
+}
+
+/* Pastille / sur-titre */
+.eyebrow { color: var(--ink); font-family: var(--sans); font-weight: 700; letter-spacing: .12em; }
+.eyebrow::before { background: var(--laiton); border-radius: 1.5px; box-shadow: 0 0 0 1.5px var(--ink); }
+.hero .eyebrow { border-radius: 999px; border: 1.5px solid var(--ink); }
+.deep .eyebrow { color: var(--on-deep); }
+.deep .eyebrow::before { background: var(--laiton); box-shadow: none; }
+
+/* Fonds : plus de halos beige / vert sauge */
+.hero::before, .final-card::before, .deep::before, .hero-visual::before, .final-card::after { background: none; border: 0; }
+.hero::after { background: repeating-linear-gradient(90deg, rgba(10, 13, 11, .045) 0 1px, transparent 1px 120px); -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 80%); mask-image: linear-gradient(to bottom, #000 0%, transparent 80%); }
+.legal-hero { background: var(--surface); border-bottom: 2px solid var(--ink); }
+.legal-hero h1 { font-size: clamp(30px, 4vw, 48px); letter-spacing: -.045em; }
+.deep { background: var(--ink); }
+.deep h2, .deep h3, .checks h3 { color: var(--on-deep); }
+.deep .deep-summary li { color: var(--on-deep-muted); }
+.deep-links a { border-bottom-color: var(--laiton); }
+.checks svg { background: rgba(57, 255, 20, .12); color: var(--laiton); border-radius: 6px; }
+
+/* Appel final : bande noire, vert fluo */
+.final-card { background: var(--ink); border: 0; border-radius: 8px; box-shadow: none; }
+.final-card h2 { color: var(--on-deep); }
+.final-card p { color: var(--on-deep-muted); }
+.pub .final-card a.btn:not(.btn-ghost) { background: var(--laiton); border-color: var(--laiton); color: var(--ink); }
+.pub .final-card a.btn:not(.btn-ghost):hover { background: #9BFF85; border-color: #9BFF85; }
+.pub .final-card a.btn.btn-ghost { color: var(--on-deep); border-color: var(--on-deep-muted); }
+.pub .final-card a.btn.btn-ghost:hover { background: var(--on-deep); color: var(--ink); border-color: var(--on-deep); }
+
+/* Cartes, tarifs, FAQ */
+.price-card, .feat, .lp-carte, .demo-frame, .legal-card, .step, .simu { border-radius: 8px; }
+.price-card { background: var(--surface); border: 1.5px solid var(--line-strong); box-shadow: none; }
+.price-card.featured { background: var(--ink); color: var(--on-deep); border-color: var(--ink); }
+.price-card.featured h3, .price-card.featured .amount, .price-card.featured .price-amount { color: var(--on-deep); }
+.price-card.featured p, .price-card.featured li, .price-card.featured .price-per { color: var(--on-deep-muted); }
+.price-card.featured .btn { background: var(--laiton); border-color: var(--laiton); color: var(--ink); }
+.price-card.featured .btn:hover { background: #9BFF85; border-color: #9BFF85; color: var(--ink); }
+.price-amount .amount { font-family: var(--titre); font-size: 34px; font-weight: 700; letter-spacing: -.05em; }
+.lp-carte { box-shadow: 0 18px 44px -24px rgba(10, 13, 11, .3); border: 1.5px solid var(--line-strong); }
+.simu-resultat dd { font-family: var(--titre); font-size: 20px; font-weight: 700; letter-spacing: -.04em; }
+.est-range { font-family: var(--titre); font-size: 22px; font-weight: 700; letter-spacing: -.04em; }
+.constat-list .n { font-family: var(--titre); color: var(--ink); font-size: 22px; }
+.score-line b, .ring b { font-family: var(--titre); color: var(--ink); letter-spacing: -.04em; }
+.mock-logo, .mock-title, .mock-lead-name, .mock-match-title { font-family: var(--sans); font-weight: 700; letter-spacing: -.01em; }
+.mock-logo { font-family: var(--logo-font); font-weight: 500; letter-spacing: 0; }
+
+/* Rouge d'alerte / bandeaux « à compléter » restent lisibles mais froids */
+.dd-retour.dd-erreur { color: #8E1F1F; }
+
+/* --- Corrections après rendu --- */
+.pub h1 em, .pub h2 em, .pub h3 em, .hero h1 em, .lp-copy h1 em, .lp-merci h1 em {
+    background-image: linear-gradient(transparent 58%, var(--laiton) 58% 90%, transparent 90%);
+    background-size: 100% 100%; background-repeat: no-repeat; background-position: 0 0; padding-bottom: 0;
+    -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+.deep h2 em, .final-card h2 em { background-image: none; }
+.hero::after { display: none; }
+.lp-copy h1, .lp-merci h1 { font-size: clamp(30px, 3.5vw, 46px); line-height: 1.12; letter-spacing: -.045em; }
+.lp-carte h2 { font-size: clamp(22px, 2.2vw, 28px); line-height: 1.12; }
+.pub p a:not(.btn), .pub li a:not(.btn), .pub dd a:not(.btn) { color: var(--ink); font-weight: 600; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; text-decoration-color: var(--ink); }
+.pub p a:not(.btn):hover, .pub li a:not(.btn):hover { background: var(--laiton); text-decoration-color: var(--ink); }
+.price-card:hover { transform: none; box-shadow: none; border-color: var(--ink); }
+.price-card.featured .price-feats svg { color: var(--laiton); }
+.price-card.featured .price-feats li { color: var(--on-deep); }
+.price-card.featured .price-tagline, .price-card.featured .price-annual, .price-card.featured .price-annual span, .price-card.featured .price-cta-note, .price-card.featured .price-amount .period { color: var(--on-deep-muted); }
+.price-card.featured .price-title-link { color: var(--on-deep); }
+.price-badge { background: var(--laiton); color: var(--ink); border: 0; font-family: var(--sans); font-weight: 800; }
+.hero h1 em, .lp-copy h1 em, .lp-merci h1 em { animation: none !important; background-size: 100% 100% !important; }
+.pub .toc li a:not(.btn), .pub .site-footer a:not(.btn), .pub .site-nav a:not(.btn), .pub .foot-col li a:not(.btn) { font-weight: inherit; text-decoration: none; }
+.pub .toc li a:not(.btn) { font-weight: 500; color: var(--ink-2); }
+.pub .toc li a:not(.btn):hover { background: var(--laiton); color: var(--ink); }
+.price-card.featured .price-badge { color: var(--ink); }
