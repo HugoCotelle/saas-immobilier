@@ -807,3 +807,4 @@ html:not(.anim) .fp-go{--y:-117px}html:not(.anim) .fp-jaune{--y:-39px}html:not(.
 .heros h1 em{letter-spacing:-.025em}
 .c-sc small{font-size:12px}
 .heros h1 em{font-size:.5em;white-space:nowrap;width:fit-content;max-width:100%;padding:0 .06em}
+.final-carte h2 em,.ch-sombre h2 em{color:var(--laiton);background:none;padding:0;margin:0}
