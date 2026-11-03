@@ -1,0 +1,1546 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZELYRO - Mon compte</title>
+    <meta name="robots" content="noindex">
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="zelyro.css">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <script src="/pwa.js" defer></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+        const VIDE = { actuel: '', nouveau: '', confirmation: '' };
+
+        function App() {
+            const [user, setUser] = useState(null);
+            const [form, setForm] = useState(VIDE);
+            const [saving, setSaving] = useState(false);
+            const [message, setMessage] = useState(null);
+            const [alertes, setAlertes] = useState(null);      // null tant que non chargé
+            const [messageAlertes, setMessageAlertes] = useState(null);
+            const [matin, setMatin] = useState(null);          // e-mail du matin : null tant que non chargé
+            const [messageMatin, setMessageMatin] = useState(null);
+            const [rapport, setRapport] = useState(null);        // rapport du lundi : null tant que non chargé
+            const [messageRapport, setMessageRapport] = useState(null);
+            const [rapportEnCours, setRapportEnCours] = useState(false);
+            const [ia, setIa] = useState(null);                 // analyse par IA : null tant que non chargé
+            const [messageIa, setMessageIa] = useState(null);
+            const [apercuEnCours, setApercuEnCours] = useState(false);
+            const [notif, setNotif] = useState(null);           // { permission, abonne } ; null tant que non lu
+            const [messageNotif, setMessageNotif] = useState(null);
+            const [notifOccupe, setNotifOccupe] = useState(false);
+            const [installable, setInstallable] = useState(false);
+            const [lien, setLien] = useState(null);
+            const [rdv, setRdv] = useState(null);              // disponibilités : null tant que non chargées
+            const [messageRdv, setMessageRdv] = useState(null);
+            const [rdvEnCours, setRdvEnCours] = useState(false);
+            const [messageLien, setMessageLien] = useState(null);
+            const [confirmerLien, setConfirmerLien] = useState(false);
+            const [forfait, setForfait] = useState(null);
+            const [gmailStatus, setGmailStatus] = useState(null);
+            const [messageGmail, setMessageGmail] = useState(null);
+            const [connectingGmail, setConnectingGmail] = useState(false);
+            const [syncingGmail, setSyncingGmail] = useState(false);
+            const [confirmerDeconnexionGmail, setConfirmerDeconnexionGmail] = useState(false);
+            const [team, setTeam] = useState(null);
+            const [messageTeam, setMessageTeam] = useState(null);
+            const [inviteEmail, setInviteEmail] = useState('');
+            const [inviting, setInviting] = useState(false);
+            const [confirmerRetrait, setConfirmerRetrait] = useState(null);
+            const [busyTeamId, setBusyTeamId] = useState(null);
+            const [billing, setBilling] = useState(null);
+            const [messageBilling, setMessageBilling] = useState(null);
+            const [busyBilling, setBusyBilling] = useState(false);
+            const [choixPlan, setChoixPlan] = useState('agence');
+            const [choixFormule, setChoixFormule] = useState('mensuel');
+            const [sieges, setSieges] = useState(0);
+            const [journal, setJournal] = useState(null);           // journal de réception : null tant que non chargé
+            const [messageJournal, setMessageJournal] = useState(null);
+            const [ongletRedir, setOngletRedir] = useState('gmail');   // guide de redirection : gmail, outlook, informatique, portail
+            const [testIA, setTestIA] = useState(null);                // résultat du test de lecture automatique
+            const [occupeTestIA, setOccupeTestIA] = useState(false);
+            const [cles, setCles] = useState(null);                 // clés d'API (administrateur seulement)
+            const [messageCles, setMessageCles] = useState(null);
+            const [nomCle, setNomCle] = useState('');
+            const [nouvelleCle, setNouvelleCle] = useState(null);   // la clé qui vient d'être créée, montrée une seule fois
+            const [confirmerCle, setConfirmerCle] = useState(null);
+            const [occupeCles, setOccupeCles] = useState(false);
+
+            const appel = async (chemin, options = {}) => {
+                const r = await fetch(`${API_URL}${chemin}`, {
+                    ...options,
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                });
+                if (r.status === 401) { handleLogout(); throw new Error('Session expirée'); }
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(data.message || `Erreur ${r.status}`);
+                return data;
+            };
+
+            useEffect(() => {
+                if (!localStorage.getItem('token')) {
+                    window.location.replace('/login.html');
+                    return;
+                }
+                const userData = localStorage.getItem('user');
+                if (userData) setUser(JSON.parse(userData));
+                appel('/auth/profile').then((p) => {
+                    setAlertes(p.alerts_enabled !== false);
+                    setMatin(p.digest_enabled !== false);
+                    setRapport(p.rapport_hebdo_enabled !== false);
+                    setIa(p.ia_enabled === true);
+                    // Met à jour ce que le navigateur sait du compte (forfait, rôle, droits d'administration).
+                    try {
+                        const u = JSON.parse(localStorage.getItem('user') || '{}');
+                        const maj = { ...u, plan: p.plan, role: p.role, is_admin: p.is_admin === true };
+                        localStorage.setItem('user', JSON.stringify(maj));
+                        setUser(maj);
+                        if (p.role === 'admin') { chargerEquipe(); chargerCles(); }
+                    } catch (e) { /* sans importance */ }
+                }).catch(() => {});
+                appel('/api/v1/plan').then(setForfait).catch(() => {});
+                appel('/api/v1/rdv/reglages').then(setRdv).catch((e) => setMessageRdv({ type: 'error', text: e.message }));
+                const pwa = window.zelyroPwa;
+                if (pwa) {
+                    pwa.etat().then(setNotif);
+                    // Le navigateur propose l'installation un peu après le chargement de la page.
+                    setTimeout(() => setInstallable(pwa.installable()), 1500);
+                }
+                appel('/api/v1/capture-link').then(setLien).catch((e) => setMessageLien({ type: 'error', text: e.message }));
+                appel('/api/v1/gmail/status').then(setGmailStatus).catch((e) => setMessageGmail({ type: 'error', text: e.message }));
+                chargerJournal();
+                chargerFacturation();
+
+                // Stripe renvoie ici après la page de paiement : ?abonnement=ok|annule. Le forfait
+                // change dès que Stripe a prévenu Zelyro (quelques secondes) : on revérifie un instant.
+                const retourPaiement = new URLSearchParams(window.location.search).get('abonnement');
+                if (retourPaiement === 'ok') {
+                    setMessageBilling({ type: 'success', text: 'Merci ! Votre paiement est en cours de confirmation, cette page se met à jour dans un instant.' });
+                    let essais = 0;
+                    const guette = setInterval(() => {
+                        essais += 1;
+                        chargerFacturation().then((b) => {
+                            if ((b && b.subscription) || essais >= 10) {
+                                clearInterval(guette);
+                                appel('/api/v1/plan').then(setForfait).catch(() => {});
+                                if (b && b.subscription) setMessageBilling({ type: 'success', text: 'Votre abonnement est actif. Merci !' });
+                            }
+                        });
+                    }, 2000);
+                } else if (retourPaiement === 'annule') {
+                    setMessageBilling({ type: 'info', text: 'Paiement annulé : rien n\'a été débité.' });
+                }
+                if (retourPaiement) window.history.replaceState({}, '', window.location.pathname);
+
+                // Google renvoie ici le navigateur après le consentement (ou son refus) :
+                // ?gmail=connecte|refuse|erreur. On affiche le message une fois puis on
+                // nettoie l'URL, pour ne pas le rejouer si la page est rechargée.
+                const parametresGmail = new URLSearchParams(window.location.search);
+                const resultatGmail = parametresGmail.get('gmail');
+                // Retour de Google réussi : le serveur n'a encore rien enregistré. Le jeton en attente est
+                // dans le # de l'adresse ; on le renvoie avec notre session, ce qui prouve qu'il s'agit
+                // bien de l'agence qui a demandé la liaison.
+                const enAttenteGmail = resultatGmail === 'confirmer'
+                    ? new URLSearchParams(window.location.hash.replace(/^#/, '')).get('p') : null;
+                if (resultatGmail === 'confirmer') {
+                    if (enAttenteGmail) {
+                        appel('/api/v1/gmail/finish', { method: 'POST', body: JSON.stringify({ pending: enAttenteGmail }) })
+                            .then(() => {
+                                setMessageGmail({ type: 'success', text: 'Boîte Gmail connectée : Zelyro va maintenant y détecter automatiquement les notifications LeBonCoin et SeLoger.' });
+                                return appel('/api/v1/gmail/status').then(setGmailStatus);
+                            })
+                            .catch((e) => setMessageGmail({ type: 'error', text: e.message }));
+                    } else {
+                        setMessageGmail({ type: 'error', text: 'La connexion à Gmail a échoué. Réessayez, ou contactez-nous si le problème persiste.' });
+                    }
+                    window.history.replaceState({}, '', window.location.pathname);
+                } else if (resultatGmail) {
+                    if (resultatGmail === 'connecte') {
+                        setMessageGmail({ type: 'success', text: 'Boîte Gmail connectée : Zelyro va maintenant y détecter automatiquement les notifications LeBonCoin et SeLoger.' });
+                    } else if (resultatGmail === 'refuse') {
+                        setMessageGmail({ type: 'error', text: 'Connexion annulée : l\'autorisation n\'a pas été accordée.' });
+                    } else {
+                        setMessageGmail({ type: 'error', text: 'La connexion à Gmail a échoué. Réessayez, ou contactez-nous si le problème persiste.' });
+                    }
+                    window.history.replaceState({}, '', window.location.pathname);
+                }
+            }, []);
+
+            const PRIX_HT = {
+                essentiel: { mensuel: 29, engage: 27.55, annuel: 313.2 },
+                agence: { mensuel: 49, engage: 46.55, annuel: 529.2 },
+                reseau: { mensuel: 79, engage: 75.05, annuel: 853.2 },
+            };
+            const NOMS_PLAN = { essentiel: 'Essentiel', agence: 'Agence', reseau: 'Réseau' };
+            const NOMS_FORMULE = {
+                mensuel: 'Mensuel, sans engagement',
+                engage: 'Mensuel, engagement 12 mois (-5 %)',
+                annuel: 'Annuel prépayé (-10 %)',
+            };
+            const eur = (n) => n.toLocaleString('fr-FR', { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 }) + ' €';
+            const prixLigne = (plan, formule) => formule === 'annuel'
+                ? `${eur(PRIX_HT[plan][formule])} HT / an` : `${eur(PRIX_HT[plan][formule])} HT / mois`;
+            const dateFr = (iso) => iso ? new Date(iso).toLocaleDateString('fr-FR') : '—';
+            const STATUTS_ABO = { active: 'Actif', trialing: 'Essai', past_due: 'Paiement en échec', unpaid: 'Impayé', canceled: 'Résilié' };
+
+            const chargerFacturation = () => appel('/api/v1/billing').then((b) => {
+                setBilling(b);
+                setSieges(b.extra_seats || 0);
+                return b;
+            }).catch(() => null);
+
+            const actionFacturation = async (fonction) => {
+                setBusyBilling(true);
+                setMessageBilling(null);
+                try { await fonction(); }
+                catch (e) { setMessageBilling({ type: 'error', text: e.message }); }
+                finally { setBusyBilling(false); }
+            };
+            const souscrire = () => actionFacturation(async () => {
+                const d = await appel('/api/v1/billing/checkout', { method: 'POST', body: JSON.stringify({ plan: choixPlan, formule: choixFormule }) });
+                window.location.href = d.url;
+            });
+            const ouvrirPortail = () => actionFacturation(async () => {
+                const d = await appel('/api/v1/billing/portal', { method: 'POST' });
+                window.location.href = d.url;
+            });
+            const majSieges = () => actionFacturation(async () => {
+                const d = await appel('/api/v1/billing/seats', { method: 'POST', body: JSON.stringify({ quantity: Number(sieges) }) });
+                await chargerFacturation();
+                setMessageBilling({ type: 'success', text: d.cancel_at_period_end
+                    ? 'Les comptes supplémentaires s\'arrêteront à la fin de la période en cours.'
+                    : 'Comptes supplémentaires mis à jour.' });
+            });
+
+            const changerAlertes = async (valeur) => {
+                setAlertes(valeur);
+                setMessageAlertes(null);
+                try {
+                    await appel('/auth/preferences', { method: 'PUT', body: JSON.stringify({ alerts_enabled: valeur }) });
+                    setMessageAlertes({ type: 'success', text: valeur ? 'Alertes activées.' : 'Alertes désactivées.' });
+                } catch (e) {
+                    setAlertes(!valeur);
+                    setMessageAlertes({ type: 'error', text: e.message });
+                }
+            };
+
+            const changerIa = async (valeur) => {
+                setIa(valeur);
+                setMessageIa(null);
+                try {
+                    await appel('/auth/preferences', { method: 'PUT', body: JSON.stringify({ ia_enabled: valeur }) });
+                    setMessageIa({ type: 'success', text: valeur ? 'Analyse par IA activée.' : 'Analyse par IA désactivée : plus aucun message n\'est transmis.' });
+                } catch (e) {
+                    setIa(!valeur);
+                    setMessageIa({ type: 'error', text: e.message });
+                }
+            };
+
+            const changerRapport = async (valeur) => {
+                setRapport(valeur);
+                setMessageRapport(null);
+                try {
+                    await appel('/auth/preferences', { method: 'PUT', body: JSON.stringify({ rapport_hebdo_enabled: valeur }) });
+                    setMessageRapport({ type: 'success', text: valeur ? 'Rapport du lundi activé.' : 'Rapport du lundi désactivé.' });
+                } catch (e) {
+                    setRapport(!valeur);
+                    setMessageRapport({ type: 'error', text: e.message });
+                }
+            };
+
+            const recevoirRapport = async () => {
+                setRapportEnCours(true);
+                setMessageRapport(null);
+                try {
+                    const d = await appel('/api/v1/rapport-hebdo/preview', { method: 'POST' });
+                    setMessageRapport({ type: d.sent ? 'success' : 'info', text: d.message });
+                } catch (e) {
+                    setMessageRapport({ type: 'error', text: e.message });
+                } finally {
+                    setRapportEnCours(false);
+                }
+            };
+
+            const changerMatin = async (valeur) => {
+                setMatin(valeur);
+                setMessageMatin(null);
+                try {
+                    await appel('/auth/preferences', { method: 'PUT', body: JSON.stringify({ digest_enabled: valeur }) });
+                    setMessageMatin({ type: 'success', text: valeur ? 'E-mail du matin activé.' : 'E-mail du matin désactivé.' });
+                } catch (e) {
+                    setMatin(!valeur);
+                    setMessageMatin({ type: 'error', text: e.message });
+                }
+            };
+
+            // Planning de rendez-vous : les modifications restent dans la page jusqu'à « Enregistrer ».
+            const JOURS_RDV = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+            const majRdv = (cle, valeur) => { setMessageRdv(null); setRdv((r) => ({ ...r, [cle]: valeur })); };
+            const majPlage = (i, cle, valeur) => { setMessageRdv(null); setRdv((r) => ({ ...r, plages: r.plages.map((p, k) => k === i ? { ...p, [cle]: valeur } : p) })); };
+            const ajouterPlage = (jour) => { setMessageRdv(null); setRdv((r) => ({ ...r, plages: [...r.plages, { jour, debut: '09:00', fin: '12:00' }] })); };
+            const retirerPlage = (i) => { setMessageRdv(null); setRdv((r) => ({ ...r, plages: r.plages.filter((_, k) => k !== i) })); };
+            const plagesTypes = () => {
+                setMessageRdv(null);
+                const plages = [];
+                for (let j = 0; j < 5; j++) {
+                    plages.push({ jour: j, debut: '09:00', fin: '12:00' }, { jour: j, debut: '14:00', fin: '18:00' });
+                }
+                setRdv((r) => ({ ...r, plages }));
+            };
+            const enregistrerRdv = async () => {
+                setRdvEnCours(true);
+                setMessageRdv(null);
+                try {
+                    const plages = rdv.plages.filter((p) => p.debut && p.fin);
+                    const maj = await appel('/api/v1/rdv/reglages', { method: 'PUT', body: JSON.stringify({ ...rdv, plages }) });
+                    setRdv(maj);
+                    setMessageRdv({ type: 'success', text: maj.plages.length
+                        ? 'Planning enregistré. Vos prospects verront ces créneaux quand ils demanderont une visite.'
+                        : 'Planning enregistré, mais aucune plage n\'est définie : aucun créneau ne sera proposé.' });
+                } catch (e) {
+                    setMessageRdv({ type: 'error', text: e.message });
+                } finally {
+                    setRdvEnCours(false);
+                }
+            };
+            const optionsAvec = (base, courante) => [...new Set([...base, courante])].sort((a, b) => a - b);
+
+            const pwa = window.zelyroPwa;
+            const actionNotif = async (fonction, succes) => {
+                setNotifOccupe(true);
+                setMessageNotif(null);
+                try {
+                    const r = await fonction();
+                    setNotif(await pwa.etat());
+                    if (succes) setMessageNotif({ type: 'success', text: typeof succes === 'function' ? succes(r) : succes });
+                } catch (e) {
+                    setNotif(await pwa.etat());
+                    setMessageNotif({ type: 'error', text: e.message });
+                } finally {
+                    setNotifOccupe(false);
+                }
+            };
+            const activerNotif = () => actionNotif(() => pwa.activer(), 'Notifications activées sur cet appareil.');
+            const couperNotif = () => actionNotif(() => pwa.desactiver(), 'Notifications désactivées sur cet appareil.');
+            const essaiNotif = () => actionNotif(() => pwa.essai(), (r) => r.message);
+            const installerAppli = async () => {
+                const ok = await pwa.installer();
+                setInstallable(false);
+                if (ok) setMessageNotif({ type: 'success', text: 'Application installée.' });
+            };
+
+            const recevoirApercu = async () => {
+                setApercuEnCours(true);
+                setMessageMatin(null);
+                try {
+                    const d = await appel('/api/v1/digest/preview', { method: 'POST' });
+                    setMessageMatin({ type: d.sent ? 'success' : 'info', text: d.message });
+                } catch (e) {
+                    setMessageMatin({ type: 'error', text: e.message });
+                } finally {
+                    setApercuEnCours(false);
+                }
+            };
+
+            const copier = async () => {
+                try {
+                    await navigator.clipboard.writeText(lien.url);
+                    setMessageLien({ type: 'success', text: 'Adresse copiée.' });
+                } catch (e) {
+                    document.getElementById('champ-lien').select();
+                    setMessageLien({ type: 'error', text: 'Copie automatique impossible : l\'adresse est sélectionnée, copiez-la avec Ctrl+C.' });
+                }
+            };
+
+            const nouveauLien = async () => {
+                setConfirmerLien(false);
+                try {
+                    setLien(await appel('/api/v1/capture-link/regenerate', { method: 'POST' }));
+                    setMessageLien({ type: 'success', text: 'Nouvelle adresse créée. L\'ancienne ne fonctionne plus.' });
+                } catch (e) {
+                    setMessageLien({ type: 'error', text: e.message });
+                }
+            };
+
+            const chargerJournal = async () => {
+                try {
+                    setJournal(await appel('/api/v1/reception/journal'));
+                    setMessageJournal(null);
+                } catch (e) {
+                    setMessageJournal({ type: 'error', text: e.message });
+                }
+            };
+
+            // « Ce n'est pas du spam » : l'agence récupère un message écarté par le filtre (conservé 30 jours).
+            const pasSpam = async (id) => {
+                try {
+                    const r = await appel(`/api/v1/reception/messages/${id}/not-spam`, { method: 'POST' });
+                    setMessageJournal(r.created
+                        ? { type: 'success', text: 'Message récupéré : le prospect a été créé.' }
+                        : { type: 'error', text: r.message || 'Le prospect n\'a pas pu être créé.' });
+                    const j = await appel('/api/v1/reception/journal');
+                    setJournal(j);
+                } catch (e) {
+                    setMessageJournal({ type: 'error', text: e.message });
+                }
+            };
+
+            // Le journal se rafraîchit seul pendant que la page est ouverte : le code de
+            // confirmation Gmail et le premier message de test y apparaissent sans clic.
+            useEffect(() => {
+                const minuteur = setInterval(() => {
+                    if (!document.hidden) appel('/api/v1/reception/journal').then(setJournal).catch(() => {});
+                }, 20000);
+                return () => clearInterval(minuteur);
+            }, []);
+
+            const lancerTestIA = async () => {
+                setOccupeTestIA(true);
+                setTestIA(null);
+                try {
+                    setTestIA(await appel('/api/v1/reception/test-analyse', { method: 'POST' }));
+                } catch (e) {
+                    setTestIA({ ok: false, message: e.message });
+                }
+                setOccupeTestIA(false);
+            };
+
+            // Fichier que Gmail sait importer (Paramètres > Filtres et adresses bloquées > Importer des filtres) :
+            // il crée d'un coup le filtre qui transfère les messages de SeLoger et LeBonCoin.
+            // Ce que le filtre transfère : les messages des portails (expéditeur) ET ceux dont l'objet parle d'une demande,
+            // sauf les alertes « nouvelles annonces » qui ne sont pas des demandes de contact.
+            const RECHERCHE_FILTRE_GMAIL =
+                '(from:(seloger.com OR seloger.fr OR leboncoin.fr OR leboncoin.com) OR '
+                + 'subject:(seloger OR leboncoin OR "demande de visite" OR "demande de contact" OR "demande de renseignements" '
+                + 'OR "nouveau contact" OR "votre annonce")) '
+                + '-subject:(alerte OR "nouvelles annonces" OR "correspondant à vos critères" OR "nouveau prospect" '
+                + 'OR "précisez votre recherche") -from:zelyro.fr';
+            const echapperXml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+            const telechargerFiltreGmail = () => {
+                const xml = "<?xml version='1.0' encoding='UTF-8'?>\n"
+                    + "<feed xmlns='http://www.w3.org/2005/Atom' xmlns:apps='http://schemas.google.com/apps/2006'>\n"
+                    + "\t<title>Mail Filters</title>\n\t<entry>\n\t\t<category term='filter'></category>\n"
+                    + "\t\t<title>Zelyro : prospects LeBonCoin, SeLoger et demandes de visite</title>\n"
+                    + "\t\t<apps:property name='hasTheWord' value='" + echapperXml(RECHERCHE_FILTRE_GMAIL) + "'/>\n"
+                    + "\t\t<apps:property name='forwardTo' value='" + echapperXml(journal.address) + "'/>\n"
+                    + "\t</entry>\n</feed>\n";
+                const lienFichier = document.createElement('a');
+                lienFichier.href = URL.createObjectURL(new Blob([xml], { type: 'application/xml' }));
+                lienFichier.download = 'filtre-zelyro.xml';
+                document.body.appendChild(lienFichier);
+                lienFichier.click();
+                lienFichier.remove();
+                setTimeout(() => URL.revokeObjectURL(lienFichier.href), 1000);
+            };
+
+            const messageInformatique = (adresse) =>
+                "Bonjour,\n\n"
+                + "Pourriez-vous mettre en place sur la messagerie de l'agence une règle de transfert automatique : "
+                + "tous les messages dont l'expéditeur contient « seloger.com » ou « leboncoin.fr » doivent être "
+                + "transférés en copie (sans les retirer de la boîte de réception) à l'adresse suivante :\n\n"
+                + adresse + "\n\n"
+                + "Il s'agit des notifications de demandes de contact reçues via nos annonces ; elles alimentent notre outil Zelyro.\n\n"
+                + "Merci d'avance.";
+
+            const copierTexte = async (texte, definirMessage, confirmation, idChamp) => {
+                try {
+                    await navigator.clipboard.writeText(texte);
+                    definirMessage({ type: 'success', text: confirmation });
+                } catch (e) {
+                    const champ = document.getElementById(idChamp);
+                    if (champ) champ.select();
+                    definirMessage({ type: 'error', text: 'Copie automatique impossible : le texte est sélectionné, copiez-le avec Ctrl+C.' });
+                }
+            };
+
+            const chargerCles = async () => {
+                try {
+                    setCles(await appel('/api/v1/api-keys'));
+                } catch (e) {
+                    setMessageCles({ type: 'error', text: e.message });
+                }
+            };
+
+            const creerCle = async () => {
+                setOccupeCles(true);
+                setMessageCles(null);
+                try {
+                    const r = await appel('/api/v1/api-keys', { method: 'POST', body: JSON.stringify({ name: nomCle }) });
+                    setNouvelleCle(r);
+                    setNomCle('');
+                    await chargerCles();
+                } catch (e) {
+                    setMessageCles({ type: 'error', text: e.message });
+                } finally {
+                    setOccupeCles(false);
+                }
+            };
+
+            const supprimerCle = async (id) => {
+                setConfirmerCle(null);
+                try {
+                    await appel(`/api/v1/api-keys/${id}`, { method: 'DELETE' });
+                    setMessageCles({ type: 'success', text: 'Clé supprimée : elle ne fonctionne plus.' });
+                    setNouvelleCle(null);
+                    await chargerCles();
+                } catch (e) {
+                    setMessageCles({ type: 'error', text: e.message });
+                }
+            };
+
+            const connecterGmail = async () => {
+                setConnectingGmail(true);
+                setMessageGmail(null);
+                try {
+                    const { url } = await appel('/api/v1/gmail/connect');
+                    window.location.href = url;
+                } catch (e) {
+                    setMessageGmail({ type: 'error', text: e.message });
+                    setConnectingGmail(false);
+                }
+            };
+
+            const synchroniserGmail = async () => {
+                setSyncingGmail(true);
+                try {
+                    const r = await appel('/api/v1/gmail/sync', { method: 'POST' });
+                    setMessageGmail({ type: 'success', text: r.message });
+                    setGmailStatus(await appel('/api/v1/gmail/status'));
+                } catch (e) {
+                    setMessageGmail({ type: 'error', text: e.message });
+                } finally {
+                    setSyncingGmail(false);
+                }
+            };
+
+            const deconnecterGmail = async () => {
+                setConfirmerDeconnexionGmail(false);
+                try {
+                    await appel('/api/v1/gmail/disconnect', { method: 'POST' });
+                    setGmailStatus({ connected: false });
+                    setMessageGmail({ type: 'success', text: 'Boîte Gmail déconnectée.' });
+                } catch (e) {
+                    setMessageGmail({ type: 'error', text: e.message });
+                }
+            };
+
+            const chargerEquipe = async () => {
+                try {
+                    setTeam(await appel('/api/v1/team'));
+                } catch (e) {
+                    setMessageTeam({ type: 'error', text: e.message });
+                }
+            };
+
+            const inviterCollaborateur = async (e) => {
+                e.preventDefault();
+                setMessageTeam(null);
+                setInviting(true);
+                try {
+                    const r = await appel('/api/v1/team/invite', { method: 'POST', body: JSON.stringify({ email: inviteEmail.trim() }) });
+                    setMessageTeam({ type: 'success', text: r.message });
+                    setInviteEmail('');
+                    await chargerEquipe();
+                } catch (e) {
+                    setMessageTeam({ type: 'error', text: e.message });
+                } finally {
+                    setInviting(false);
+                }
+            };
+
+            const retirerCollaborateur = async (id) => {
+                setConfirmerRetrait(null);
+                setBusyTeamId(id);
+                try {
+                    await appel(`/api/v1/team/${id}`, { method: 'DELETE' });
+                    await chargerEquipe();
+                } catch (e) {
+                    setMessageTeam({ type: 'error', text: e.message });
+                } finally {
+                    setBusyTeamId(null);
+                }
+            };
+
+            const reactiverCollaborateur = async (id) => {
+                setBusyTeamId(id);
+                try {
+                    await appel(`/api/v1/team/${id}/reactivate`, { method: 'PUT' });
+                    await chargerEquipe();
+                } catch (e) {
+                    setMessageTeam({ type: 'error', text: e.message });
+                } finally {
+                    setBusyTeamId(null);
+                }
+            };
+
+            const handleLogout = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.replace('/login.html');
+            };
+
+            const set = (k, v) => { setForm({ ...form, [k]: v }); setMessage(null); };
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setMessage(null);
+                if (form.nouveau.length < 10) {
+                    setMessage({ type: 'error', text: 'Le nouveau mot de passe doit contenir au moins 10 caractères' });
+                    return;
+                }
+                if (form.nouveau !== form.confirmation) {
+                    setMessage({ type: 'error', text: 'Les nouveaux mots de passe ne correspondent pas' });
+                    return;
+                }
+                setSaving(true);
+                try {
+                    const response = await fetch(`${API_URL}/auth/change-password`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        },
+                        body: JSON.stringify({ current_password: form.actuel, new_password: form.nouveau })
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (response.ok) {
+                        // Les autres appareils sont déconnectés ; celui-ci reçoit un jeton neuf.
+                        localStorage.setItem('token', data.token);
+                        setForm(VIDE);
+                        setMessage({ type: 'success', text: 'Mot de passe modifié. Les autres appareils connectés ont été déconnectés.' });
+                    } else if (response.status === 401) {
+                        handleLogout();
+                    } else if (response.status === 429) {
+                        setMessage({ type: 'error', text: 'Trop de tentatives. Réessayez dans quelques minutes.' });
+                    } else {
+                        setMessage({ type: 'error', text: data.message || 'Modification impossible' });
+                    }
+                } catch (error) {
+                    setMessage({ type: 'error', text: 'Serveur injoignable : ' + error.message });
+                } finally {
+                    setSaving(false);
+                }
+            };
+
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style={{ color: 'inherit', textDecoration: 'none' }}>ZELYRO</a></div>
+                            <nav>
+                                <a href="/taches.html">À faire</a>
+                                <a href="/prospects.html">Leads</a>
+                                <a href="/biens.html">Biens</a>
+                                <a href="/matching.html">Matching</a>
+                                <a href="/propositions.html">Propositions</a>
+                                <a href="/dashboard.html">Dashboard</a>
+                                <a href="/compte.html" className="active">Compte</a>
+                                {user && user.is_admin && <a href="/admin.html">Admin</a>}
+                            </nav>
+                            <div className="user-info">
+                                {user && <span className="user-email">{user.email}</span>}
+                                <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="container">
+                        <div className="titre-ligne">
+                            <div>
+                                <h1 className="page-title">Mon compte</h1>
+                                <p className="page-subtitle">Vos informations et l'accès à votre espace.</p>
+                            </div>
+                        </div>
+
+                        <div className="account-grid">
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Informations</h2>
+                                </div>
+                                <dl className="info-list">
+                                    <dt>Email</dt>
+                                    <dd>{user ? user.email : '…'}</dd>
+                                    {user && user.first_name && (<><dt>Prénom</dt><dd>{user.first_name}</dd></>)}
+                                    {user && user.company_name && (<><dt>Agence</dt><dd>{user.company_name}</dd></>)}
+                                    {user && user.role && (
+                                        <><dt>Rôle</dt><dd>{user.role === 'admin' ? "Administrateur de l'agence" : 'Collaborateur'}</dd></>
+                                    )}
+                                </dl>
+                            </div>
+
+                            {forfait && (
+                                <div className="panel">
+                                    <div className="panel-header">
+                                        <h2 className="panel-title">Mon forfait</h2>
+                                        <span className="pastille">{forfait.plan.label}</span>
+                                    </div>
+                                    <p className="panel-note">
+                                        Ce que votre forfait autorise, et ce que vous avez déjà utilisé. Les compteurs mensuels
+                                        repartent à zéro le 1er de chaque mois. Pour changer de forfait, écrivez à{' '}
+                                        <a href="mailto:contact@zelyro.fr?subject=Changement%20de%20forfait%20Zelyro" style={{ color: 'var(--sage-700)' }}>contact@zelyro.fr</a>.
+                                    </p>
+                                    {[['leads', 'Prospects'], ['properties', 'Biens'], ['mails', 'E-mails envoyés ce mois-ci'], ['extractions', 'Extractions IA ce mois-ci']].map(([k, libelle]) => {
+                                        const n = forfait.usage[k], max = forfait.limits[k];
+                                        const ratio = max ? n / max : 0;
+                                        return (
+                                            <div key={k} className="forfait-ligne">
+                                                <div className="forfait-libelle">
+                                                    <span>{libelle}</span>
+                                                    <span className="forfait-chiffres">{n.toLocaleString('fr-FR')} / {max == null ? 'illimité' : max.toLocaleString('fr-FR')}</span>
+                                                </div>
+                                                {max != null && max > 0 && (
+                                                    <div className="usage-piste">
+                                                        <div className={`usage-barre ${ratio >= 1 ? 'plein' : ratio >= 0.8 ? 'proche' : ''}`}
+                                                            style={{ width: Math.min(100, ratio * 100) + '%' }}></div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+
+                            {billing && billing.configured && billing.can_manage && (
+                                <div className="panel">
+                                    <div className="panel-header">
+                                        <h2 className="panel-title">Abonnement</h2>
+                                        {billing.subscription && (
+                                            <span className={`pastille ${['active', 'trialing'].includes(billing.subscription.status) ? '' : 'off'}`}>
+                                                {STATUTS_ABO[billing.subscription.status] || billing.subscription.status}
+                                            </span>
+                                        )}
+                                    </div>
+                                    {messageBilling && (
+                                        <div className={messageBilling.type === 'error' ? 'error' : messageBilling.type === 'info' ? 'info-box' : 'success'}>{messageBilling.text}</div>
+                                    )}
+                                    {!billing.subscription ? (
+                                        <>
+                                            <p className="panel-note">
+                                                Choisissez votre forfait et votre formule. Le paiement se fait sur une page sécurisée
+                                                de Stripe, par carte bancaire ou par prélèvement SEPA. Zelyro ne conserve ni numéro
+                                                de carte ni IBAN. Prix hors taxes.
+                                            </p>
+                                            <div className="form-group">
+                                                <label>Forfait</label>
+                                                <select value={choixPlan} onChange={(e) => setChoixPlan(e.target.value)} disabled={busyBilling}>
+                                                    {Object.keys(NOMS_PLAN).map((p) => (
+                                                        <option key={p} value={p}>{NOMS_PLAN[p]} : à partir de {eur(PRIX_HT[p].mensuel)} HT / mois</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div className="form-group">
+                                                <label>Formule</label>
+                                                <select value={choixFormule} onChange={(e) => setChoixFormule(e.target.value)} disabled={busyBilling}>
+                                                    {Object.keys(NOMS_FORMULE).map((f) => (
+                                                        <option key={f} value={f}>{NOMS_FORMULE[f]}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <p className="panel-note">
+                                                {NOMS_PLAN[choixPlan]}, {NOMS_FORMULE[choixFormule].toLowerCase()} : {prixLigne(choixPlan, choixFormule)}.
+                                            </p>
+                                            <button className="btn" onClick={souscrire} disabled={busyBilling}>
+                                                {busyBilling ? 'Ouverture…' : 'Souscrire'}
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <dl className="info-list">
+                                                <dt>Forfait</dt><dd>{NOMS_PLAN[billing.subscription.plan] || billing.subscription.plan}</dd>
+                                                <dt>Formule</dt><dd>{NOMS_FORMULE[billing.subscription.formule] || '—'}</dd>
+                                                <dt>{billing.subscription.cancel_at_period_end ? 'Se termine le' : 'Prochaine échéance'}</dt>
+                                                <dd>{dateFr(billing.subscription.period_end)}</dd>
+                                                {billing.subscription.commit_end && billing.subscription.formule !== 'mensuel' && (
+                                                    <><dt>Engagement jusqu'au</dt><dd>{dateFr(billing.subscription.commit_end)}</dd></>
+                                                )}
+                                            </dl>
+                                            {billing.subscription.status === 'past_due' && (
+                                                <div className="error">Votre dernier paiement a échoué. Mettez à jour votre moyen de paiement pour éviter une interruption.</div>
+                                            )}
+                                            <p className="panel-note" style={{ marginTop: '14px' }}>
+                                                Changer de carte ou de compte bancaire, télécharger vos factures, ou résilier :
+                                                tout se fait dans votre espace de gestion Stripe. Pour changer de forfait,
+                                                écrivez à <a href="mailto:contact@zelyro.fr?subject=Changement%20de%20forfait%20Zelyro" style={{ color: 'var(--sage-700)' }}>contact@zelyro.fr</a>.
+                                            </p>
+                                            <button className="btn" onClick={ouvrirPortail} disabled={busyBilling}>Gérer mon abonnement</button>
+                                            {['active', 'trialing'].includes(billing.subscription.status) && (
+                                                <div style={{ marginTop: '22px' }}>
+                                                    <p className="panel-note">
+                                                        Comptes utilisateurs en plus de ceux inclus dans votre forfait : {billing.seat_price_ht} € HT par mois
+                                                        et par compte, facturés au prorata dès aujourd'hui.
+                                                    </p>
+                                                    <div className="btn-ligne" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                                                        <div className="form-group" style={{ flex: '0 0 140px', marginBottom: 0 }}>
+                                                            <label>Comptes en plus</label>
+                                                            <input type="number" min="0" max="50" value={sieges}
+                                                                onChange={(e) => setSieges(e.target.value)} disabled={busyBilling} />
+                                                        </div>
+                                                        <button className="btn secondary" onClick={majSieges}
+                                                            disabled={busyBilling || Number(sieges) === (billing.extra_seats || 0)}>Mettre à jour</button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+                            )}
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Changer le mot de passe</h2>
+                                </div>
+                                <p className="panel-note">
+                                    Choisissez un mot de passe d'au moins 10 caractères, que vous n'utilisez nulle part ailleurs.
+                                </p>
+
+                                {message && (
+                                    <div className={message.type === 'error' ? 'error' : 'success'}>
+                                        {message.text}
+                                    </div>
+                                )}
+
+                                <form onSubmit={handleSubmit}>
+                                    <div className="form-group">
+                                        <label>Mot de passe actuel</label>
+                                        <input type="password" value={form.actuel}
+                                            onChange={(e) => set('actuel', e.target.value)}
+                                            autoComplete="current-password" required disabled={saving} />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Nouveau mot de passe</label>
+                                        <input type="password" value={form.nouveau}
+                                            onChange={(e) => set('nouveau', e.target.value)}
+                                            autoComplete="new-password" minLength={10} required disabled={saving} />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Confirmer le nouveau mot de passe</label>
+                                        <input type="password" value={form.confirmation}
+                                            onChange={(e) => set('confirmation', e.target.value)}
+                                            autoComplete="new-password" required disabled={saving} />
+                                    </div>
+                                    <button type="submit" className="btn" disabled={saving}>
+                                        {saving ? 'Enregistrement…' : 'Modifier le mot de passe'}
+                                    </button>
+                                </form>
+                            </div>
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Alertes e-mail</h2>
+                                </div>
+                                <p className="panel-note">
+                                    Recevez un e-mail quand un bien correspond à un prospect (score de 70 sur 100
+                                    ou plus), quand un import ajoute des prospects qui correspondent à vos biens,
+                                    quand un nouveau prospect arrive via votre formulaire de contact ou via
+                                    LeBonCoin/SeLoger, et quand un prospect demande à visiter un bien depuis les annonces
+                                    que vous lui avez envoyées. Une même correspondance n'est signalée qu'une fois.
+                                </p>
+                                {messageAlertes && (
+                                    <div className={messageAlertes.type === 'error' ? 'error' : 'success'}>{messageAlertes.text}</div>
+                                )}
+                                <label className="interrupteur">
+                                    <input type="checkbox" checked={alertes === true} disabled={alertes === null}
+                                        onChange={(e) => changerAlertes(e.target.checked)} />
+                                    <span>Me prévenir par e-mail à l'adresse {user ? user.email : 'de mon compte'}</span>
+                                </label>
+                            </div>
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Analyse des messages par IA</h2>
+                                </div>
+                                <p className="panel-note">
+                                    Quand elle est activée, Zelyro fait lire par une IA (notre sous-traitant Anthropic) le texte
+                                    des e-mails LeBonCoin/SeLoger reçus et des messages que vous collez, pour remplir
+                                    automatiquement la fiche du prospect : nom, coordonnées, budget et critères. Ce texte contient
+                                    les données personnelles du prospect. Désactivée, aucun message n'est transmis et les
+                                    fiches sont créées sans cette lecture. C'est à vous, responsable de traitement, d'en décider.
+                                </p>
+                                {messageIa && (
+                                    <div className={messageIa.type === 'error' ? 'error' : 'success'}>{messageIa.text}</div>
+                                )}
+                                <label className="interrupteur">
+                                    <input type="checkbox" checked={ia === true} disabled={ia === null || (user && user.role === 'employe')}
+                                        onChange={(e) => changerIa(e.target.checked)} />
+                                    <span>Autoriser l'analyse par IA des messages de mes prospects</span>
+                                </label>
+                            </div>
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">E-mail du matin</h2>
+                                </div>
+                                <p className="panel-note">
+                                    Chaque matin, un seul e-mail pour savoir par où commencer : les prospects chauds à
+                                    appeler, les relances du jour, ce que vos prospects ont fait depuis la veille et ceux
+                                    restés sans suite depuis plus de 24 h. Il n'est envoyé que s'il y a quelque chose à traiter.
+                                </p>
+                                {messageMatin && (
+                                    <div className={messageMatin.type === 'error' ? 'error' : messageMatin.type === 'info' ? 'info-box' : 'success'}>{messageMatin.text}</div>
+                                )}
+                                <label className="interrupteur">
+                                    <input type="checkbox" checked={matin === true} disabled={matin === null}
+                                        onChange={(e) => changerMatin(e.target.checked)} />
+                                    <span>Recevoir l'e-mail du matin à l'adresse {user ? user.email : 'de mon compte'}</span>
+                                </label>
+                                <button type="button" className="btn secondary petit" style={{ marginTop: '14px' }}
+                                    disabled={apercuEnCours} onClick={recevoirApercu}>
+                                    {apercuEnCours ? 'Envoi…' : "Recevoir un aperçu maintenant"}
+                                </button>
+                            </div>
+
+                            {user && user.role === 'admin' && (
+                                <div className="panel">
+                                    <div className="panel-header">
+                                        <h2 className="panel-title">Rapport du lundi</h2>
+                                    </div>
+                                    <p className="panel-note">
+                                        Chaque lundi matin, un e-mail récapitule la semaine écoulée : les demandes reçues par
+                                        portail, celles qui sont devenues des prospects, les messages écartés (alertes,
+                                        spam, messages sans coordonnées) et les annonces qui ont attiré le plus de contacts.
+                                        Il n'est envoyé que si l'agence a reçu des demandes.
+                                    </p>
+                                    {messageRapport && (
+                                        <div role={messageRapport.type === 'error' ? 'alert' : 'status'} aria-live="polite" className={messageRapport.type === 'error' ? 'error' : messageRapport.type === 'info' ? 'info-box' : 'success'}>{messageRapport.text}</div>
+                                    )}
+                                    <label className="interrupteur">
+                                        <input type="checkbox" checked={rapport === true} disabled={rapport === null}
+                                            onChange={(e) => changerRapport(e.target.checked)} />
+                                        <span>Recevoir le rapport du lundi à l'adresse {user ? user.email : 'de mon compte'}</span>
+                                    </label>
+                                    <button type="button" className="btn secondary petit" style={{ marginTop: '14px' }}
+                                        disabled={rapportEnCours} onClick={recevoirRapport}>
+                                        {rapportEnCours ? 'Envoi…' : "Recevoir le dernier rapport"}
+                                    </button>
+                                </div>
+                            )}
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Planning de rendez-vous</h2>
+                                </div>
+                                <p className="panel-note">
+                                    Quand un prospect demande à visiter un bien, il reçoit un lien vers votre planning et
+                                    choisit lui-même un créneau libre parmi vos disponibilités. Le rendez-vous s'inscrit sur
+                                    sa fiche, une relance est posée le jour même, vous êtes prévenu et il reçoit une
+                                    confirmation avec une invitation de calendrier. Les heures sont celles de Paris.
+                                </p>
+                                {messageRdv && (
+                                    <div className={messageRdv.type === 'error' ? 'error' : 'success'}>{messageRdv.text}</div>
+                                )}
+                                {rdv === null ? (
+                                    !messageRdv && <div className="panel-note" style={{ marginBottom: 0 }}>Chargement…</div>
+                                ) : (
+                                    <div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '14px' }}>
+                                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                                <label htmlFor="rdv-duree">Durée d'une visite</label>
+                                                <select id="rdv-duree" value={rdv.duree_min}
+                                                    onChange={(e) => majRdv('duree_min', Number(e.target.value))}>
+                                                    {[30, 45, 60].map((n) => <option key={n} value={n}>{n} minutes</option>)}
+                                                </select>
+                                            </div>
+                                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                                <label htmlFor="rdv-delai">Délai minimum</label>
+                                                <select id="rdv-delai" value={rdv.delai_heures}
+                                                    onChange={(e) => majRdv('delai_heures', Number(e.target.value))}>
+                                                    {optionsAvec([0, 2, 4, 12, 24, 48, 72], rdv.delai_heures).map((n) => (
+                                                        <option key={n} value={n}>{n === 0 ? 'Aucun' : `${n} h à l'avance`}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                                <label htmlFor="rdv-horizon">Ouvert sur</label>
+                                                <select id="rdv-horizon" value={rdv.horizon_jours}
+                                                    onChange={(e) => majRdv('horizon_jours', Number(e.target.value))}>
+                                                    {optionsAvec([7, 14, 21, 30, 45, 60], rdv.horizon_jours).map((n) => (
+                                                        <option key={n} value={n}>{n} jours</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div className="form-group" style={{ marginTop: '14px' }}>
+                                            <label htmlFor="rdv-lieu">Lieu du rendez-vous (facultatif)</label>
+                                            <input id="rdv-lieu" type="text" maxLength={255} value={rdv.lieu}
+                                                onChange={(e) => majRdv('lieu', e.target.value)}
+                                                placeholder="Adresse de l'agence, ou « sur place, devant le bien »" />
+                                            <div className="field-hint">Indiqué au prospect sur la page et dans sa confirmation.</div>
+                                        </div>
+
+                                        <div className="panel-title" style={{ fontSize: '17px', margin: '18px 0 8px' }}>Vos disponibilités</div>
+                                        {rdv.plages.length === 0 && (
+                                            <div className="panel-note">
+                                                Aucune plage pour l'instant : aucun créneau n'est proposé.{' '}
+                                                <button type="button" className="raccourci" onClick={plagesTypes}>
+                                                    Du lundi au vendredi, 9 h–12 h et 14 h–18 h
+                                                </button>
+                                            </div>
+                                        )}
+                                        {JOURS_RDV.map((nom, jour) => (
+                                            <div key={nom} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 10px', padding: '8px 0', borderTop: '1px solid var(--line, #E3DCCC)' }}>
+                                                <div style={{ width: '92px', fontWeight: 600, fontSize: '14px' }}>{nom}</div>
+                                                {rdv.plages.map((p, i) => p.jour !== jour ? null : (
+                                                    <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                                        <input type="time" step="300" value={p.debut} aria-label={`${nom} : début`}
+                                                            style={{ width: '132px', padding: '7px 8px' }}
+                                                            onChange={(e) => majPlage(i, 'debut', e.target.value)} />
+                                                        <span>à</span>
+                                                        <input type="time" step="300" value={p.fin} aria-label={`${nom} : fin`}
+                                                            style={{ width: '132px', padding: '7px 8px' }}
+                                                            onChange={(e) => majPlage(i, 'fin', e.target.value)} />
+                                                        <button type="button" className="rappel-suppr" aria-label={`Retirer cette plage du ${nom.toLowerCase()}`}
+                                                            onClick={() => retirerPlage(i)}>×</button>
+                                                    </span>
+                                                ))}
+                                                <button type="button" className="raccourci" onClick={() => ajouterPlage(jour)}>
+                                                    + Ajouter une plage
+                                                </button>
+                                            </div>
+                                        ))}
+
+                                        <label className="interrupteur" style={{ marginTop: '18px' }}>
+                                            <input type="checkbox" checked={rdv.auto_envoi === true}
+                                                onChange={(e) => majRdv('auto_envoi', e.target.checked)} />
+                                            <span>Envoyer automatiquement le planning dès qu'un prospect demande une visite.
+                                                Désactivé, vous pouvez toujours l'envoyer à la main depuis la fiche du prospect.</span>
+                                        </label>
+                                        <button type="button" className="btn" style={{ marginTop: '18px' }}
+                                            disabled={rdvEnCours} onClick={enregistrerRdv}>
+                                            {rdvEnCours ? 'Enregistrement…' : 'Enregistrer mon planning'}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Application et notifications</h2>
+                                </div>
+                                <p className="panel-note">
+                                    Installez Zelyro sur votre téléphone ou votre ordinateur comme une application, et
+                                    recevez une notification dès qu'un prospect ouvre un lien que vous lui avez envoyé,
+                                    remplit son formulaire ou demande une visite, ou quand un prospect vous est confié.
+                                    Le réglage se fait appareil par appareil.
+                                </p>
+                                {messageNotif && (
+                                    <div className={messageNotif.type === 'error' ? 'error' : 'success'}>{messageNotif.text}</div>
+                                )}
+                                {pwa && pwa.iphoneAInstaller() && (
+                                    <div className="info-box" style={{ marginBottom: '12px' }}>
+                                        Sur iPhone, ajoutez d'abord Zelyro à l'écran d'accueil (bouton Partager de Safari,
+                                        puis « Sur l'écran d'accueil »), ouvrez l'application depuis cette icône, puis revenez
+                                        ici pour activer les notifications.
+                                    </div>
+                                )}
+                                {notif && notif.permission === 'unsupported' && !(pwa && pwa.iphoneAInstaller()) && (
+                                    <div className="info-box" style={{ marginBottom: '12px' }}>
+                                        Ce navigateur ne gère pas les notifications. Essayez Chrome, Edge, Firefox ou Safari récent.
+                                    </div>
+                                )}
+                                {notif && notif.permission === 'denied' && (
+                                    <div className="info-box" style={{ marginBottom: '12px' }}>
+                                        Les notifications sont bloquées pour ce site : autorisez-les dans les réglages de votre navigateur, puis revenez ici.
+                                    </div>
+                                )}
+                                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                    {notif && notif.permission !== 'unsupported' && !notif.abonne && (
+                                        <button type="button" className="btn petit" disabled={notifOccupe || notif.permission === 'denied'}
+                                            onClick={activerNotif}>Activer les notifications sur cet appareil</button>
+                                    )}
+                                    {notif && notif.abonne && (
+                                        <>
+                                            <button type="button" className="btn secondary petit" disabled={notifOccupe} onClick={essaiNotif}>
+                                                Envoyer une notification d'essai
+                                            </button>
+                                            <button type="button" className="btn secondary petit" disabled={notifOccupe} onClick={couperNotif}>
+                                                Désactiver sur cet appareil
+                                            </button>
+                                        </>
+                                    )}
+                                    {installable && (
+                                        <button type="button" className="btn secondary petit" onClick={installerAppli}>Installer l'application</button>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Formulaire de contact</h2>
+                                </div>
+                                <p className="panel-note">
+                                    Placez ce lien sur le site de votre agence, dans vos e-mails ou sur vos réseaux :
+                                    les personnes qui remplissent le formulaire arrivent directement dans votre
+                                    liste de prospects, avec la trace de leur consentement à être recontactées.
+                                </p>
+                                {messageLien && (
+                                    <div className={messageLien.type === 'error' ? 'error' : 'success'}>{messageLien.text}</div>
+                                )}
+                                {lien && lien.url ? (
+                                    <>
+                                        <div className="copie-ligne">
+                                            <input id="champ-lien" type="text" readOnly value={lien.url}
+                                                onFocus={(e) => e.target.select()} aria-label="Adresse du formulaire" />
+                                            <button className="btn" onClick={copier}>Copier</button>
+                                        </div>
+                                        <div className="btn-ligne" style={{ marginTop: '14px' }}>
+                                            <a className="btn secondary petit" href={lien.url} target="_blank" rel="noopener">Voir le formulaire</a>
+                                            <a className="btn secondary petit" href="/affiche.html">QR code et affiche à imprimer</a>
+                                            {!confirmerLien ? (
+                                                <button className="btn secondary petit" onClick={() => setConfirmerLien(true)}>Créer une nouvelle adresse</button>
+                                            ) : (
+                                                <>
+                                                    <button className="btn danger plein petit" onClick={nouveauLien}>Confirmer : l'ancienne adresse cessera de fonctionner</button>
+                                                    <button className="btn secondary petit" onClick={() => setConfirmerLien(false)}>Annuler</button>
+                                                </>
+                                            )}
+                                        </div>
+                                        <p className="field-hint">
+                                            Une nouvelle adresse est utile en cas de messages indésirables :
+                                            l'ancienne est aussitôt désactivée, ainsi que les QR codes déjà imprimés.
+                                        </p>
+                                    </>
+                                ) : !messageLien && <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}
+                            </div>
+
+                            {user && user.role === 'admin' && (
+                                <div className="panel">
+                                    <div className="panel-header">
+                                        <h2 className="panel-title">Mon équipe</h2>
+                                        {team && (
+                                            <span className="panel-count">
+                                                {team.used}{team.max_users != null ? ` / ${team.max_users}` : ''} compte{team.used > 1 ? 's' : ''}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p className="panel-note">
+                                        Invitez les collaborateurs de votre agence : chacun a son propre compte
+                                        (son propre mot de passe), avec un accès complet aux mêmes prospects et
+                                        aux mêmes biens que vous. Le nombre de comptes inclus dépend de votre
+                                        forfait{team && team.label ? ` (${team.label})` : ''}.
+                                    </p>
+                                    {messageTeam && (
+                                        <div className={messageTeam.type === 'error' ? 'error' : 'success'}>{messageTeam.text}</div>
+                                    )}
+                                    {team ? (
+                                        <>
+                                            <form onSubmit={inviterCollaborateur} className="btn-ligne" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                                                <div className="form-group" style={{ flex: '1 1 240px', marginBottom: 0 }}>
+                                                    <label>E-mail du collaborateur</label>
+                                                    <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)}
+                                                        placeholder="prenom@agence.fr" required disabled={inviting} />
+                                                </div>
+                                                <button type="submit" className="btn" disabled={inviting || !inviteEmail.trim()}>
+                                                    {inviting ? 'Envoi…' : 'Inviter'}
+                                                </button>
+                                            </form>
+
+                                            {team.employees.length > 0 && (
+                                                <div className="table-scroll" style={{ marginTop: '18px' }}>
+                                                    <table className="admin-table">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>Collaborateur</th><th>Prospects suivis</th>
+                                                                <th>Statuts changés (30j)</th><th>E-mails envoyés (30j)</th>
+                                                                <th>Dernière activité</th><th>Statut</th><th></th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {team.employees.map((emp) => (
+                                                                <tr key={emp.id}>
+                                                                    <td className="cellule-nom">
+                                                                        {emp.first_name || '—'}
+                                                                        <small>{emp.email}</small>
+                                                                    </td>
+                                                                    <td>{emp.prospects_touches}</td>
+                                                                    <td>{emp.changements_statut_30j}</td>
+                                                                    <td>{emp.mails_envoyes_30j}</td>
+                                                                    <td>{emp.derniere_activite ? new Date(emp.derniere_activite).toLocaleDateString('fr-FR') : '—'}</td>
+                                                                    <td>
+                                                                        {emp.is_active ? <span className="pastille">Actif</span> : <span className="pastille off">Retiré</span>}
+                                                                    </td>
+                                                                    <td>
+                                                                        {emp.is_active ? (
+                                                                            confirmerRetrait === emp.id ? (
+                                                                                <div className="btn-ligne">
+                                                                                    <button className="btn danger plein petit" disabled={busyTeamId === emp.id}
+                                                                                        onClick={() => retirerCollaborateur(emp.id)}>Confirmer</button>
+                                                                                    <button className="btn secondary petit" onClick={() => setConfirmerRetrait(null)}>Annuler</button>
+                                                                                </div>
+                                                                            ) : (
+                                                                                <button className="btn danger petit" disabled={busyTeamId === emp.id}
+                                                                                    onClick={() => setConfirmerRetrait(emp.id)}>Retirer</button>
+                                                                            )
+                                                                        ) : (
+                                                                            <button className="btn secondary petit" disabled={busyTeamId === emp.id}
+                                                                                onClick={() => reactiverCollaborateur(emp.id)}>Réactiver</button>
+                                                                        )}
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            )}
+
+                                            {team.invitations.length > 0 && (
+                                                <p className="field-hint" style={{ marginTop: '18px' }}>
+                                                    Invitation{team.invitations.length > 1 ? 's' : ''} envoyée{team.invitations.length > 1 ? 's' : ''}, en attente d'acceptation : {team.invitations.map((i) => i.email).join(', ')}.
+                                                </p>
+                                            )}
+                                        </>
+                                    ) : !messageTeam && <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}
+                                </div>
+                            )}
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Réception des prospects LeBonCoin et SeLoger</h2>
+                                    {journal && (
+                                        <span className="panel-count">{journal.last_30_days.created} prospect{journal.last_30_days.created > 1 ? 's' : ''} en 30 jours</span>
+                                    )}
+                                </div>
+                                <p className="panel-note">
+                                    Zelyro crée vos prospects à partir des e-mails de contact des portails : redirigez-les vers votre adresse
+                                    de réception ci-dessous (ou connectez Gmail plus bas). Chaque message reçu apparaît dans le journal,
+                                    avec ce qu'on en a fait.
+                                </p>
+                                {messageJournal && (
+                                    <div className={messageJournal.type === 'error' ? 'error' : 'success'}>{messageJournal.text}</div>
+                                )}
+                                {journal ? (
+                                    <>
+                                        {!journal.services.mail_forwarding && (
+                                            <div className="error">La réception par e-mail n'est pas encore activée sur le serveur : les messages envoyés à cette adresse ne sont pas encore traités. Contactez Zelyro.</div>
+                                        )}
+                                        {journal.services.mail_forwarding && !journal.services.analysis && (
+                                            <div className="info-box">L'analyse automatique est désactivée : les prospects sont créés avec le texte du message, sans tri ni champs remplis.</div>
+                                        )}
+                                        <label htmlFor="champ-adresse-mail" style={{ display: 'block', marginTop: '8px' }}>Votre adresse de réception</label>
+                                        <div className="btn-ligne" style={{ alignItems: 'stretch', flexWrap: 'wrap' }}>
+                                            <input id="champ-adresse-mail" type="text" readOnly value={journal.address}
+                                                onFocus={(e) => e.target.select()} aria-label="Adresse de réception des e-mails de portails"
+                                                style={{ flex: '1 1 260px', minWidth: 0 }} />
+                                            <button className="btn" onClick={() => copierTexte(journal.address, setMessageJournal, 'Adresse copiée.', 'champ-adresse-mail')}>Copier</button>
+                                        </div>
+                                        <h3 style={{ margin: '22px 0 4px', fontSize: '15px' }}>Rediriger vos messages vers cette adresse</h3>
+                                        <p className="field-hint" style={{ marginTop: 0 }}>Choisissez votre messagerie. Il suffit de le faire une fois pour l'agence.</p>
+                                        <div className="btn-ligne" style={{ margin: '10px 0 14px' }}>
+                                            {[['gmail', 'Gmail'], ['outlook', 'Outlook'], ['informatique', 'Autre messagerie ou informaticien'], ['portail', 'Directement dans le portail']].map(([cle, libelle]) => (
+                                                <button key={cle} type="button" className={ongletRedir === cle ? 'btn petit' : 'btn secondary petit'}
+                                                    onClick={() => setOngletRedir(cle)}>{libelle}</button>
+                                            ))}
+                                        </div>
+
+                                        {ongletRedir === 'gmail' && (
+                                            <div>
+                                                <p className="panel-note" style={{ marginBottom: '10px' }}>
+                                                    Étape 1. Dans Gmail, cliquez sur la roue en haut à droite, puis « Voir tous les paramètres », onglet
+                                                    « Transfert et POP/IMAP », « Ajouter une adresse de transfert ». Collez l'adresse ci-dessus, puis Suivant, Continuer, OK.
+                                                </p>
+                                                <p className="panel-note" style={{ marginBottom: '10px' }}>
+                                                    Étape 2. Google envoie alors un message de confirmation à cette adresse. Il s'affiche ici dans quelques secondes :
+                                                </p>
+                                                {journal.gmail_confirmation ? (
+                                                    <div className="info-box">
+                                                        <p style={{ margin: '0 0 8px' }}>
+                                                            Google a envoyé le code de confirmation
+                                                            {journal.gmail_confirmation.code ? <> : <strong id="code-gmail">{journal.gmail_confirmation.code}</strong></> : '.'}
+                                                        </p>
+                                                        <div className="btn-ligne">
+                                                            {journal.gmail_confirmation.code && (
+                                                                <button type="button" className="btn secondary petit"
+                                                                    onClick={() => copierTexte(journal.gmail_confirmation.code, setMessageJournal, 'Code copié : collez-le dans Gmail.', 'code-gmail')}>Copier le code</button>
+                                                            )}
+                                                            {journal.gmail_confirmation.url && (
+                                                                <a className="btn secondary petit" href={journal.gmail_confirmation.url} target="_blank" rel="noopener noreferrer">Ouvrir le lien de confirmation</a>
+                                                            )}
+                                                        </div>
+                                                        <p className="field-hint">Dans Gmail, saisissez le code puis cliquez sur « Vérifier » (ou ouvrez le lien).</p>
+                                                    </div>
+                                                ) : (
+                                                    <p className="field-hint" style={{ marginTop: 0 }}>En attente du message de Google (la page se met à jour toute seule).</p>
+                                                )}
+                                                <p className="panel-note" style={{ margin: '14px 0 10px' }}>
+                                                    Étape 3. Téléchargez le filtre ci-dessous. Dans Gmail : Paramètres, onglet « Filtres et adresses bloquées »,
+                                                    « Importer des filtres », « Choisir un fichier », puis « Ouvrir le fichier » et « Créer des filtres ».
+                                                </p>
+                                                <div className="btn-ligne">
+                                                    <button type="button" className="btn secondary petit" onClick={telechargerFiltreGmail}>Télécharger le filtre Gmail</button>
+                                                </div>
+                                                <p className="field-hint">
+                                                    Ce filtre transfère les messages envoyés par SeLoger ou LeBonCoin, et ceux dont l'objet contient
+                                                    « seloger », « leboncoin », « demande de visite », « demande de contact », « demande de renseignements »,
+                                                    « nouveau contact » ou « votre annonce » (hors alertes « nouvelles annonces » et hors les e-mails envoyés par Zelyro lui-même,
+                                                    pour ne pas créer de boucle).
+                                                    Si Gmail refuse le fichier, créez le filtre à la main : « Créer un filtre », collez ceci dans « Contient les mots » :
+                                                </p>
+                                                <p className="field-hint" style={{ userSelect: 'all', fontFamily: 'ui-monospace, monospace', overflowWrap: 'anywhere' }}>
+                                                    {RECHERCHE_FILTRE_GMAIL}
+                                                </p>
+                                                <p className="field-hint">
+                                                    puis « Transférer à » l'adresse ci-dessus (possible une fois l'étape 2 terminée).
+                                                    Un message de ce type qui n'est pas une demande est le plus souvent ignoré par Zelyro quand l'analyse automatique est active.
+                                                </p>
+                                            </div>
+                                        )}
+
+                                        {ongletRedir === 'outlook' && (
+                                            <div>
+                                                <p className="panel-note" style={{ marginBottom: '10px' }}>
+                                                    Dans Outlook sur le web : roue en haut à droite, « Courrier », « Règles », « Ajouter une nouvelle règle ».
+                                                    Condition : l'adresse de l'expéditeur comprend « seloger.com » (puis ajoutez « leboncoin.fr »).
+                                                    Action : « Transférer à » l'adresse ci-dessus. Enregistrez. Les intitulés varient un peu selon la version.
+                                                </p>
+                                                <p className="field-hint">
+                                                    Si le transfert vers l'extérieur est grisé ou refusé, il est bloqué par l'administrateur de votre messagerie :
+                                                    envoyez-lui le message de l'onglet « Autre messagerie ou informaticien ».
+                                                </p>
+                                            </div>
+                                        )}
+
+                                        {ongletRedir === 'informatique' && (
+                                            <div>
+                                                <p className="panel-note" style={{ marginBottom: '10px' }}>
+                                                    Quelle que soit la messagerie (OVH, Orange, Google Workspace, Microsoft 365...), la personne qui la gère
+                                                    sait créer cette règle en quelques minutes. Copiez-lui ce message :
+                                                </p>
+                                                <textarea id="champ-message-informatique" readOnly rows={9} value={messageInformatique(journal.address)}
+                                                    onFocus={(e) => e.target.select()} aria-label="Message à envoyer au responsable de la messagerie" />
+                                                <div className="btn-ligne" style={{ marginTop: '10px' }}>
+                                                    <button type="button" className="btn secondary petit"
+                                                        onClick={() => copierTexte(messageInformatique(journal.address), setMessageJournal, 'Message copié.', 'champ-message-informatique')}>Copier le message</button>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {ongletRedir === 'portail' && (
+                                            <div>
+                                                <p className="panel-note" style={{ marginBottom: '10px' }}>
+                                                    Le plus simple à long terme : que les portails envoient directement leurs notifications à cette adresse.
+                                                    Sur LeBonCoin Pro, les messages arrivent à l'adresse du compte, et cette adresse ne se change pas soi-même :
+                                                    il faut en faire la demande au service client de LeBonCoin, avec un extrait Kbis récent.
+                                                    Pour SeLoger, demandez à votre conseiller s'il peut ajouter une adresse de réception.
+                                                </p>
+                                                <p className="field-hint">En attendant, une règle de transfert (onglets précédents) fait le même travail.</p>
+                                            </div>
+                                        )}
+
+                                        <h3 style={{ margin: '24px 0 4px', fontSize: '15px' }}>Vérifier que tout fonctionne</h3>
+                                        <p className="field-hint" style={{ marginTop: 0 }}>
+                                            Envoyez un e-mail de test à l'adresse de réception avec les lignes « Nom : », « Téléphone : » et « Email : » :
+                                            le prospect apparaît dans le journal ci-dessous. Vous pouvez aussi vérifier la lecture automatique des messages.
+                                        </p>
+                                        <div className="btn-ligne" style={{ marginTop: '8px' }}>
+                                            <button type="button" className="btn secondary petit" onClick={lancerTestIA} disabled={occupeTestIA}>
+                                                {occupeTestIA ? 'Test en cours...' : 'Tester la lecture automatique'}
+                                            </button>
+                                        </div>
+                                        {testIA && testIA.ok && (
+                                            <div className="success" style={{ marginTop: '10px' }}>
+                                                La lecture automatique fonctionne : elle a lu {testIA.read.name || 'aucun nom'}, {testIA.read.phone || 'aucun téléphone'}, {testIA.read.email || 'aucun e-mail'}.
+                                            </div>
+                                        )}
+                                        {testIA && !testIA.ok && (
+                                            <div className="error" style={{ marginTop: '10px' }}>{testIA.message}</div>
+                                        )}
+                                        {journal.messages.slice(0, 10).some((m) => m.analysis === 'erreur') && (
+                                            <div className="info-box" style={{ marginTop: '10px' }}>
+                                                La lecture automatique n'a pas répondu pour certains messages récents : le prospect est créé, mais seuls le téléphone, l'e-mail et un nom net sont repris. Cliquez sur « Tester la lecture automatique » pour en voir la cause.
+                                            </div>
+                                        )}
+
+                                        <div className="btn-ligne" style={{ marginTop: '18px', justifyContent: 'space-between' }}>
+                                            <h3 style={{ margin: 0, fontSize: '15px' }}>Derniers messages reçus</h3>
+                                            <button className="btn secondary petit" onClick={chargerJournal}>Actualiser</button>
+                                        </div>
+                                        {journal.messages.length === 0 ? (
+                                            <p className="field-hint">Rien reçu pour l'instant. Envoyez un e-mail de test à l'adresse de réception pour vérifier que tout fonctionne.</p>
+                                        ) : (
+                                            <div style={{ overflowX: 'auto' }}>
+                                                <table className="admin-table">
+                                                    <thead>
+                                                        <tr><th>Reçu</th><th>Origine</th><th>Objet</th><th>Résultat</th></tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {journal.messages.map((m, i) => (
+                                                            <tr key={i}>
+                                                                <td>{new Date(m.received_at).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+                                                                <td>{m.origin || '—'}</td>
+                                                                <td>{m.subject || '—'}</td>
+                                                                <td>
+                                                                    {m.created && m.lead_id ? (
+                                                                        <a href={`/leads-profile.html?id=${m.lead_id}`}>{m.lead_name || 'Prospect créé'}</a>
+                                                                    ) : m.result}
+                                                                    {m.can_rescue && (
+                                                                        <div style={{ marginTop: '6px' }}>
+                                                                            <button type="button" className="btn secondary petit" onClick={() => pasSpam(m.id)}>
+                                                                                Ce n'est pas du spam
+                                                                            </button>
+                                                                        </div>
+                                                                    )}
+                                                                    {m.analysis_note && (
+                                                                        <div className="field-hint" style={{ marginTop: '2px' }}>{m.analysis_note}</div>
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </>
+                                ) : !messageJournal && <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}
+                            </div>
+
+                            {user && user.role === 'admin' && (
+                                <div className="panel">
+                                    <div className="panel-header">
+                                        <h2 className="panel-title">Connexion par API (partenaires)</h2>
+                                    </div>
+                                    <p className="panel-note">
+                                        Une passerelle de diffusion, un CRM ou un outil comme Zapier peut envoyer directement des prospects à votre
+                                        agence. Créez une clé par partenaire et donnez-la lui : elle ne sert qu'à envoyer des prospects dans votre
+                                        compte, jamais à les lire.
+                                    </p>
+                                    {messageCles && (
+                                        <div className={messageCles.type === 'error' ? 'error' : 'success'}>{messageCles.text}</div>
+                                    )}
+                                    {nouvelleCle && (
+                                        <div className="info-box">
+                                            <p style={{ margin: '0 0 8px' }}>Clé « {nouvelleCle.name} » créée. Copiez-la maintenant : elle ne sera plus jamais affichée.</p>
+                                            <div className="btn-ligne" style={{ alignItems: 'stretch', flexWrap: 'wrap' }}>
+                                                <input id="champ-cle-api" type="text" readOnly value={nouvelleCle.key}
+                                                    onFocus={(e) => e.target.select()} aria-label="Clé d'API" style={{ flex: '1 1 260px', minWidth: 0 }} />
+                                                <button className="btn" onClick={() => copierTexte(nouvelleCle.key, setMessageCles, 'Clé copiée.', 'champ-cle-api')}>Copier</button>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {cles ? (
+                                        <>
+                                            {cles.keys.length > 0 && (
+                                                <div style={{ overflowX: 'auto' }}>
+                                                    <table className="admin-table">
+                                                        <thead>
+                                                            <tr><th>Nom</th><th>Clé</th><th>Dernier envoi</th><th></th></tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {cles.keys.map((k) => (
+                                                                <tr key={k.id}>
+                                                                    <td>{k.name}</td>
+                                                                    <td>{k.prefix}…</td>
+                                                                    <td>{k.last_used_at ? new Date(k.last_used_at).toLocaleString('fr-FR') : 'Jamais utilisée'}</td>
+                                                                    <td>
+                                                                        {confirmerCle === k.id ? (
+                                                                            <>
+                                                                                <button className="btn danger plein petit" onClick={() => supprimerCle(k.id)}>Confirmer la suppression</button>{' '}
+                                                                                <button className="btn secondary petit" onClick={() => setConfirmerCle(null)}>Annuler</button>
+                                                                            </>
+                                                                        ) : (
+                                                                            <button className="btn secondary petit" onClick={() => setConfirmerCle(k.id)}>Supprimer</button>
+                                                                        )}
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            )}
+                                            {cles.keys.length < cles.max ? (
+                                                <div className="btn-ligne" style={{ alignItems: 'flex-end', flexWrap: 'wrap', marginTop: '14px' }}>
+                                                    <div style={{ flex: '1 1 220px' }}>
+                                                        <label htmlFor="champ-nom-cle">Nom de la nouvelle clé</label>
+                                                        <input id="champ-nom-cle" type="text" maxLength={80} value={nomCle} placeholder="Ex. Ubiflow"
+                                                            onChange={(e) => setNomCle(e.target.value)} />
+                                                    </div>
+                                                    <button className="btn plein" onClick={creerCle} disabled={occupeCles || !nomCle.trim()}>
+                                                        {occupeCles ? 'Création…' : 'Créer une clé'}
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <p className="field-hint">Vous avez atteint le maximum de {cles.max} clés : supprimez-en une pour en créer une autre.</p>
+                                            )}
+                                            <p className="field-hint" style={{ marginTop: '14px' }}>
+                                                Pour le partenaire : envoyer un POST JSON à {API_URL}/api/v1/inbound/leads avec l'en-tête
+                                                « Authorization: Bearer » suivi de la clé. Champs : phone ou email (obligatoire), name, message, source,
+                                                listing_title, listing_ref, transaction, budget, location, property_type, external_id (pour ne pas créer
+                                                deux fois le même prospect). Un GET sur {API_URL}/api/v1/inbound/ping permet de tester la clé.
+                                            </p>
+                                            <p className="field-hint" style={{ marginTop: '8px' }}>
+                                                Pour envoyer des biens avec la même clé : un POST JSON à {API_URL}/api/v1/inbound/properties, de la forme
+                                                {'{'}"properties": [ ... ]{'}'} (300 biens au plus par appel). Champs : reference (conseillé : un bien déjà
+                                                connu est mis à jour, jamais dupliqué), title, address (ou address, zip et city), price (le loyer pour une
+                                                location), size, rooms, property_type, transaction, meuble, dpe, ges, description.
+                                            </p>
+                                        </>
+                                    ) : !messageCles && <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}
+                                </div>
+                            )}
+
+                            <div className="panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Connexion à votre boîte Gmail</h2>
+                                </div>
+                                <p className="panel-note">
+                                    Zelyro se connecte directement à votre boîte Gmail (lecture seule) pour détecter
+                                    automatiquement les notifications LeBonCoin et SeLoger et créer les prospects —
+                                    rien à configurer dans votre messagerie.
+                                </p>
+                                {messageGmail && (
+                                    <div className={messageGmail.type === 'error' ? 'error' : 'success'}>{messageGmail.text}</div>
+                                )}
+                                {gmailStatus ? (
+                                    gmailStatus.connected ? (
+                                        <>
+                                            <p className="field-hint">
+                                                Connecté : <strong>{gmailStatus.email}</strong>
+                                                {gmailStatus.last_synced_at && (
+                                                    <> — dernière synchronisation {new Date(gmailStatus.last_synced_at).toLocaleString('fr-FR')}</>
+                                                )}
+                                            </p>
+                                            {gmailStatus.last_error && (
+                                                <div className="error">{gmailStatus.last_error}</div>
+                                            )}
+                                            <div className="btn-ligne" style={{ marginTop: '14px' }}>
+                                                <button className="btn secondary petit" onClick={synchroniserGmail} disabled={syncingGmail}>
+                                                    {syncingGmail ? 'Synchronisation…' : 'Synchroniser maintenant'}
+                                                </button>
+                                                {!confirmerDeconnexionGmail ? (
+                                                    <button className="btn secondary petit" onClick={() => setConfirmerDeconnexionGmail(true)}>Déconnecter</button>
+                                                ) : (
+                                                    <>
+                                                        <button className="btn danger plein petit" onClick={deconnecterGmail}>Confirmer la déconnexion</button>
+                                                        <button className="btn secondary petit" onClick={() => setConfirmerDeconnexionGmail(false)}>Annuler</button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <button className="btn plein" onClick={connecterGmail} disabled={connectingGmail}>
+                                            {connectingGmail ? 'Redirection…' : 'Connecter Gmail'}
+                                        </button>
+                                    )
+                                ) : <div className="loading" style={{ padding: '20px' }}><div className="loader"></div></div>}
+                            </div>
+                        </div>
+                    </div>
+                </>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>

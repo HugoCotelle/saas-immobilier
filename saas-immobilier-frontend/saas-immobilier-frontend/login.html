@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZELYRO - Connexion</title>
+    <meta name="robots" content="noindex">
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="zelyro.css">
+    <style>
+        .champ-cle { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.06em; text-transform: uppercase; }
+        .champ-cle::placeholder { text-transform: none; }
+    </style>
+<script src="/stats.js" defer></script>
+</head>
+<body class="auth">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+
+        function AuthApp() {
+            // Un lien d'activation (login.html#cle=ZLY-XXXX-XXXX-XXXX) remplit la clé tout seul.
+            // La clé est après le # : elle n'est jamais envoyée au serveur du site.
+            const cleDuLien = (window.location.hash.match(/^#(?:cle|invitation)=([A-Za-z0-9_-]{8,64})$/) || [])[1] || '';
+            const [activeTab, setActiveTab] = useState(
+                (window.location.hash === '#inscription' || cleDuLien) ? 'signup' : 'login');
+            const [loading, setLoading] = useState(false);
+            const [message, setMessage] = useState(null);
+            const [loginData, setLoginData] = useState({ email: '', password: '' });
+            const [signupData, setSignupData] = useState({
+                email: '', password: '', confirmPassword: '', firstName: '', companyName: '', cle: cleDuLien
+            });
+
+            useEffect(() => {
+                const token = localStorage.getItem('token');
+                if (token && !cleDuLien) window.location.replace('/prospects.html');
+            }, []);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setMessage(null);
+                setLoading(true);
+                try {
+                    const response = await fetch(`${API_URL}/auth/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(loginData)
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        localStorage.setItem('token', data.token);
+                        localStorage.setItem('user', JSON.stringify(data.user));
+                        setMessage({ type: 'success', text: 'Connexion réussie, redirection…' });
+                        setTimeout(() => { window.location.replace('/prospects.html'); }, 1000);
+                    } else {
+                        // Compte suspendu pour impayé : le serveur fournit un lien vers le portail de paiement Stripe.
+                        const lien = typeof data.billing_url === 'string' && data.billing_url.startsWith('https://') ? data.billing_url : null;
+                        // Abonnement terminé : jeton limité au téléchargement des données, avant leur effacement.
+                        const exportToken = typeof data.export_token === 'string' ? data.export_token : null;
+                        const purge = data.purge_prevue ? new Date(data.purge_prevue).toLocaleDateString('fr-FR') : null;
+                        setMessage({ type: 'error', text: data.message || 'Identifiants incorrects', lien, exportToken, purge });
+                    }
+                } catch (error) {
+                    setMessage({ type: 'error', text: 'Serveur injoignable : ' + error.message });
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const telechargerDonnees = async (jeton) => {
+                try {
+                    const r = await fetch(`${API_URL}/api/v1/export/complet`, { headers: { 'Authorization': `Bearer ${jeton}` } });
+                    if (!r.ok) throw new Error('Téléchargement impossible (' + r.status + ')');
+                    const blob = await r.blob();
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'zelyro-export.zip';
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                } catch (error) {
+                    setMessage({ type: 'error', text: error.message });
+                }
+            };
+
+            const handleSignup = async (e) => {
+                e.preventDefault();
+                setMessage(null);
+                if (signupData.password !== signupData.confirmPassword) {
+                    setMessage({ type: 'error', text: 'Les mots de passe ne correspondent pas' });
+                    return;
+                }
+                setLoading(true);
+                try {
+                    const response = await fetch(`${API_URL}/auth/register`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            email: signupData.email,
+                            invitation: signupData.cle,
+                            password: signupData.password,
+                            first_name: signupData.firstName,
+                            company_name: signupData.companyName
+                        })
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        localStorage.setItem('token', data.token);
+                        localStorage.setItem('user', JSON.stringify(data.user));
+                        window.history.replaceState(null, '', window.location.pathname);
+                        setMessage({ type: 'success', text: 'Compte créé, redirection…' });
+                        setTimeout(() => { window.location.replace('/prospects.html'); }, 1000);
+                    } else {
+                        setMessage({ type: 'error', text: data.message || 'Inscription impossible' });
+                    }
+                } catch (error) {
+                    setMessage({ type: 'error', text: 'Serveur injoignable : ' + error.message });
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="auth-container">
+                    <div className="auth-header">
+                        <h1><a href="/" aria-label="Zelyro, retour à l'accueil">ZELYRO</a></h1>
+                        <p>Chaque lead. Chaque bien. Aucune opportunité perdue.</p>
+                    </div>
+
+                    {message && (
+                        <div className={message.type === 'error' ? 'error' : 'success'}>
+                            {message.text}
+                            {message.exportToken && (
+                                <div style={{ marginTop: '10px' }}>
+                                    <button type="button" onClick={() => telechargerDonnees(message.exportToken)}>
+                                        Télécharger toutes mes données
+                                    </button>
+                                    {message.purge && <div>Vos données seront définitivement effacées le {message.purge}.</div>}
+                                </div>
+                            )}
+                            {message.lien && (
+                                <div style={{ marginTop: '10px' }}>
+                                    <a href={message.lien} rel="noopener noreferrer"><strong>Régulariser mon paiement</strong></a>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    <div className="tabs">
+                        <div className={`tab ${activeTab === 'login' ? 'active' : ''}`}
+                            onClick={() => { setActiveTab('login'); setMessage(null); }}>Connexion</div>
+                        <div className={`tab ${activeTab === 'signup' ? 'active' : ''}`}
+                            onClick={() => { setActiveTab('signup'); setMessage(null); }}>Inscription</div>
+                    </div>
+
+                    {activeTab === 'login' && (
+                        <form onSubmit={handleLogin}>
+                            <div className="form-group">
+                                <label>Email</label>
+                                <input type="email" value={loginData.email}
+                                    onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
+                                    placeholder="vous@agence.fr" required disabled={loading} />
+                            </div>
+                            <div className="form-group">
+                                <label>Mot de passe</label>
+                                <input type="password" value={loginData.password}
+                                    onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
+                                    placeholder="••••••••" autoComplete="current-password" required disabled={loading} />
+                            </div>
+                            <a className="auth-link" href="/forgot-password.html">Mot de passe oublié ?</a>
+                            <button type="submit" disabled={loading}>
+                                {loading ? 'Connexion…' : 'Se connecter'}
+                            </button>
+                        </form>
+                    )}
+
+                    {activeTab === 'signup' && (
+                        <form onSubmit={handleSignup}>
+                            <div className="form-group">
+                                <label>Email</label>
+                                <input type="email" value={signupData.email}
+                                    onChange={(e) => setSignupData({ ...signupData, email: e.target.value })}
+                                    placeholder="vous@agence.fr" required disabled={loading} />
+                            </div>
+                            <div className="form-group">
+                                <label>Prénom</label>
+                                <input type="text" value={signupData.firstName}
+                                    onChange={(e) => setSignupData({ ...signupData, firstName: e.target.value })}
+                                    placeholder="Tom" disabled={loading} />
+                            </div>
+                            <div className="form-group">
+                                <label>Agence</label>
+                                <input type="text" value={signupData.companyName}
+                                    onChange={(e) => setSignupData({ ...signupData, companyName: e.target.value })}
+                                    placeholder="Nom de votre agence" disabled={loading} />
+                            </div>
+                            <div className="form-group">
+                                <label>Mot de passe</label>
+                                <input type="password" value={signupData.password}
+                                    onChange={(e) => setSignupData({ ...signupData, password: e.target.value })}
+                                    placeholder="••••••••" autoComplete="new-password" minLength={10} required disabled={loading} />
+                                <p className="field-hint">10 caractères minimum.</p>
+                            </div>
+                            <div className="form-group">
+                                <label>Confirmer le mot de passe</label>
+                                <input type="password" value={signupData.confirmPassword}
+                                    onChange={(e) => setSignupData({ ...signupData, confirmPassword: e.target.value })}
+                                    placeholder="••••••••" autoComplete="new-password" required disabled={loading} />
+                            </div>
+                            <div className="form-group">
+                                <label>Clé d'activation</label>
+                                <input type="text" className="champ-cle" value={signupData.cle}
+                                    onChange={(e) => setSignupData({ ...signupData, cle: e.target.value })}
+                                    placeholder="ZLY-XXXX-XXXX-XXXX" autoComplete="off" autoCapitalize="characters"
+                                    spellCheck={false} maxLength={64} required disabled={loading} />
+                                <p className="field-hint">
+                                    Zelyro est accessible sur invitation : la clé d'activation vous est remise par l'équipe Zelyro.
+                                    Pas encore de clé ? Écrivez-nous à{' '}
+                                    <a href="mailto:contact@zelyro.fr?subject=Demande%20de%20cl%C3%A9%20Zelyro" style={{ color: 'inherit' }}>contact@zelyro.fr</a>.
+                                </p>
+                            </div>
+                            <button type="submit" disabled={loading}>
+                                {loading ? 'Création…' : "S'inscrire"}
+                            </button>
+                            <p className="field-hint" style={{ textAlign: 'center', marginTop: '14px' }}>
+                                Ces informations servent uniquement à créer et gérer votre compte Zelyro. Elles sont conservées pendant la durée
+                                du contrat, puis 30 jours. Pour les faire effacer : <a href="mailto:contact@zelyro.fr" style={{ color: 'inherit' }}>contact@zelyro.fr</a>.
+                            </p>
+                            <p className="field-hint" style={{ textAlign: 'center', marginTop: '8px' }}>
+                                En vous inscrivant, vous acceptez les <a href="/cgu.html" style={{ color: 'inherit' }}>conditions d'utilisation</a> et
+                                la <a href="/confidentialite.html" style={{ color: 'inherit' }}>politique de confidentialité</a>.
+                            </p>
+                        </form>
+                    )}
+
+                    <div className="auth-footer">
+                        <a href="/">Accueil</a> · <a href="/mentions-legales.html">Mentions légales</a> · <a href="/confidentialite.html">Confidentialité</a> · <a href="/confidentialite.html#audience">Mesure d'audience (refuser)</a> · <a href="/cgu.html">CGU</a>
+                    </div>
+                    <p className="auth-trust">Base de données hébergée dans l’Union européenne · Échanges chiffrés (HTTPS)</p>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<AuthApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZELYRO - Affiche avec QR code</title>
+    <meta name="robots" content="noindex">
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <script src="/pwa.js" defer></script>
+    <link rel="stylesheet" href="zelyro.css">
+    <style>
+        .outils { max-width: 760px; margin: 0 auto 24px; }
+        .outils .form-group { margin-bottom: 14px; }
+        .outils .btn-ligne { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+        .feuille { background: #FFFEFB; border: 1px solid var(--line, #E3DCCC); border-radius: 12px; max-width: 760px;
+                   margin: 0 auto 40px; padding: 56px 48px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+        .feuille .agence { font-family: Georgia, serif; letter-spacing: .14em; text-transform: uppercase; font-size: 18px; color: #3E4F43; margin: 0 0 40px; }
+        .feuille h1 { font-family: Georgia, serif; font-weight: 500; font-size: 44px; line-height: 1.15; margin: 0 0 18px; color: #1F2A24; }
+        .feuille .phrase { font-size: 20px; line-height: 1.5; color: #44504A; margin: 0 auto 36px; max-width: 520px; }
+        .feuille .qr { display: inline-block; padding: 18px; background: #fff; border: 2px solid #1F2A24; border-radius: 14px; }
+        .feuille .qr svg { display: block; width: 320px; height: 320px; }
+        .feuille .adresse { margin: 22px 0 0; font-size: 13px; color: #6A7168; word-break: break-all; }
+        .feuille .mention { margin: 36px 0 0; font-size: 12px; color: #6A7168; line-height: 1.6; }
+        .masque { display: none; }
+        @media print {
+            @page { size: A4; margin: 0; }
+            header, .outils, .page-title, .page-subtitle, #avertissement { display: none !important; }
+            body { background: #fff !important; }
+            .container { padding: 0 !important; max-width: none !important; }
+            .feuille { border: none; box-shadow: none; border-radius: 0; margin: 0; max-width: none; min-height: 297mm;
+                       padding: 22mm 18mm; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; }
+            .feuille h1 { font-size: 54px; }
+            .feuille .qr svg { width: 380px; height: 380px; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <div class="logo">ZELYRO</div>
+            <nav>
+                <a href="/prospects.html">Leads</a>
+                <a href="/biens.html">Biens</a>
+                <a href="/matching.html">Matching</a>
+                <a href="/propositions.html">Propositions</a>
+                <a href="/dashboard.html">Dashboard</a>
+                <a href="/compte.html" class="active">Compte</a>
+            </nav>
+            <div class="user-info">
+                <span class="user-email" id="email"></span>
+                <button class="logout-btn" id="deconnexion">Déconnexion</button>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <h1 class="page-title">Affiche avec QR code</h1>
+        <p class="page-subtitle">À imprimer pour votre vitrine, votre accueil ou vos cartes de visite</p>
+
+        <div id="erreur" class="error masque"></div>
+        <div id="chargement" class="loading"><div class="loader"></div></div>
+
+        <div id="contenu" class="masque">
+            <div class="panel outils">
+                <div class="form-group">
+                    <label for="titre">Titre</label>
+                    <input id="titre" type="text" maxlength="60" value="Un projet immobilier ?">
+                </div>
+                <div class="form-group">
+                    <label for="phrase">Phrase d'accroche</label>
+                    <input id="phrase" type="text" maxlength="140" value="Scannez ce code avec votre téléphone et décrivez-nous ce que vous cherchez : nous vous recontactons.">
+                </div>
+                <div class="btn-ligne">
+                    <button class="btn" id="imprimer" type="button">Imprimer l'affiche</button>
+                    <button class="btn secondary" id="telecharger" type="button">Télécharger le QR code (SVG)</button>
+                </div>
+                <p class="field-hint" id="avertissement">
+                    Ce QR code ouvre le formulaire de contact de votre agence. Si vous créez une nouvelle adresse du formulaire
+                    depuis « Mon compte », l'ancienne cesse de fonctionner : les affiches déjà imprimées ne marcheraient plus.
+                </p>
+            </div>
+
+            <div class="feuille" id="feuille">
+                <p class="agence" id="f-agence"></p>
+                <h1 id="f-titre"></h1>
+                <p class="phrase" id="f-phrase"></p>
+                <div class="qr" id="f-qr" role="img" aria-label="QR code du formulaire de contact"></div>
+                <p class="adresse" id="f-adresse"></p>
+                <p class="mention">Les informations que vous nous confiez servent uniquement à vous recontacter au sujet de votre projet.</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="vendor/qrcode.js"></script>
+    <script>
+        (function () {
+            var API_URL = 'https://saas-immobilier-921a.onrender.com';
+            var $ = function (id) { return document.getElementById(id); };
+            var token = localStorage.getItem('token');
+            if (!token) { window.location.replace('/login.html'); return; }
+            try { var u = JSON.parse(localStorage.getItem('user') || '{}'); if (u.email) $('email').textContent = u.email; } catch (e) { /* sans importance */ }
+            $('deconnexion').addEventListener('click', function () {
+                localStorage.removeItem('token'); localStorage.removeItem('user'); window.location.replace('/login.html');
+            });
+
+            function appel(chemin) {
+                return fetch(API_URL + chemin, { headers: { 'Authorization': 'Bearer ' + token } }).then(function (r) {
+                    if (r.status === 401) { localStorage.removeItem('token'); localStorage.removeItem('user'); window.location.replace('/login.html'); throw new Error('Session expirée'); }
+                    if (!r.ok) throw new Error('Erreur ' + r.status);
+                    return r.json();
+                });
+            }
+
+            var svgQr = '';
+            function dessiner(adresse) {
+                var qr = qrcode(0, 'M');
+                qr.addData(adresse);
+                qr.make();
+                svgQr = qr.createSvgTag({ cellSize: 8, margin: 0, scalable: true });
+                $('f-qr').innerHTML = svgQr;      // SVG produit par notre propre bibliothèque, à partir d'une adresse du serveur
+                $('f-adresse').textContent = adresse;
+            }
+            function majTextes() {
+                $('f-titre').textContent = $('titre').value;
+                $('f-phrase').textContent = $('phrase').value;
+            }
+            $('titre').addEventListener('input', majTextes);
+            $('phrase').addEventListener('input', majTextes);
+            $('imprimer').addEventListener('click', function () { window.print(); });
+            $('telecharger').addEventListener('click', function () {
+                var blob = new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + svgQr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"')], { type: 'image/svg+xml' });
+                var a = document.createElement('a');
+                a.href = URL.createObjectURL(blob); a.download = 'qr-code-formulaire-zelyro.svg';
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+            });
+
+            Promise.all([appel('/api/v1/capture-link'), appel('/auth/profile')]).then(function (r) {
+                var agence = (r[1].company_name || '').trim();
+                $('f-agence').textContent = agence;
+                if (!agence) $('f-agence').classList.add('masque');
+                majTextes();
+                dessiner(r[0].url);
+                $('chargement').classList.add('masque');
+                $('contenu').classList.remove('masque');
+            }).catch(function (e) {
+                $('chargement').classList.add('masque');
+                $('erreur').textContent = 'Impossible de préparer l\'affiche : ' + e.message;
+                $('erreur').classList.remove('masque');
+            });
+        })();
+    </script>
+</body>
+</html>

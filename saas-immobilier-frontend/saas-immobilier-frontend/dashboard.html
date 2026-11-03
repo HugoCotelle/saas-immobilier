@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZELYRO - Dashboard</title>
+    <meta name="robots" content="noindex">
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="zelyro.css">
+    <style>
+        .content-grid { grid-template-columns: 1fr 1fr; }
+        .stats-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+        .stat-value { font-size: 42px; }
+    </style>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <script src="/pwa.js" defer></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+
+        const STATUTS = [
+            ['nouveau', 'Nouveau'], ['contacte', 'Contacté'], ['visite', 'Visite'],
+            ['offre', 'Offre'], ['signe', 'Signé'], ['perdu', 'Perdu']
+        ];
+        const QUALITES = [['hot', 'Acheteur actif'], ['warm', 'Projet en cours'], ['cold', 'Premier contact']];
+        const SOURCES = [
+            ['manuel', 'Saisie à la main'], ['import', 'Import de fichier'],
+            ['formulaire', 'Formulaire de contact'], ['extraction', "Extrait d'un message"],
+            ['leboncoin', 'LeBonCoin'], ['seloger', 'SeLoger'], ['portail', 'E-mail transféré'], ['api', 'API partenaire']
+        ];
+
+        const dateCourte = (iso) => {
+            const [a, m, j] = iso.split('-').map(Number);
+            return new Date(a, m - 1, j).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+        };
+        // « il y a 12 min », « il y a 3 h », « hier », puis la date.
+        const ilYA = (iso) => {
+            const d = new Date(iso);
+            if (isNaN(d)) return '';
+            const min = Math.round((Date.now() - d.getTime()) / 60000);
+            if (min < 1) return "à l'instant";
+            if (min < 60) return `il y a ${min} min`;
+            if (min < 24 * 60) return `il y a ${Math.round(min / 60)} h`;
+            if (min < 48 * 60) return 'hier';
+            return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+        };
+        // Dernière visite de l'agent sur le tableau de bord, pour repérer ce qui est nouveau.
+        const CLE_ACTIVITE_VUE = 'zelyro_activite_vue';
+        const lireVue = () => { try { return localStorage.getItem(CLE_ACTIVITE_VUE) || ''; } catch (e) { return ''; } };
+        const ecrireVue = (iso) => { try { localStorage.setItem(CLE_ACTIVITE_VUE, iso); } catch (e) { /* stockage indisponible : sans conséquence */ } };
+
+        const duree = (heures) => {
+            if (heures === null || heures === undefined) return '—';
+            if (heures < 1) return "< 1 h";
+            if (heures < 48) return `${Math.round(heures)} h`;
+            return `${(heures / 24).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} j`;
+        };
+
+        // Une ligne par catégorie : le nom, une barre proportionnelle au plus grand
+        // effectif, et le nombre.
+        // Courbe des nouveaux prospects par semaine (chiffres réels de l'agence, SVG dessiné ici : aucun script externe).
+        function Tendance({ valeurs }) {
+            const L = 600, H = 150, bas = 130, haut = 14, marge = 10;
+            const maxi = Math.max(1, ...valeurs);
+            const x = (i) => marge + (i * (L - 2 * marge)) / Math.max(1, valeurs.length - 1);
+            const y = (v) => bas - ((bas - haut) * v) / maxi;
+            const points = valeurs.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+            const aire = `M${x(0).toFixed(1)},${bas} L${points.join(' L')} L${x(valeurs.length - 1).toFixed(1)},${bas} Z`;
+            const total = valeurs.reduce((a, b) => a + b, 0);
+            return (
+                <div>
+                    <svg className="tendance" viewBox={`0 0 ${L} ${H}`} role="img"
+                        aria-label={`Nouveaux prospects par semaine sur ${valeurs.length} semaines : ${valeurs.join(', ')}`}>
+                        <defs>
+                            <linearGradient id="tendance-aire" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="#4F6353" stopOpacity="0.28" />
+                                <stop offset="100%" stopColor="#4F6353" stopOpacity="0" />
+                            </linearGradient>
+                        </defs>
+                        {[0, 0.5, 1].map((f) => (
+                            <line key={f} x1={marge} x2={L - marge} y1={bas - (bas - haut) * f} y2={bas - (bas - haut) * f} className="tendance-grille" />
+                        ))}
+                        <path d={aire} fill="url(#tendance-aire)" />
+                        <polyline points={points.join(' ')} className="tendance-ligne" />
+                        {valeurs.map((v, i) => (
+                            <circle key={i} cx={x(i)} cy={y(v)} r={i === valeurs.length - 1 ? 4.5 : 2.5} className={i === valeurs.length - 1 ? 'tendance-point actif' : 'tendance-point'} />
+                        ))}
+                    </svg>
+                    <div className="tendance-legende">
+                        <span>Il y a {valeurs.length} semaines</span>
+                        <span>{total} au total</span>
+                        <span>Cette semaine : {valeurs[valeurs.length - 1]}</span>
+                    </div>
+                </div>
+            );
+        }
+
+        const ECARTS = [
+            ['alertes', "Alertes de portail (pas une demande)"], ['spam', 'Spam'],
+            ['non_contact', "Messages qui n'étaient pas une demande"], ['vides', 'Messages sans coordonnées'],
+            ['quota', 'Refusés (quota atteint)']
+        ];
+
+        // Ce que l'agence reçoit : par portail, par annonce, et ce qui a été écarté (alertes, spam...).
+        function Reception({ donnees, jours, onJours, etat, onRetry }) {
+            const t = donnees.totals;
+            const taux = t.received ? Math.round((100 * t.created) / t.received) : 0;
+            const ecarts = ECARTS.filter(([c]) => (donnees.ignored_reasons[c] || 0) > 0);
+            return (
+                <div className="panel" style={{ marginBottom: '20px' }}>
+                    <div className="reception-entete">
+                        <div>
+                            <div className="panel-title">Demandes reçues</div>
+                            <div className="panel-note">Ce qui arrive par vos portails et vos e-mails transférés, et ce que Zelyro en fait.</div>
+                        </div>
+                        <div className="periodes" role="group" aria-label="Période">
+                            {[[7, '7 jours'], [30, '30 jours'], [90, '90 jours']].map(([j, nom]) => (
+                                <button key={j} type="button" className={jours === j ? 'periode actif' : 'periode'}
+                                    aria-pressed={jours === j} onClick={() => onJours(j)}>{nom}</button>
+                            ))}
+                        </div>
+                    </div>
+                    {etat === 'chargement' && <p className="panel-note" role="status" aria-live="polite">Chargement…</p>}
+                    {etat === 'erreur' && (
+                        <div className="error" role="alert">
+                            Impossible de charger les demandes reçues pour le moment.{' '}
+                            <button type="button" className="lien-bouton" onClick={onRetry}>Réessayer</button>
+                        </div>
+                    )}
+                    {t.received === 0 ? (
+                        <p className="panel-note" style={{ margin: 0 }}>Aucune demande reçue sur cette période.</p>
+                    ) : (
+                        <>
+                            <div className="reception-chiffres">
+                                <div><strong>{t.received}</strong><span>reçues</span></div>
+                                <div><strong>{t.created}</strong><span>devenues prospects</span></div>
+                                <div><strong>{t.ignored}</strong><span>écartées</span></div>
+                                <div><strong>{taux} %</strong><span>de transformation</span></div>
+                            </div>
+                            <div className="content-grid">
+                                <div>
+                                    <div className="reception-titre">Par portail</div>
+                                    <div className="reception-portails"><Barres lignes={donnees.by_portal.map((p) => [p.portal, `${p.label} · ${p.created} prospect${p.created > 1 ? 's' : ''}`, p.received])} /></div>
+                                    {ecarts.length > 0 && (
+                                        <>
+                                            <div className="reception-titre">Écartées automatiquement</div>
+                                            <ul className="reception-liste">
+                                                {ecarts.map(([c, nom]) => (
+                                                    <li key={c}><span>{nom}</span><strong>{donnees.ignored_reasons[c]}</strong></li>
+                                                ))}
+                                            </ul>
+                                        </>
+                                    )}
+                                </div>
+                                <div>
+                                    <div className="reception-titre">Annonces qui attirent le plus</div>
+                                    {donnees.by_listing.length === 0 ? (
+                                        <p className="panel-note" style={{ margin: 0 }}>
+                                            Les annonces apparaissent dès qu'un message en mentionne une (titre ou référence).
+                                        </p>
+                                    ) : (
+                                        <ul className="reception-liste">
+                                            {donnees.by_listing.map((a, i) => (
+                                                <li key={i}>
+                                                    <span>
+                                                        {a.title || `Réf. ${a.reference}`}
+                                                        {a.title && a.reference ? <em> · réf. {a.reference}</em> : null}
+                                                        <small>{Object.entries(a.portals).map(([n, c]) => `${n} ${c}`).join(' · ')}</small>
+                                                    </span>
+                                                    <strong>{a.contacts}</strong>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                </div>
+                            </div>
+                        </>
+                    )}
+                </div>
+            );
+        }
+
+        function Barres({ lignes, classe }) {
+            const maxi = Math.max(1, ...lignes.map((l) => l[2]));
+            return (
+                <div className="barres">
+                    {lignes.map(([cle, nom, n]) => (
+                        <div key={cle} className="barre-ligne">
+                            <div className="barre-nom">{nom}</div>
+                            <div className="barre-piste" role="img" aria-label={`${nom} : ${n}`}>
+                                <div className={`barre-remplie ${cle === 'perdu' ? 'perdu' : classe || ''}`}
+                                    style={{ width: `${(100 * n) / maxi}%` }}></div>
+                            </div>
+                            <div className="barre-nombre">{n}</div>
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+
+        function DashboardApp() {
+            const [stats, setStats] = useState(null);
+            const [rappels, setRappels] = useState([]);
+            const [biens, setBiens] = useState([]);
+            const [filtre, setFiltre] = useState('');
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [user, setUser] = useState(null);
+            // Lu une fois, avant d'être mis à jour : ce qui est postérieur est « nouveau » pour l'agent.
+            const [vueAvant] = useState(lireVue);
+            const [dormants, setDormants] = useState(null);
+            const [reception, setReception] = useState(null);
+            const [jours, setJours] = useState(30);
+            const [receptionEtat, setReceptionEtat] = useState('ok');      // ok | chargement | erreur
+            const dernierAppelReception = React.useRef(0);                // ignore les réponses devenues obsolètes
+            const [tauxSaisi, setTauxSaisi] = useState('');
+            const [tauxMessage, setTauxMessage] = useState(null);
+
+            useEffect(() => {
+                const token = localStorage.getItem('token');
+                const userData = localStorage.getItem('user');
+                if (!token) {
+                    window.location.replace('/login.html');
+                    return;
+                }
+                if (userData) setUser(JSON.parse(userData));
+                chargerTout(token);
+            }, []);
+
+            const chargerReception = (j) => {
+                const token = localStorage.getItem('token');
+                if (!token) return;
+                const numero = ++dernierAppelReception.current;
+                setReceptionEtat('chargement');
+                fetch(`${API_URL}/api/v1/reception/stats?days=${j}`, { headers: { 'Authorization': `Bearer ${token}` } })
+                    .then((r) => {
+                        if (r.status === 401) {
+                            localStorage.removeItem('token');
+                            localStorage.removeItem('user');
+                            window.location.replace('/login.html');
+                            return null;
+                        }
+                        return r.ok ? r.json() : Promise.reject(new Error('stats'));
+                    })
+                    .then((d) => {
+                        if (numero !== dernierAppelReception.current || !d) return;   // réponse d'une période déjà quittée
+                        setReception(d);
+                        setReceptionEtat('ok');
+                    })
+                    .catch(() => { if (numero === dernierAppelReception.current) setReceptionEtat('erreur'); });
+            };
+            const changerPeriode = (j) => { setJours(j); chargerReception(j); };
+
+            const chargerTout = async (token) => {
+                try {
+                    setLoading(true);
+                    const entetes = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+                    // Les deux appels partent ensemble : les enchaîner
+                    // doublerait le temps d'attente sur un serveur qui sort
+                    // de veille.
+                    const [rStats, rBiens, rRappels] = await Promise.all([
+                        fetch(`${API_URL}/api/v1/dashboard`, { headers: entetes }),
+                        fetch(`${API_URL}/api/v1/properties`, { headers: entetes }),
+                        fetch(`${API_URL}/api/v1/reminders`, { headers: entetes })
+                    ]);
+
+                    if (rStats.status === 401 || rBiens.status === 401 || rRappels.status === 401) {
+                        localStorage.removeItem('token');
+                        localStorage.removeItem('user');
+                        window.location.replace('/login.html');
+                        return;
+                    }
+                    if (!rStats.ok) throw new Error(`Erreur API: ${rStats.status}`);
+                    if (!rBiens.ok) throw new Error(`Erreur API: ${rBiens.status}`);
+                    if (!rRappels.ok) throw new Error(`Erreur API: ${rRappels.status}`);
+
+                    const donnees = await rStats.json();
+                    setStats(donnees);
+                    if (donnees.activity && donnees.activity.length) ecrireVue(donnees.activity[0].created_at);
+                    setBiens(await rBiens.json());
+                    setRappels(await rRappels.json());
+                    if (donnees.commission) setTauxSaisi(String(donnees.commission.rate).replace('.', ','));
+                    setError(null);
+                    chargerReception(30);
+                    // Les prospects à réveiller se calculent à part : ils n'empêchent pas l'affichage du reste.
+                    fetch(`${API_URL}/api/v1/dormants`, { headers: entetes })
+                        .then((r) => (r.ok ? r.json() : null))
+                        .then((d) => setDormants(d))
+                        .catch(() => {});
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const euros = (n) => `${Number(n || 0).toLocaleString('fr-FR')} €`;
+
+            // Le taux se règle ici : on met aussi à jour les montants sans recharger la page.
+            const enregistrerTaux = async () => {
+                const taux = Number(String(tauxSaisi).replace(',', '.'));
+                if (!(taux >= 0.1 && taux <= 15)) { setTauxMessage('Indiquez un taux entre 0,1 et 15 %.'); return; }
+                setTauxMessage(null);
+                try {
+                    const r = await fetch(`${API_URL}/api/v1/commission-rate`, {
+                        method: 'PUT',
+                        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rate: taux })
+                    });
+                    const j = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(j.message || `Erreur ${r.status}`);
+                    setStats((st) => {
+                        const c = st.commission;
+                        const hot = { ...c.hot, commission: Math.round(c.hot.budget * j.rate / 100) };
+                        const warm = { ...c.warm, commission: Math.round(c.warm.budget * j.rate / 100) };
+                        return { ...st, commission: { rate: j.rate, hot, warm, total: hot.commission + warm.commission } };
+                    });
+                    setTauxSaisi(String(j.rate).replace('.', ','));
+                    setTauxMessage('Taux enregistré.');
+                } catch (err) {
+                    setTauxMessage(err.message);
+                }
+            };
+
+            const handleLogout = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.replace('/login.html');
+            };
+
+            const estNouveau = (iso) => !vueAvant || new Date(iso) > new Date(vueAvant);
+            const nouveautes = stats ? (stats.activity || []).filter((e) => estNouveau(e.created_at)).length : 0;
+            const f = filtre.trim().toLowerCase();
+            const biensFiltres = f
+                ? biens.filter((b) =>
+                    (b.title || '').toLowerCase().includes(f) ||
+                    (b.address || '').toLowerCase().includes(f) ||
+                    (b.property_type || '').toLowerCase().includes(f))
+                : biens;
+
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style={{ color: 'inherit', textDecoration: 'none' }}>ZELYRO</a></div>
+                            <nav>
+                                <a href="/taches.html">À faire</a>
+                                <a href="/prospects.html">Leads</a>
+                                <a href="/biens.html">Biens</a>
+                                <a href="/matching.html">Matching</a>
+                                <a href="/propositions.html">Propositions</a>
+                                <a href="/dashboard.html" className="active">Dashboard</a>
+                                <a href="/compte.html">Compte</a>
+                                {user && user.is_admin && <a href="/admin.html">Admin</a>}
+                            </nav>
+                            <div className="user-info">
+                                {user && <span className="user-email">{user.email}</span>}
+                                <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="container">
+                        <h1 className="page-title">Dashboard</h1>
+                        <p className="page-subtitle">Vue d'ensemble de votre agence</p>
+
+                        {error && <div className="error">Erreur: {error}</div>}
+
+                        {loading ? (
+                            <div className="loading">
+                                <div className="loader"></div>
+                                <p style={{ marginTop: '20px' }}>Chargement...</p>
+                            </div>
+                        ) : (
+                            <>
+                                {stats && (
+                                    <>
+                                    <div className="stats-grid">
+                                        <div className="stat-card">
+                                            <div className="stat-value">{stats.total_leads}</div>
+                                            <div className="stat-label">Prospects</div>
+                                            {stats.leads_location > 0 && (
+                                                <div className="stat-note">{stats.total_leads - stats.leads_location} en achat, {stats.leads_location} en location</div>
+                                            )}
+                                            <div className="stat-note">{stats.new_last_30_days} nouveau{stats.new_last_30_days > 1 ? 'x' : ''} ces 30 derniers jours</div>
+                                        </div>
+                                        <div className="stat-card">
+                                            <div className="stat-value">{stats.to_contact}</div>
+                                            <div className="stat-label">À contacter</div>
+                                            <div className="stat-note">Nouveaux depuis plus de 2 jours, jamais contactés</div>
+                                        </div>
+                                        <div className="stat-card">
+                                            <div className="stat-value">{duree(stats.avg_first_response_hours)}</div>
+                                            <div className="stat-label">Délai de réponse</div>
+                                            <div className="stat-note">Entre l'arrivée d'un prospect et son premier contact</div>
+                                        </div>
+                                        <div className="stat-card">
+                                            <div className="stat-value">{stats.conversion_rate === null ? '—' : `${stats.conversion_rate} %`}</div>
+                                            <div className="stat-label">Taux de signature</div>
+                                            <div className="stat-note">Prospects signés sur l'ensemble</div>
+                                        </div>
+                                        <div className="stat-card">
+                                            <div className="stat-value">{stats.total_properties}</div>
+                                            <div className="stat-label">Biens au portefeuille</div>
+                                            {stats.properties_location > 0 && (
+                                                <div className="stat-note">{stats.total_properties - stats.properties_location} à vendre, {stats.properties_location} à louer</div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="panel" style={{ marginBottom: '24px' }}>
+                                        <div className="panel-header">
+                                            <div className="panel-title">Activité des prospects</div>
+                                            <div className="panel-count">
+                                                {nouveautes > 0 ? `${nouveautes} nouveauté${nouveautes > 1 ? 's' : ''}` : '14 derniers jours'}
+                                            </div>
+                                        </div>
+                                        {(stats.activity || []).length === 0 ? (
+                                            <div className="empty-state">
+                                                Rien pour l'instant.<br />
+                                                Quand un prospect ouvre le lien de son formulaire, le remplit ou ouvre les annonces
+                                                que vous lui avez envoyées, vous le voyez ici.
+                                            </div>
+                                        ) : (
+                                            <div>
+                                                {stats.activity.slice(0, 8).map((e) => (
+                                                    <div key={e.id} className="afaire-item"
+                                                        style={e.kind === 'interet_bien' ? { borderLeft: '3px solid var(--hot)', paddingLeft: '12px' } : undefined}>
+                                                        <div className="afaire-quoi">
+                                                            <a href={`/leads-profile.html?id=${e.lead_id}`}>{e.name}</a>
+                                                            <small style={e.kind === 'interet_bien' ? { color: 'var(--hot)', fontWeight: 600 } : undefined}>
+                                                                {e.kind === 'interet_bien' ? 'À rappeler · ' : ''}{e.label}
+                                                            </small>
+                                                        </div>
+                                                        <div className="rappel-date" style={estNouveau(e.created_at) ? { color: 'var(--sage-700)', fontWeight: 600 } : undefined}>
+                                                            {estNouveau(e.created_at) ? 'Nouveau · ' : ''}{ilYA(e.created_at)}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                {stats.activity.length > 8 && (
+                                                    <div className="stat-note">… et {stats.activity.length - 8} autre{stats.activity.length - 8 > 1 ? 's' : ''}.</div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {stats.untreated && stats.untreated.count > 0 && (
+                                        <div className="panel" style={{ marginBottom: '24px' }}>
+                                            <div className="panel-header">
+                                                <div className="panel-title">Sans suite depuis {stats.untreated.hours} h</div>
+                                                <div className="panel-count">{stats.untreated.count} prospect{stats.untreated.count > 1 ? 's' : ''}</div>
+                                            </div>
+                                            {stats.untreated.items.map((p) => (
+                                                <div key={p.id} className="afaire-item">
+                                                    <div className="afaire-quoi">
+                                                        <a href={`/leads-profile.html?id=${p.id}`}>{p.name}</a>
+                                                        <small>{p.assigned_name ? `Responsable : ${p.assigned_name}` : 'Sans responsable'}</small>
+                                                    </div>
+                                                    <div className="rappel-date retard" style={{ color: 'var(--danger)', fontWeight: 600 }}>
+                                                        {p.hours >= 48 ? `${Math.floor(p.hours / 24)} j` : `${p.hours} h`} sans réponse
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {stats.untreated.count > stats.untreated.items.length && (
+                                                <div className="stat-note">… et {stats.untreated.count - stats.untreated.items.length} autre{stats.untreated.count - stats.untreated.items.length > 1 ? 's' : ''}. Ils sont aussi dans votre e-mail du matin.</div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {dormants && dormants.total > 0 && (
+                                        <div className="panel" style={{ marginBottom: '24px' }}>
+                                            <div className="panel-header">
+                                                <div className="panel-title">Prospects à réveiller</div>
+                                                <div className="panel-count">{dormants.total} prospect{dormants.total > 1 ? 's' : ''}</div>
+                                            </div>
+                                            <div className="panel-note">
+                                                Sans nouvelles depuis plus de {dormants.days} jours, et un bien de votre portefeuille leur correspond
+                                                aujourd'hui (un bien qu'on ne leur a pas déjà envoyé).
+                                            </div>
+                                            {dormants.dormants.slice(0, 5).map((d) => (
+                                                <div key={d.lead.id} className="afaire-item">
+                                                    <div className="afaire-quoi">
+                                                        <a href={`/leads-profile.html?id=${d.lead.id}`}>{d.lead.name}</a>
+                                                        <small>
+                                                            {d.days_inactive} j sans nouvelles · {d.biens[0].title}
+                                                            {d.biens.length > 1 ? ` (+${d.biens.length - 1})` : ''}
+                                                        </small>
+                                                    </div>
+                                                    <a className="lien-fiche" href={`/propositions.html?id=${d.lead.id}`}>Préparer la relance →</a>
+                                                </div>
+                                            ))}
+                                            {dormants.total > 5 && (
+                                                <div className="stat-note">… et {dormants.total - 5} autre{dormants.total - 5 > 1 ? 's' : ''}, à retrouver dans <a href="/propositions.html">Propositions</a>.</div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {stats.commission && (
+                                        <div className="panel" style={{ marginBottom: '24px' }}>
+                                            <div className="panel-header">
+                                                <div className="panel-title">Potentiel de commission</div>
+                                                <div className="panel-count">achats en cours</div>
+                                            </div>
+                                            <div className="chips-relances">
+                                                <span className="chip">{stats.commission.hot.count} chaud{stats.commission.hot.count > 1 ? 's' : ''} · budgets {euros(stats.commission.hot.budget)} · {euros(stats.commission.hot.commission)}</span>
+                                                <span className="chip">{stats.commission.warm.count} tiède{stats.commission.warm.count > 1 ? 's' : ''} · budgets {euros(stats.commission.warm.budget)} · {euros(stats.commission.warm.commission)}</span>
+                                            </div>
+                                            <div className="stat-value" style={{ marginTop: '12px' }}>{euros(stats.commission.total)}</div>
+                                            <div className="stat-note">
+                                                Commission si tous ces prospects achetaient à leur budget maximum, au taux de {String(stats.commission.rate).replace('.', ',')} %.
+                                                C'est un ordre de grandeur, pas une prévision : seuls les achats comptent, et pas les locations.
+                                            </div>
+                                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '14px', flexWrap: 'wrap' }}>
+                                                <label htmlFor="taux-commission" style={{ fontSize: '14px' }}>Taux moyen de votre agence (%)</label>
+                                                <input id="taux-commission" type="text" inputMode="decimal" value={tauxSaisi}
+                                                    onChange={(e) => { setTauxSaisi(e.target.value); setTauxMessage(null); }}
+                                                    style={{ width: '90px' }} />
+                                                <button className="btn petit" onClick={enregistrerTaux}>Enregistrer</button>
+                                                {tauxMessage && <span className="stat-note" role="status">{tauxMessage}</span>}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="content-grid">
+                                        <div className="panel">
+                                            <div className="panel-header">
+                                                <div className="panel-title">À faire</div>
+                                                <div className="panel-count">{rappels.length} relance{rappels.length > 1 ? 's' : ''}</div>
+                                            </div>
+                                            <div className="chips-relances">
+                                                <span className={`chip${stats.reminders.overdue ? ' retard' : ''}`}>{stats.reminders.overdue} en retard</span>
+                                                <span className="chip">{stats.reminders.today} aujourd'hui</span>
+                                                <span className="chip">{stats.reminders.this_week} cette semaine</span>
+                                            </div>
+                                            {rappels.length === 0 ? (
+                                                <div className="empty-state">
+                                                    Aucune relance en attente.<br />
+                                                    Depuis la fiche d'un prospect, fixez une date de relance : elle apparaîtra ici.
+                                                </div>
+                                            ) : (
+                                                <div>
+                                                    {rappels.slice(0, 8).map((r) => (
+                                                        <div key={r.id} className="afaire-item">
+                                                            <div className="afaire-quoi">
+                                                                <a href={`/leads-profile.html?id=${r.lead_id}`}>{r.lead_name}</a>
+                                                                <small>{r.label}</small>
+                                                            </div>
+                                                            <div className={`rappel-date${r.en_retard ? ' retard' : ''}`}
+                                                                style={r.en_retard ? { color: 'var(--danger)', fontWeight: 600 } : undefined}>
+                                                                {r.en_retard ? 'En retard · ' : ''}{dateCourte(r.due_date)}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                    {rappels.length > 8 && (
+                                                        <div className="stat-note">… et {rappels.length - 8} autre{rappels.length - 8 > 1 ? 's' : ''}.</div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="panel">
+                                            <div className="panel-header">
+                                                <div className="panel-title">Parcours</div>
+                                                <div className="panel-count">{stats.total_leads} prospect{stats.total_leads > 1 ? 's' : ''}</div>
+                                            </div>
+                                            <div className="panel-note">
+                                                Où en sont vos prospects. Un gros tas à « Nouveau » signale des
+                                                demandes qui attendent d'être contactées.
+                                            </div>
+                                            <Barres lignes={STATUTS.map(([c, n]) => [c, n, stats.pipeline[c] || 0])} />
+                                        </div>
+                                    </div>
+
+                                    {Array.isArray(stats.weekly_new) && stats.weekly_new.length > 1 && stats.weekly_new.some((n) => n > 0) && (
+                                        <div className="panel" style={{ marginBottom: '20px' }}>
+                                            <div className="panel-title">Nouveaux prospects par semaine</div>
+                                            <div className="panel-note">Les arrivées des {stats.weekly_new.length} dernières semaines, tous canaux confondus.</div>
+                                            <Tendance valeurs={stats.weekly_new} />
+                                        </div>
+                                    )}
+
+                                    {reception && <Reception donnees={reception} jours={jours} onJours={changerPeriode}
+                                        etat={receptionEtat} onRetry={() => chargerReception(jours)} />}
+                                    {!reception && receptionEtat === 'erreur' && (
+                                        <div className="panel" style={{ marginBottom: '20px' }}>
+                                            <div className="error" role="alert">
+                                                Impossible de charger les demandes reçues pour le moment.{' '}
+                                                <button type="button" className="lien-bouton" onClick={() => chargerReception(jours)}>Réessayer</button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="content-grid">
+                                        <div className="panel">
+                                            <div className="panel-title">Origine des prospects</div>
+                                            <div className="panel-note">
+                                                D'où viennent-ils : saisis à la main, importés d'un fichier ou
+                                                arrivés par votre formulaire de contact.
+                                            </div>
+                                            <Barres classe="source" lignes={SOURCES.map(([c, n]) => [c, n, stats.sources[c] || 0])} />
+                                        </div>
+                                        <div className="panel">
+                                            <div className="panel-title">Classement</div>
+                                            <div className="panel-note">
+                                                Prospects en cours (hors signés et perdus), classés d'après leur
+                                                financement, leur échéance et la précision de leur besoin.
+                                            </div>
+                                            <Barres lignes={QUALITES.map(([c, n]) => [c, n, stats.quality[c] || 0])} />
+                                        </div>
+                                    </div>
+                                    </>
+                                )}
+
+                                <div className="content-grid" style={{ gridTemplateColumns: '1fr' }}>
+                                    <div className="panel">
+                                        <div className="panel-header">
+                                            <div className="panel-title">Portefeuille</div>
+                                            <div className="panel-count">
+                                                {biensFiltres.length}
+                                                {f && ` sur ${biens.length}`}
+                                            </div>
+                                        </div>
+                                        <div className="panel-note">
+                                            Tous les biens de votre agence.
+                                        </div>
+
+                                        {biens.length > 0 && (
+                                            <input className="recherche" type="text" value={filtre}
+                                                onChange={(e) => setFiltre(e.target.value)}
+                                                placeholder="Filtrer par titre, adresse ou type..." />
+                                        )}
+
+                                        {biens.length === 0 ? (
+                                            <div className="empty-state">
+                                                Aucun bien au portefeuille.
+                                            </div>
+                                        ) : biensFiltres.length === 0 ? (
+                                            <div className="empty-state">
+                                                Aucun bien ne correspond à « {filtre} ».
+                                            </div>
+                                        ) : (
+                                            <div className="biens-liste">
+                                                {biensFiltres.map((b) => (
+                                                    <div key={b.id} className="bien-card">
+                                                        <div className="bien-header">
+                                                            <div className="bien-titre">{b.title}</div>
+                                                            <div className="bien-prix">
+                                                                {b.price ? `${b.price.toLocaleString('fr-FR')} €${b.transaction === 'location' ? ' / mois' : ''}` : '—'}
+                                                            </div>
+                                                        </div>
+                                                        <div className="bien-adresse">
+                                                            {b.address || 'Adresse non renseignée'}
+                                                        </div>
+                                                        <div className="bien-details">
+                                                            {b.rooms ? `${b.rooms} pièces` : 'Pièces non renseignées'}
+                                                            {' · '}
+                                                            {b.size ? `${b.size} m²` : 'Surface non renseignée'}
+                                                        </div>
+                                                        {b.property_type && (
+                                                            <span className="bien-type">{b.property_type}</span>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </>
+            );
+        }
+
+        ReactDOM.render(<DashboardApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>

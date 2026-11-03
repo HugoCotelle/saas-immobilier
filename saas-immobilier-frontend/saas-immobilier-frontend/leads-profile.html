@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZELYRO - Fiche prospect</title>
+    <meta name="robots" content="noindex">
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="zelyro.css">
+    <style>
+        .content-wrapper { grid-template-columns: 1.3fr 1fr; }
+        .form-row { grid-template-columns: 1fr 1fr; }
+        @media (max-width: 700px) { .form-row { grid-template-columns: 1fr; } }
+    </style>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <script src="/pwa.js" defer></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+
+        // Reproduit la logique du serveur pour expliquer le classement à
+        // l'agent. Si les seuils changent côté backend, il faut les changer
+        // ici aussi — c'est le prix de l'explication en direct.
+        // Coordonnées : la moitié des points pour un e-mail plausible, l'autre
+        // moitié pour un numéro plausible (mêmes règles que le serveur).
+        function coordonnees(lead, total) {
+            const moitie = Math.floor(total / 2);
+            const email = String(lead.email || '').trim();
+            const chiffres = String(lead.phone || '').replace(/\D/g, '');
+            return {
+                email: email.length <= 255 && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) ? moitie : 0,
+                phone: chiffres.length >= 8 && chiffres.length <= 15 ? total - moitie : 0
+            };
+        }
+
+        // Numéro au format international sans « + » (06 12 34 56 78 -> 33612345678), pour tel: et WhatsApp.
+        function numeroInternational(tel) {
+            var d = String(tel || '').replace(/[^\d+]/g, '');
+            if (!d) return '';
+            if (d.charAt(0) === '+') return d.slice(1).replace(/\D/g, '');
+            if (d.slice(0, 2) === '00') return d.slice(2);
+            if (d.charAt(0) === '0' && d.length === 10) return '33' + d.slice(1);
+            return d;
+        }
+        // Prénom pour le message, sauf nom provisoire donné à un contact de portail.
+        function prenomPourMessage(nom) {
+            var n = String(nom || '').trim();
+            if (!n || /^Contact (LeBonCoin|SeLoger|\()/.test(n)) return '';
+            return n.split(' ')[0];
+        }
+
+        // Engagement : ce que le prospect a fait avec les liens reçus (points calculés par le serveur).
+        function ajouterEngagement(lead, ajouter) {
+            var lignes = lead.engagement_lignes || [];
+            var total = 0;
+            lignes.forEach(function (l) { total += l[0]; ajouter(l[0], l[1]); });
+            if (total > 12) ajouter(12 - total, 'Plafond de l\'engagement (12 points)');
+            return Math.min(total, 12);
+        }
+
+        function expliquerQualite(lead) {
+            if (lead.transaction === 'location') return expliquerQualiteLocataire(lead);
+            const lignes = [];
+            let points = 0;
+
+            const fin = {
+                approved: [36, 'Financement approuvé'],
+                in_progress: [22, 'Financement en cours'],
+                pending: [11, 'Financement en attente']
+            }[lead.financing_status];
+            if (fin) { points += fin[0]; lignes.push(`+${fin[0]} ${fin[1]}`); }
+
+            const urg = {
+                immediate: [32, 'Achat immédiat'],
+                '1-3_months': [25, 'Achat sous 3 mois'],
+                '3-6_months': [14, 'Achat sous 6 mois'],
+                '6plus_months': [4, 'Achat au-delà de 6 mois']
+            }[lead.purchase_urgency];
+            if (urg) { points += urg[0]; lignes.push(`+${urg[0]} ${urg[1]}`); }
+
+            const coord = coordonnees(lead, 8);
+            if (coord.email) { points += coord.email; lignes.push(`+${coord.email} E-mail renseigné`); }
+            if (coord.phone) { points += coord.phone; lignes.push(`+${coord.phone} Téléphone renseigné`); }
+            if (lead.budget) { points += 5; lignes.push('+5 Budget renseigné'); }
+            if (lead.location) { points += 4; lignes.push('+4 Secteur renseigné'); }
+            if (lead.property_type) { points += 3; lignes.push('+3 Type de bien renseigné'); }
+            points += ajouterEngagement(lead, (n, t) => lignes.push(`${n > 0 ? '+' : ''}${n} ${t}`));
+
+            points = Math.min(100, points);
+            const quality = points >= 80 ? 'hot' : points >= 45 ? 'warm' : 'cold';
+            return { quality, points, lignes };
+        }
+
+        // Même calcul que _qualite_locataire côté serveur : solidité du dossier,
+        // échéance et complétude. Revenus et loyer viennent du formulaire (texte).
+        function expliquerQualiteLocataire(lead) {
+            const lignes = [];
+            let points = 0;
+            const loyer = parseInt(lead.budget, 10) || 0;
+            const revenus = parseInt(lead.revenus, 10) || 0;
+            // Un local commercial ou un bureau se loue à un professionnel : on ne compte aucun garant.
+            const garants = ['Local commercial', 'Bureau'].includes(lead.property_type) ? 0 : (parseInt(lead.garants, 10) || 0);
+            const ajouter = (n, texte) => { points += n; lignes.push(`${n > 0 ? '+' : ''}${n} ${texte}`); };
+
+            if (revenus && loyer) {
+                const r = revenus / loyer;
+                const txt = r.toFixed(1).replace('.', ',').replace(',0', '');
+                if (r >= 3) ajouter(27, `Revenus de ${txt} fois le loyer`);
+                else if (r >= 2.5) ajouter(18, `Revenus de ${txt} fois le loyer (3 fois exigés)`);
+                else if (r >= 2) ajouter(9, `Revenus de ${txt} fois le loyer (3 fois exigés)`);
+                else ajouter(3, `Revenus de ${txt} fois le loyer, insuffisants`);
+                if (garants) ajouter(r >= 3 ? 4 : 11, 'Garant disponible');
+            } else if (garants) {
+                ajouter(13, 'Garant disponible');
+            }
+
+            const situation = { cdi: 13, fonctionnaire: 13, retraite: 11, independant: 8, cdd: 5, etudiant: 4, autre: 2 }[lead.situation_pro];
+            if (situation) ajouter(situation, `Situation : ${(SITUATIONS.find((x) => x[0] === lead.situation_pro) || [])[1]}`);
+
+            const urg = {
+                immediate: [24, 'Emménagement immédiat'],
+                '1-3_months': [19, 'Emménagement sous 3 mois'],
+                '3-6_months': [10, 'Emménagement sous 6 mois'],
+                '6plus_months': [3, 'Emménagement au-delà de 6 mois']
+            }[lead.purchase_urgency];
+            if (urg) ajouter(urg[0], urg[1]);
+
+            const coord = coordonnees(lead, 8);
+            if (coord.email) ajouter(coord.email, 'E-mail renseigné');
+            if (coord.phone) ajouter(coord.phone, 'Téléphone renseigné');
+            if (lead.budget) ajouter(5, 'Loyer maximum renseigné');
+            if (lead.location) ajouter(4, 'Secteur renseigné');
+            if (lead.property_type) ajouter(3, 'Type de bien renseigné');
+            ajouterEngagement(lead, (n, t) => ajouter(n, t));
+
+            points = Math.min(100, points);
+            const quality = points >= 80 ? 'hot' : points >= 45 ? 'warm' : 'cold';
+            return { quality, points, lignes };
+        }
+
+        // Classe la moins bonne que le prospect accepte : « C ou mieux » = A, B ou C.
+        const LIMITES_ENERGIE = [['', 'Indifférent'], ['A', 'A uniquement'], ['B', 'B ou mieux'], ['C', 'C ou mieux'],
+            ['D', 'D ou mieux'], ['E', 'E ou mieux'], ['F', 'F ou mieux']];
+        const SITUATIONS = [
+            ['cdi', 'CDI'], ['fonctionnaire', 'Fonctionnaire'], ['cdd', 'CDD ou intérim'],
+            ['independant', "Indépendant ou chef d'entreprise"], ['retraite', 'Retraité'],
+            ['etudiant', 'Étudiant'], ['autre', 'Autre']
+        ];
+
+        // Palier de couleur selon le score /100 (voir zelyro.css). Sans score, on retombe sur le niveau historique.
+        const palier = (score, q) => typeof score !== 'number'
+            ? (q === 'hot' ? 'p-vert' : q === 'warm' ? 'p-orange' : 'p-gris')
+            : score >= 90 ? 'p-go' : score >= 80 ? 'p-vert' : score >= 65 ? 'p-jaune' : score >= 45 ? 'p-orange' : 'p-gris';
+
+        const LIBELLES = {
+            hot: 'Acheteur actif',
+            warm: 'Projet en cours',
+            cold: 'Premier contact'
+        };
+
+        // Les valeurs sont celles du serveur (leads.status).
+        const STATUTS = [
+            ['nouveau', 'Nouveau'], ['contacte', 'Contacté'], ['visite', 'Visite'],
+            ['offre', 'Offre'], ['signe', 'Signé'], ['perdu', 'Perdu']
+        ];
+        const SOURCES = {
+            manuel: 'Ajouté à la main',
+            import: 'Import de fichier',
+            formulaire: 'Formulaire de contact',
+            extraction: "Extrait d'un message",
+            leboncoin: 'LeBonCoin',
+            seloger: 'SeLoger',
+            portail: 'E-mail transféré',
+            api: 'API partenaire'
+        };
+
+        const deuxChiffres = (n) => String(n).padStart(2, '0');
+        // Date du jour dans le fuseau de l'agent, au format AAAA-MM-JJ.
+        const jourLocal = (decalage = 0) => {
+            const d = new Date();
+            d.setDate(d.getDate() + decalage);
+            return `${d.getFullYear()}-${deuxChiffres(d.getMonth() + 1)}-${deuxChiffres(d.getDate())}`;
+        };
+        // « 2026-09-21 » -> 21 sept. 2026, sans passer par UTC (qui décalerait d'un jour).
+        const dateCourte = (iso) => {
+            const [a, m, j] = iso.split('-').map(Number);
+            return new Date(a, m - 1, j).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+        };
+        const dateHeure = (iso) => new Date(iso).toLocaleString('fr-FR',
+            { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+        const euros = (n) => `${Math.round(n).toLocaleString('fr-FR')} €`;
+
+        // Résultat de l'estimation indicative (usage interne : ne pas montrer au prospect).
+        function ResultatEstimation({ r }) {
+            const e = r.estimation;
+            const libelleConfiance = { bonne: 'Fiabilité correcte', moyenne: 'Fiabilité moyenne', faible: 'Fiabilité faible' }[r.confiance] || '';
+            return (
+                <div className="estim-resultat">
+                    <div className="estim-etiquette">Valeur indicative</div>
+                    <div className="estim-fourchette">{euros(e.basse)} <span>à</span> {euros(e.haute)}</div>
+                    <div className="estim-mediane">
+                        Valeur centrale : {euros(e.mediane)} · {r.prix_m2.median.toLocaleString('fr-FR')} €/m²
+                    </div>
+                    <div className="estim-adresse">Adresse retenue : {r.adresse_trouvee}</div>
+                    <div className="estim-meta">
+                        <span className={`estim-confiance estim-${r.confiance}`}>{libelleConfiance}</span>
+                        <span>{r.nb_ventes} ventes comparables</span>
+                        <span>{r.rayon_m ? `dans ${r.rayon_m} m` : 'dans la commune'}</span>
+                        <span>sur {r.annees} ans</span>
+                    </div>
+                    <ul className="estim-avertissements">
+                        {r.avertissements.map((a, i) => <li key={i}>{a}</li>)}
+                    </ul>
+                    <details className="estim-details">
+                        <summary>Voir les ventes les plus proches</summary>
+                        <div className="estim-table-wrap">
+                            <table className="estim-table">
+                                <thead>
+                                    <tr><th>Adresse</th><th>Date</th><th>Surface</th><th>Prix</th><th>€/m²</th><th>Distance</th></tr>
+                                </thead>
+                                <tbody>
+                                    {r.comparables.map((c, i) => (
+                                        <tr key={i}>
+                                            <td>{c.adresse || 'Adresse non communiquée'}</td>
+                                            <td>{dateCourte(c.date)}</td>
+                                            <td>{c.surface} m²{c.pieces ? ` · ${c.pieces} p.` : ''}</td>
+                                            <td>{euros(c.prix)}</td>
+                                            <td>{c.prix_m2.toLocaleString('fr-FR')}</td>
+                                            <td>{c.distance_m} m</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </details>
+                    <p className="estim-source">Source : {r.source}. Estimation indicative, à confirmer par une visite.</p>
+                </div>
+            );
+        }
+
+        function LeadProfile() {
+            const [lead, setLead] = useState(null);
+            const [form, setForm] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [saving, setSaving] = useState(false);
+            const [error, setError] = useState(null);
+            const [saved, setSaved] = useState(false);
+            const [doublon, setDoublon] = useState(null);
+            const [user, setUser] = useState(null);
+            const [notes, setNotes] = useState([]);
+            const [lienPerso, setLienPerso] = useState(null);
+            const [lienCopie, setLienCopie] = useState(false);
+            const [membres, setMembres] = useState([]);
+            const [rappels, setRappels] = useState([]);
+            const [rdvInfo, setRdvInfo] = useState(null);          // planning et rendez-vous ; null tant que non chargé
+            const [messageRdv, setMessageRdv] = useState(null);
+            const [lienRdv, setLienRdv] = useState(null);
+            const [confirmerAnnulRdv, setConfirmerAnnulRdv] = useState(false);
+            const [nouvelleNote, setNouvelleNote] = useState('');
+            const [rappelDate, setRappelDate] = useState('');
+            const [rappelTexte, setRappelTexte] = useState('');
+            const [occupe, setOccupe] = useState(false);
+            const [erreurSuivi, setErreurSuivi] = useState(null);
+            const [confirmerSuppression, setConfirmerSuppression] = useState(false);
+            const [estim, setEstim] = useState({ chargement: false, resultat: null, erreur: null });
+
+            const leadId = new URLSearchParams(window.location.search).get('id');
+
+            useEffect(() => {
+                const token = localStorage.getItem('token');
+                const userData = localStorage.getItem('user');
+                if (!token) {
+                    window.location.replace('/login.html');
+                    return;
+                }
+                if (userData) setUser(JSON.parse(userData));
+                if (!leadId) {
+                    setError("Aucun prospect indiqué dans l'adresse.");
+                    setLoading(false);
+                    return;
+                }
+                fetchLead(token);
+                chargerSuivi();
+                appel('/api/v1/team/members').then(setMembres).catch(() => {});
+            }, []);
+
+            const deconnecter = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.replace('/login.html');
+            };
+
+            // Appel authentifié : renvoie le JSON, ou lève une erreur avec le
+            // message du serveur.
+            const appel = async (chemin, options = {}) => {
+                const r = await fetch(`${API_URL}${chemin}`, {
+                    ...options,
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}`, 'Content-Type': 'application/json' }
+                });
+                if (r.status === 401) { deconnecter(); throw new Error('Session expirée'); }
+                if (!r.ok) {
+                    let message = `Erreur ${r.status}`;
+                    try { const j = await r.json(); if (j.message) message = j.message; } catch (e) { /* corps vide */ }
+                    throw new Error(message);
+                }
+                return r.json();
+            };
+
+            const chargerSuivi = async () => {
+                try {
+                    const [n, r, rdv] = await Promise.all([
+                        appel(`/api/v1/leads/${leadId}/notes`),
+                        appel(`/api/v1/leads/${leadId}/reminders`),
+                        appel(`/api/v1/leads/${leadId}/rdv`).catch(() => null)
+                    ]);
+                    setNotes(n);
+                    setRappels(r);
+                    setRdvInfo(rdv);
+                } catch (err) {
+                    setErreurSuivi(err.message);
+                }
+            };
+
+            // Chaque action du suivi suit le même chemin : on l'exécute, on
+            // recharge, et une erreur s'affiche au lieu de disparaître.
+            const agir = async (action) => {
+                setOccupe(true);
+                setErreurSuivi(null);
+                try { await action(); await chargerSuivi(); }
+                catch (err) { setErreurSuivi(err.message); }
+                finally { setOccupe(false); }
+            };
+
+            const changerStatut = (statut) => agir(async () => {
+                await appel(`/api/v1/leads/${leadId}/status`, { method: 'PUT', body: JSON.stringify({ status: statut }) });
+                setLead((l) => ({ ...l, status: statut }));
+            });
+
+            // Confier le prospect à un collaborateur (ou à personne).
+            const changerResponsable = (valeur) => agir(async () => {
+                const cible = valeur === '' ? null : Number(valeur);
+                await appel(`/api/v1/leads/${leadId}/assign`, { method: 'PUT', body: JSON.stringify({ user_id: cible }) });
+                setLead((l) => ({ ...l, assigned_to: cible }));
+            });
+
+            const ajouterNote = () => agir(async () => {
+                if (!nouvelleNote.trim()) return;
+                await appel(`/api/v1/leads/${leadId}/notes`, { method: 'POST', body: JSON.stringify({ body: nouvelleNote }) });
+                setNouvelleNote('');
+            });
+
+            // Lien personnel du formulaire + message prêt à coller (messagerie du
+            // portail, SMS, WhatsApp) : sert surtout quand l'e-mail est inconnu.
+            const copierLien = () => agir(async () => {
+                const d = await appel(`/api/v1/leads/${leadId}/completion-link`, { method: 'POST' });
+                setLienPerso(d);
+                try { await navigator.clipboard.writeText(d.message); setLienCopie(true); }
+                catch (e) { setLienCopie(false); }
+            });
+
+            // Planning de rendez-vous : envoi par e-mail, ou lien à coller (SMS, WhatsApp, messagerie du portail).
+            const envoyerPlanning = () => agir(async () => {
+                setMessageRdv(null);
+                const d = await appel(`/api/v1/leads/${leadId}/rdv/envoyer`, { method: 'POST', body: JSON.stringify({ canal: 'email' }) });
+                setLienRdv(null);
+                setMessageRdv({ type: 'success', text: 'Planning envoyé par e-mail. Le rendez-vous apparaîtra ici dès que le prospect aura choisi un créneau.' });
+            });
+            const copierPlanning = () => agir(async () => {
+                setMessageRdv(null);
+                const d = await appel(`/api/v1/leads/${leadId}/rdv/envoyer`, { method: 'POST', body: JSON.stringify({ canal: 'lien' }) });
+                let copie = false;
+                try { await navigator.clipboard.writeText(d.message); copie = true; } catch (e) { copie = false; }
+                setLienRdv({ message: d.message, copie });
+            });
+            const annulerRdv = () => agir(async () => {
+                setMessageRdv(null);
+                await appel(`/api/v1/leads/${leadId}/rdv`, { method: 'DELETE' });
+                setConfirmerAnnulRdv(false);
+                setLienRdv(null);
+                setMessageRdv({ type: 'success', text: 'Rendez-vous annulé. Le prospect est prévenu et peut choisir un autre créneau.' });
+            });
+
+            const supprimerNote = (id) => agir(() => appel(`/api/v1/leads/${leadId}/notes/${id}`, { method: 'DELETE' }));
+
+            const ajouterRappel = () => agir(async () => {
+                if (!rappelDate) throw new Error('Choisissez une date de relance.');
+                await appel(`/api/v1/leads/${leadId}/reminders`, {
+                    method: 'POST', body: JSON.stringify({ due_date: rappelDate, label: rappelTexte })
+                });
+                setRappelDate('');
+                setRappelTexte('');
+            });
+
+            const basculerRappel = (r) => agir(() => appel(`/api/v1/reminders/${r.id}`, {
+                method: 'PUT', body: JSON.stringify({ done: !r.done_at })
+            }));
+
+            const supprimerRappel = (id) => agir(() => appel(`/api/v1/reminders/${id}`, { method: 'DELETE' }));
+
+            const supprimerProspect = async () => {
+                setOccupe(true);
+                try {
+                    await appel(`/api/v1/leads/${leadId}`, { method: 'DELETE' });
+                    window.location.replace('/prospects.html');
+                } catch (err) {
+                    setErreurSuivi(err.message);
+                    setOccupe(false);
+                }
+            };
+
+            const fetchLead = async (token) => {
+                try {
+                    setLoading(true);
+                    const response = await fetch(`${API_URL}/api/v1/leads/${leadId}`, {
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+                    });
+                    if (!response.ok) {
+                        if (response.status === 401) {
+                            localStorage.removeItem('token');
+                            localStorage.removeItem('user');
+                            window.location.replace('/login.html');
+                            return;
+                        }
+                        if (response.status === 404) throw new Error("Ce prospect n'existe pas, ou n'appartient pas à votre agence.");
+                        throw new Error(`Erreur API: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    setLead(data);
+                    setForm({
+                        name: data.name ?? '',
+                        email: data.email ?? '',
+                        phone: data.phone ?? '',
+                        budget: data.budget ?? '',
+                        location: data.location ?? '',
+                        property_type: data.property_type ?? '',
+                        surface_min: data.surface_min ?? '',
+                        activite: data.activite ?? '',
+                        financing_status: data.financing_status ?? 'unknown',
+                        purchase_urgency: data.purchase_urgency ?? 'unknown',
+                        financing_amount: data.financing_amount ?? '',
+                        transaction: data.transaction === 'location' ? 'location' : 'vente',
+                        revenus: data.revenus ?? '',
+                        garants: data.garants ?? '',
+                        situation_pro: data.situation_pro ?? '',
+                        meuble_souhaite: data.meuble_souhaite === true ? 'oui' : data.meuble_souhaite === false ? 'non' : '',
+                        proprietaire: data.proprietaire === true ? 'oui' : data.proprietaire === false ? 'non' : '',
+                        dpe_max: data.dpe_max ?? '',
+                        ges_max: data.ges_max ?? '',
+                        bien_adresse: data.bien_adresse ?? '',
+                        bien_code_postal: data.bien_code_postal ?? '',
+                        bien_ville: data.bien_ville ?? '',
+                        bien_type: data.bien_type ?? '',
+                        bien_surface: data.bien_surface ?? '',
+                        bien_pieces: data.bien_pieces ?? '',
+                        notes: data.notes ?? ''
+                    });
+                    setError(null);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleSave = async (confirmerDoublon) => {
+                const token = localStorage.getItem('token');
+                if (!form.name.trim()) {
+                    setError('Le nom du prospect est obligatoire.');
+                    return;
+                }
+                setSaving(true);
+                setSaved(false);
+                setDoublon(null);
+                try {
+                    const response = await fetch(`${API_URL}/api/v1/leads/${leadId}/update-financing`, {
+                        method: 'PUT',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            name: form.name.trim(),
+                            email: form.email.trim() || null,
+                            phone: form.phone.trim() || null,
+                            confirm_duplicate: confirmerDoublon === true,
+                            budget: form.budget === '' ? null : parseInt(form.budget, 10),
+                            location: form.location || null,
+                            property_type: form.property_type || null,
+                            surface_min: ['Local commercial', 'Bureau'].includes(form.property_type) && form.surface_min !== '' ? parseInt(form.surface_min, 10) : null,
+                            activite: ['Local commercial', 'Bureau'].includes(form.property_type) && form.activite ? form.activite : null,
+                            financing_status: form.financing_status,
+                            purchase_urgency: form.purchase_urgency,
+                            financing_amount: form.financing_amount === '' ? null : parseInt(form.financing_amount, 10),
+                            transaction: form.transaction,
+                            dpe_max: form.dpe_max || null,
+                            ges_max: form.ges_max || null,
+                            proprietaire: form.proprietaire === '' ? null : form.proprietaire === 'oui',
+                            // Le bien n'est envoyé que pour un prospect propriétaire : sinon on ne touche à rien.
+                            ...(form.proprietaire === 'oui' ? {
+                                bien_adresse: form.bien_adresse.trim() || null,
+                                bien_code_postal: form.bien_code_postal.trim() || null,
+                                bien_ville: form.bien_ville.trim() || null,
+                                bien_type: form.bien_type || null,
+                                bien_surface: form.bien_surface === '' ? null : parseInt(form.bien_surface, 10),
+                                bien_pieces: form.bien_pieces === '' ? null : parseInt(form.bien_pieces, 10)
+                            } : {}),
+                            // Le dossier du locataire n'a de sens que pour une location : on ne l'efface pas si l'agent bascule en achat.
+                            ...(form.transaction === 'location' ? {
+                                revenus: form.revenus === '' ? null : parseInt(form.revenus, 10),
+                                garants: form.garants === '' || ['Local commercial', 'Bureau'].includes(form.property_type) ? null : parseInt(form.garants, 10),
+                                situation_pro: form.situation_pro || null,
+                                meuble_souhaite: form.meuble_souhaite === '' ? null : form.meuble_souhaite === 'oui'
+                            } : {}),
+                            notes: form.notes || null
+                        })
+                    });
+                    if (!response.ok) {
+                        const d = await response.json().catch(() => ({}));
+                        if (response.status === 409 && d.duplicate) {
+                            // Un autre prospect porte déjà cet e-mail ou ce numéro : on laisse l'agent décider.
+                            setDoublon(d.message);
+                            setError(null);
+                            return;
+                        }
+                        throw new Error(d.message || `Enregistrement impossible (${response.status})`);
+                    }
+                    setSaved(true);
+                    setError(null);
+                    // On relit la fiche : la qualité est recalculée par le
+                    // serveur, on ne la devine pas côté navigateur.
+                    await fetchLead(token);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setSaving(false);
+                }
+            };
+
+            const handleLogout = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.replace('/login.html');
+            };
+
+            const set = (k, v) => { setForm({ ...form, [k]: v }); setSaved(false); setDoublon(null); };
+
+            // Estimation indicative du bien d'un prospect propriétaire (les valeurs saisies, enregistrées ou non).
+            const estimerBien = async () => {
+                setEstim({ chargement: true, resultat: null, erreur: null });
+                try {
+                    const r = await appel(`/api/v1/leads/${leadId}/estimation`, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            adresse: form.bien_adresse,
+                            code_postal: form.bien_code_postal,
+                            ville: form.bien_ville,
+                            type: form.bien_type,
+                            surface: form.bien_surface === '' ? null : parseInt(form.bien_surface, 10),
+                            pieces: form.bien_pieces === '' ? null : parseInt(form.bien_pieces, 10)
+                        })
+                    });
+                    setEstim({ chargement: false, resultat: r, erreur: null });
+                } catch (e) {
+                    setEstim({ chargement: false, resultat: null, erreur: e.message });
+                }
+            };
+
+            const apercu = form ? expliquerQualite({
+                financing_status: form.financing_status,
+                purchase_urgency: form.purchase_urgency,
+                budget: form.budget,
+                location: form.location,
+                property_type: form.property_type,
+                email: form.email,
+                phone: form.phone,
+                engagement_lignes: lead ? lead.engagement_lignes : [],
+                transaction: form.transaction,
+                revenus: form.revenus,
+                garants: form.garants,
+                situation_pro: form.situation_pro
+            }) : null;
+            const location = !!form && form.transaction === 'location';
+
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style={{ color: 'inherit', textDecoration: 'none' }}>ZELYRO</a></div>
+                            <nav>
+                                <a href="/taches.html">À faire</a>
+                                <a href="/prospects.html">Leads</a>
+                                <a href="/biens.html">Biens</a>
+                                <a href="/matching.html">Matching</a>
+                                <a href="/propositions.html">Propositions</a>
+                                <a href="/dashboard.html">Dashboard</a>
+                                <a href="/compte.html">Compte</a>
+                                {user && user.is_admin && <a href="/admin.html">Admin</a>}
+                            </nav>
+                            <div className="user-info">
+                                {user && <span className="user-email">{user.email}</span>}
+                                <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="container">
+                        <a href="/prospects.html" className="back-link">← Retour aux prospects</a>
+
+                        {loading ? (
+                            <div className="loading">
+                                <div className="loader"></div>
+                                <p style={{ marginTop: '20px' }}>Chargement de la fiche...</p>
+                            </div>
+                        ) : error && !lead ? (
+                            <div className="error">{error}</div>
+                        ) : lead ? (
+                            <>
+                                <h1 className="page-title">{lead.name}</h1>
+                                <p className="page-subtitle">
+                                    {lead.email || 'Email non renseigné'} · {lead.phone || 'Téléphone non renseigné'}
+                                    {lead.proprietaire === true && <> · <span className="chip-proprio">⌂ Déjà propriétaire</span></>}
+                                </p>
+
+                                {error && <div className="error">{error}</div>}
+                                {saved && <div className="success">Fiche enregistrée. Le classement a été recalculé.</div>}
+                                {doublon && (
+                                    <div className="error" style={{ textAlign: 'left' }}>
+                                        {doublon} Il s'agit peut-être du même prospect.
+                                        <div className="btn-ligne" style={{ marginTop: '12px' }}>
+                                            <button className="btn danger petit" onClick={() => handleSave(true)} disabled={saving}>
+                                                Enregistrer quand même
+                                            </button>
+                                            <button className="btn secondary petit" onClick={() => setDoublon(null)}>
+                                                Corriger
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="content-wrapper">
+                                    <div>
+                                        <div className="panel">
+                                            <div className="panel-title">Coordonnées</div>
+                                            <div className="panel-note">
+                                                Le prospect a changé de numéro ou d'adresse e-mail ? Corrigez-le
+                                                ici, puis cliquez sur Enregistrer en bas de la page.
+                                            </div>
+
+                                            <div className="form-group">
+                                                <label>Nom <span className="obligatoire">*</span></label>
+                                                <input type="text" value={form.name}
+                                                    onChange={(e) => set('name', e.target.value)}
+                                                    placeholder="Prénom et nom" />
+                                            </div>
+
+                                            <div className="form-row">
+                                                <div className="form-group">
+                                                    <label>Téléphone</label>
+                                                    <input type="tel" value={form.phone}
+                                                        onChange={(e) => set('phone', e.target.value)}
+                                                        placeholder="06 12 34 56 78" />
+                                                </div>
+                                                <div className="form-group">
+                                                    <label>E-mail</label>
+                                                    <input type="email" value={form.email}
+                                                        onChange={(e) => set('email', e.target.value)}
+                                                        placeholder="prenom.nom@exemple.fr" />
+                                                </div>
+                                            </div>
+                                            {numeroInternational(form.phone).length >= 9 && (
+                                                <div className="btn-ligne" style={{ marginTop: 0 }}>
+                                                    <a className="btn petit" href={`tel:+${numeroInternational(form.phone)}`}>Appeler</a>
+                                                    <a className="btn petit secondary" target="_blank" rel="noopener noreferrer"
+                                                        href={`https://wa.me/${numeroInternational(form.phone)}?text=${encodeURIComponent(
+                                                            `Bonjour${prenomPourMessage(form.name) ? ' ' + prenomPourMessage(form.name) : ''}, je vous contacte suite à votre demande${user && user.company_name ? ' auprès de ' + user.company_name : ''}. Quand seriez-vous disponible pour en parler ?`)}`}>
+                                                        WhatsApp
+                                                    </a>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="panel">
+                                            <div className="panel-title">Sa recherche</div>
+                                            <div className="panel-note">
+                                                Plus ces informations sont complètes, plus le rapprochement
+                                                avec vos biens est fiable.
+                                            </div>
+
+                                            <div className="form-group">
+                                                <label>Il cherche à</label>
+                                                <select value={form.transaction} onChange={(e) => set('transaction', e.target.value)}>
+                                                    <option value="vente">Acheter</option>
+                                                    <option value="location">Louer</option>
+                                                </select>
+                                            </div>
+
+                                            <div className="form-row">
+                                                <div className="form-group">
+                                                    <label>{location ? 'Loyer maximum (€ par mois)' : 'Budget (€)'}</label>
+                                                    <input type="number" value={form.budget}
+                                                        onChange={(e) => set('budget', e.target.value)}
+                                                        placeholder="Non renseigné" />
+                                                </div>
+                                                <div className="form-group">
+                                                    <label>Secteur recherché</label>
+                                                    <input type="text" value={form.location}
+                                                        onChange={(e) => set('location', e.target.value)}
+                                                        placeholder="Non renseigné" />
+                                                </div>
+                                            </div>
+
+                                            <div className="form-group">
+                                                <label>Type de bien recherché</label>
+                                                <select value={form.property_type}
+                                                    onChange={(e) => set('property_type', e.target.value)}>
+                                                    <option value="">Non renseigné</option>
+                                                    <option value="Appartement">Appartement</option>
+                                                    <option value="Maison">Maison</option>
+                                                    <option value="Villa">Villa</option>
+                                                    <option value="Studio">Studio</option>
+                                                    <option value="Penthouse">Penthouse</option>
+                                                    <option value="Terrain">Terrain</option>
+                                                    <option value="Local commercial">Local commercial</option>
+                                                    <option value="Bureau">Bureau</option>
+                                                </select>
+                                            </div>
+
+                                            {['Local commercial', 'Bureau'].includes(form.property_type) && (
+                                                <div className="form-group">
+                                                    <label>Surface minimale recherchée (m²)</label>
+                                                    <input type="number" min="0" value={form.surface_min}
+                                                        onChange={(e) => set('surface_min', e.target.value)}
+                                                        placeholder="Non renseignée" />
+                                                </div>
+                                            )}
+                                            {['Local commercial', 'Bureau'].includes(form.property_type) && (
+                                                <div className="form-group">
+                                                    <label>Activité envisagée</label>
+                                                    <select value={form.activite} onChange={(e) => set('activite', e.target.value)}>
+                                                        <option value="">Non précisée</option>
+                                                        <option value="commerce">Commerce de détail</option>
+                                                        <option value="restauration">Restauration</option>
+                                                        <option value="services">Services ou profession libérale</option>
+                                                        <option value="bureau">Bureaux</option>
+                                                        <option value="artisanat">Artisanat ou activité</option>
+                                                        <option value="autre">Autre</option>
+                                                    </select>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="panel">
+                                            <div className="panel-title">{location ? 'Son dossier' : 'Son projet'}</div>
+                                            <div className="panel-note">
+                                                {location
+                                                    ? (['Local commercial', 'Bureau'].includes(form.property_type)
+                                                        ? "Pour un local commercial ou un bureau, le classement repose sur la solidité du dossier : revenus d'au moins trois fois le loyer, situation professionnelle, et la date d'emménagement."
+                                                        : "Pour un locataire, le classement repose sur la solidité du dossier : revenus d'au moins trois fois le loyer, garants, situation professionnelle, et la date d'emménagement.")
+                                                    : "Ces deux informations pèsent le plus lourd dans le classement. Un prospect avec accord bancaire et projet immédiat remonte automatiquement en tête de liste."}
+                                            </div>
+
+                                            {location && (
+                                                <>
+                                                    <div className="form-row">
+                                                        <div className="form-group">
+                                                            <label>Revenus mensuels nets du foyer (€)</label>
+                                                            <input type="number" min="0" value={form.revenus}
+                                                                onChange={(e) => set('revenus', e.target.value)}
+                                                                placeholder="Non renseignés" />
+                                                        </div>
+                                                        {!['Local commercial', 'Bureau'].includes(form.property_type) && (
+                                                        <div className="form-group">
+                                                            <label>Nombre de garants</label>
+                                                            <input type="number" min="0" max="10" value={form.garants}
+                                                                onChange={(e) => set('garants', e.target.value)}
+                                                                placeholder="Non renseigné" />
+                                                        </div>
+                                                        )}
+                                                    </div>
+                                                    {form.budget && form.revenus && (
+                                                        <div className="info-box" style={{ marginBottom: '15px' }}>
+                                                            Revenus = {(form.revenus / form.budget).toFixed(1).replace('.', ',')} fois le loyer maximum
+                                                            {form.revenus / form.budget >= 3 ? ' : la règle des trois fois est respectée.' : ' : sous la règle des trois fois.'}
+                                                        </div>
+                                                    )}
+                                                    <div className="form-row">
+                                                        <div className="form-group">
+                                                            <label>Situation professionnelle</label>
+                                                            <select value={form.situation_pro} onChange={(e) => set('situation_pro', e.target.value)}>
+                                                                <option value="">Non renseignée</option>
+                                                                {SITUATIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                                                            </select>
+                                                        </div>
+                                                        {!['Local commercial', 'Bureau'].includes(form.property_type) && (
+                                                            <div className="form-group">
+                                                                <label>Meublé</label>
+                                                                <select value={form.meuble_souhaite} onChange={(e) => set('meuble_souhaite', e.target.value)}>
+                                                                    <option value="">Indifférent</option>
+                                                                    <option value="oui">Meublé</option>
+                                                                    <option value="non">Non meublé</option>
+                                                                </select>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            <div className="form-row">
+                                                <div className="form-group">
+                                                    <label>DPE accepté</label>
+                                                    <select value={form.dpe_max} onChange={(e) => set('dpe_max', e.target.value)}>
+                                                        {LIMITES_ENERGIE.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                                                    </select>
+                                                </div>
+                                                <div className="form-group">
+                                                    <label>GES accepté</label>
+                                                    <select value={form.ges_max} onChange={(e) => set('ges_max', e.target.value)}>
+                                                        {LIMITES_ENERGIE.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            <div className="form-row">
+                                                <div className="form-group">
+                                                    <label>Déjà propriétaire ?</label>
+                                                    <select value={form.proprietaire} onChange={(e) => set('proprietaire', e.target.value)}>
+                                                        <option value="">Inconnu</option>
+                                                        <option value="oui">Oui, déjà propriétaire</option>
+                                                        <option value="non">Non</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            {form.proprietaire === 'oui' && (
+                                                <div className="bloc-estimation">
+                                                    <div className="estim-titre">Estimer son bien</div>
+                                                    <p className="estim-aide">Outil interne, à ne pas montrer au prospect. Estimation indicative d'après les ventes réelles autour du bien (base DVF).</p>
+                                                    <div className="form-row">
+                                                        <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                                                            <label>Adresse du bien (numéro et rue)</label>
+                                                            <input type="text" maxLength="255" value={form.bien_adresse}
+                                                                onChange={(e) => set('bien_adresse', e.target.value)}
+                                                                placeholder="12 rue Nationale" />
+                                                        </div>
+                                                        <div className="form-group">
+                                                            <label>Code postal</label>
+                                                            <input type="text" inputMode="numeric" maxLength="5" value={form.bien_code_postal}
+                                                                onChange={(e) => set('bien_code_postal', e.target.value.replace(/\D/g, ''))}
+                                                                placeholder="59800" />
+                                                        </div>
+                                                        <div className="form-group">
+                                                            <label>Ville</label>
+                                                            <input type="text" maxLength="100" value={form.bien_ville}
+                                                                onChange={(e) => set('bien_ville', e.target.value)}
+                                                                placeholder="Lille" />
+                                                        </div>
+                                                        <div className="form-group">
+                                                            <label>Type de bien</label>
+                                                            <select value={form.bien_type} onChange={(e) => set('bien_type', e.target.value)}>
+                                                                <option value="">Choisir</option>
+                                                                <option value="Appartement">Appartement</option>
+                                                                <option value="Maison">Maison</option>
+                                                            </select>
+                                                        </div>
+                                                        <div className="form-group">
+                                                            <label>Surface habitable (m²)</label>
+                                                            <input type="number" min="9" max="1000" value={form.bien_surface}
+                                                                onChange={(e) => set('bien_surface', e.target.value)} />
+                                                        </div>
+                                                        <div className="form-group">
+                                                            <label>Pièces (facultatif)</label>
+                                                            <input type="number" min="1" max="50" value={form.bien_pieces}
+                                                                onChange={(e) => set('bien_pieces', e.target.value)} />
+                                                        </div>
+                                                    </div>
+                                                    <button type="button" className="btn petit" onClick={estimerBien} disabled={estim.chargement}>
+                                                        {estim.chargement ? 'Calcul en cours…' : 'Estimer la valeur'}
+                                                    </button>
+                                                    <span className="estim-rappel"> Enregistrez la fiche pour garder l'adresse.</span>
+                                                    {estim.erreur && <div className="estim-erreur">{estim.erreur}</div>}
+                                                    {estim.resultat && <ResultatEstimation r={estim.resultat} />}
+                                                </div>
+                                            )}
+
+                                            <div className="form-row">
+                                                {!location && (
+                                                <div className="form-group">
+                                                    <label>Financement</label>
+                                                    <select value={form.financing_status}
+                                                        onChange={(e) => set('financing_status', e.target.value)}>
+                                                        <option value="unknown">Non renseigné</option>
+                                                        <option value="approved">Accord bancaire obtenu</option>
+                                                        <option value="in_progress">Démarche en cours</option>
+                                                        <option value="pending">En attente</option>
+                                                        <option value="rejected">Refusé</option>
+                                                    </select>
+                                                </div>
+                                                )}
+                                                <div className="form-group">
+                                                    <label>{location ? "Date d'emménagement souhaitée" : "Échéance d'achat"}</label>
+                                                    <select value={form.purchase_urgency}
+                                                        onChange={(e) => set('purchase_urgency', e.target.value)}>
+                                                        <option value="unknown">Non renseignée</option>
+                                                        <option value="immediate">Immédiate</option>
+                                                        <option value="1-3_months">1 à 3 mois</option>
+                                                        <option value="3-6_months">3 à 6 mois</option>
+                                                        <option value="6plus_months">Plus de 6 mois</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            {!location && (
+                                            <div className="form-group">
+                                                <label>Montant du financement obtenu (€)</label>
+                                                <input type="number" value={form.financing_amount}
+                                                    onChange={(e) => set('financing_amount', e.target.value)}
+                                                    placeholder="Non renseigné" />
+                                            </div>
+                                            )}
+
+                                            <div className="form-group">
+                                                <label>Notes sur le projet</label>
+                                                <textarea value={form.notes}
+                                                    onChange={(e) => set('notes', e.target.value)}
+                                                    placeholder="Ce que le prospect a dit, ce qu'il faut retenir pour le prochain appel..."></textarea>
+                                            </div>
+
+                                            <button className="btn" onClick={() => handleSave(false)} disabled={saving}>
+                                                {saving ? 'Enregistrement...' : 'Enregistrer'}
+                                            </button>
+                                            <a href="/matching.html" className="btn secondary"
+                                               style={{ textDecoration: 'none', display: 'inline-block' }}>Annuler</a>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div className="panel">
+                                            <div className="panel-title">Lien du formulaire</div>
+                                            <div className="panel-note">
+                                                Pas d'e-mail pour ce prospect ? Copiez un message avec son lien personnel et collez-le
+                                                dans la messagerie du portail, par SMS ou sur WhatsApp. Il précise sa recherche lui-même,
+                                                et vous voyez ici et sur le tableau de bord quand il ouvre le lien.
+                                            </div>
+                                            <button className="btn petit" disabled={occupe} onClick={copierLien}>
+                                                Copier le message avec le lien
+                                            </button>
+                                            {lienPerso && (
+                                                <>
+                                                    <div className="info-box" style={{ marginTop: '12px' }} role="status">
+                                                        {lienCopie
+                                                            ? 'Message copié. Il ne reste qu\'à le coller.'
+                                                            : 'Copie automatique impossible : sélectionnez le message ci-dessous et copiez-le.'}
+                                                    </div>
+                                                    <textarea readOnly className="mail-corps" value={lienPerso.message}
+                                                        style={{ minHeight: '120px', marginTop: '10px' }}
+                                                        onFocus={(e) => e.target.select()} aria-label="Message avec le lien du formulaire"></textarea>
+                                                </>
+                                            )}
+                                        </div>
+
+                                        <div className="panel">
+                                            <div className="panel-title">Suivi</div>
+                                            <div className="panel-note">
+                                                Où en est ce prospect ? Cliquez sur l'étape atteinte : le
+                                                changement est daté dans l'historique.
+                                            </div>
+                                            <div className="pipeline" role="group" aria-label="Étape du suivi">
+                                                {STATUTS.map(([valeur, libelle], i) => {
+                                                    const actuel = lead.status || 'nouveau';
+                                                    const iActuel = STATUTS.findIndex((x) => x[0] === actuel);
+                                                    const classes = ['etape'];
+                                                    if (valeur === actuel) classes.push('active', valeur);
+                                                    else if (actuel !== 'perdu' && valeur !== 'perdu' && i < iActuel) classes.push('passee');
+                                                    return (
+                                                        <button key={valeur} className={classes.join(' ')} disabled={occupe}
+                                                            aria-pressed={valeur === actuel}
+                                                            onClick={() => valeur !== actuel && changerStatut(valeur)}>
+                                                            {libelle}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                            {erreurSuivi && <div className="error" style={{ marginTop: '16px', marginBottom: 0 }}>{erreurSuivi}</div>}
+
+                                            {membres.length > 1 && (
+                                                <div className="form-group" style={{ marginTop: '20px', marginBottom: 0 }}>
+                                                    <label htmlFor="responsable">Responsable</label>
+                                                    <select id="responsable" value={lead.assigned_to == null ? '' : String(lead.assigned_to)}
+                                                        disabled={occupe} onChange={(e) => changerResponsable(e.target.value)}>
+                                                        <option value="">Personne pour l'instant</option>
+                                                        {membres.map((m) => (
+                                                            <option key={m.id} value={String(m.id)}>{m.name}{m.is_me ? ' (moi)' : ''}</option>
+                                                        ))}
+                                                    </select>
+                                                    <div className="field-hint">Le collaborateur choisi est prévenu par e-mail.</div>
+                                                </div>
+                                            )}
+
+                                            <div className="section-divider"></div>
+                                            <div className="panel-title" style={{ fontSize: '17px' }}>Rendez-vous</div>
+                                            {rdvInfo && rdvInfo.rdv && rdvInfo.rdv.statut === 'confirme' ? (
+                                                <div className="info-box" style={{ marginBottom: '12px' }} role="status">
+                                                    Visite fixée : {rdvInfo.rdv.libelle}{rdvInfo.rdv.bien ? ` · ${rdvInfo.rdv.bien}` : ''}
+                                                </div>
+                                            ) : (
+                                                <div className="panel-note" style={{ marginBottom: '12px' }}>
+                                                    {rdvInfo && !rdvInfo.planning_pret
+                                                        ? <>Pour proposer des créneaux, réglez d'abord vos disponibilités dans <a href="/compte.html">Mon compte</a>.</>
+                                                        : rdvInfo && rdvInfo.rdv
+                                                            ? 'Le planning a été envoyé : le prospect n\'a pas encore choisi de créneau.'
+                                                            : 'Aucun rendez-vous pour l\'instant. Envoyez le planning : le prospect choisit son créneau et cette fiche se met à jour toute seule.'}
+                                                </div>
+                                            )}
+                                            {rdvInfo && rdvInfo.planning_pret && (
+                                                <div className="btn-ligne" style={{ marginTop: 0 }}>
+                                                    <button className="btn petit" disabled={occupe || !rdvInfo.email_ok} onClick={envoyerPlanning}
+                                                        title={rdvInfo.email_ok ? '' : 'Ce prospect n\'a pas d\'adresse e-mail valide'}>
+                                                        {rdvInfo.rdv && rdvInfo.rdv.statut === 'confirme' ? 'Renvoyer le lien par e-mail' : 'Envoyer le planning par e-mail'}
+                                                    </button>
+                                                    <button className="btn petit secondary" disabled={occupe} onClick={copierPlanning}>
+                                                        Copier le lien du planning
+                                                    </button>
+                                                    {rdvInfo.rdv && rdvInfo.rdv.statut === 'confirme' && !confirmerAnnulRdv && (
+                                                        <button className="btn petit secondary" disabled={occupe} onClick={() => setConfirmerAnnulRdv(true)}>
+                                                            Annuler le rendez-vous
+                                                        </button>
+                                                    )}
+                                                    {confirmerAnnulRdv && (
+                                                        <>
+                                                            <button className="btn petit danger" disabled={occupe} onClick={annulerRdv}>Oui, annuler et prévenir le prospect</button>
+                                                            <button className="btn petit secondary" disabled={occupe} onClick={() => setConfirmerAnnulRdv(false)}>Garder</button>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {messageRdv && <div className={messageRdv.type === 'error' ? 'error' : 'success'} style={{ marginTop: '12px', marginBottom: 0 }}>{messageRdv.text}</div>}
+                                            {lienRdv && (
+                                                <>
+                                                    <div className="info-box" style={{ marginTop: '12px' }} role="status">
+                                                        {lienRdv.copie
+                                                            ? 'Message copié. Il ne reste qu\'à le coller.'
+                                                            : 'Copie automatique impossible : sélectionnez le message ci-dessous et copiez-le.'}
+                                                    </div>
+                                                    <textarea readOnly className="mail-corps" value={lienRdv.message}
+                                                        style={{ minHeight: '90px', marginTop: '10px' }}
+                                                        onFocus={(e) => e.target.select()} aria-label="Message avec le lien du planning"></textarea>
+                                                </>
+                                            )}
+
+                                            <div className="section-divider"></div>
+                                            <div className="panel-title" style={{ fontSize: '17px' }}>Relances</div>
+                                            {rappels.length === 0 && (
+                                                <div className="panel-note" style={{ marginBottom: 0 }}>
+                                                    Aucune relance prévue. Fixez une date pour ne pas laisser ce prospect refroidir.
+                                                </div>
+                                            )}
+                                            {rappels.map((r) => {
+                                                const enRetard = !r.done_at && r.due_date < jourLocal();
+                                                return (
+                                                    <div key={r.id} className={`rappel${r.done_at ? ' faite' : ''}${enRetard ? ' retard' : ''}`}>
+                                                        <button className="rappel-case" disabled={occupe}
+                                                            aria-label={r.done_at ? 'Rouvrir la relance' : 'Marquer la relance comme faite'}
+                                                            onClick={() => basculerRappel(r)}>{r.done_at ? '✓' : ''}</button>
+                                                        <div className="rappel-texte">{r.label}</div>
+                                                        <div className="rappel-date">{enRetard ? 'En retard · ' : ''}{dateCourte(r.due_date)}</div>
+                                                        <button className="rappel-suppr" disabled={occupe} aria-label="Supprimer la relance"
+                                                            onClick={() => supprimerRappel(r.id)}>×</button>
+                                                    </div>
+                                                );
+                                            })}
+                                            <div className="rappel-ajout">
+                                                <input type="date" value={rappelDate} min={jourLocal()}
+                                                    onChange={(e) => setRappelDate(e.target.value)} aria-label="Date de la relance" />
+                                                <input type="text" value={rappelTexte} maxLength={255}
+                                                    onChange={(e) => setRappelTexte(e.target.value)}
+                                                    placeholder="Relancer, envoyer le dossier..." aria-label="Objet de la relance" />
+                                                <button className="btn petit" disabled={occupe || !rappelDate} onClick={ajouterRappel}>Ajouter</button>
+                                            </div>
+                                            <div className="raccourcis">
+                                                {[['Demain', 1], ['Dans 3 jours', 3], ['Dans 1 semaine', 7], ['Dans 1 mois', 30]].map(([nom, n]) => (
+                                                    <button key={nom} className="raccourci" onClick={() => setRappelDate(jourLocal(n))}>{nom}</button>
+                                                ))}
+                                            </div>
+
+                                            <div className="section-divider"></div>
+                                            <div className="panel-title" style={{ fontSize: '17px' }}>Historique</div>
+                                            <div className="form-group" style={{ marginTop: '10px', marginBottom: '10px' }}>
+                                                <textarea value={nouvelleNote} maxLength={2000}
+                                                    onChange={(e) => setNouvelleNote(e.target.value)}
+                                                    style={{ minHeight: '72px' }}
+                                                    placeholder="Ajouter une note datée : appel, visite, ce qu'il a dit..."
+                                                    aria-label="Nouvelle note"></textarea>
+                                            </div>
+                                            <button className="btn petit" disabled={occupe || !nouvelleNote.trim()} onClick={ajouterNote}>
+                                                Ajouter la note
+                                            </button>
+                                            <div className="historique">
+                                                {notes.length === 0 && (
+                                                    <div className="panel-note" style={{ marginBottom: 0 }}>Rien pour l'instant.</div>
+                                                )}
+                                                {notes.map((n) => (
+                                                    <div key={n.id} className={`hist-item ${n.kind === 'statut' || n.kind === 'attrib' ? 'statut' : n.kind === 'activite' ? 'activite' : ''}`}>
+                                                        <div className="hist-date">
+                                                            {dateHeure(n.created_at)}
+                                                            {n.kind === 'note' && (
+                                                                <button className="hist-suppr" disabled={occupe}
+                                                                    onClick={() => supprimerNote(n.id)}>Supprimer</button>
+                                                            )}
+                                                        </div>
+                                                        <div className="hist-texte">{n.kind === 'statut' ? `Statut : ${n.body}` : n.body}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div className="panel">
+                                            <div className="panel-title">Classement</div>
+                                            <div className="panel-note">
+                                                Calculé automatiquement. Vous ne le saisissez pas :
+                                                il se déduit de ce que vous renseignez à gauche.
+                                            </div>
+
+                                            <div className={`quality-box quality-${apercu.quality} ${palier(apercu.points, apercu.quality)}`}>
+                                                <div className="quality-label">{location && apercu.quality === 'hot' ? 'Locataire actif' : LIBELLES[apercu.quality]}</div>
+                                                <div className="quality-explain">{apercu.points} points sur 100</div>
+                                                {palier(apercu.points, apercu.quality) === 'p-go' && <div className="quality-go-appel">Go : à appeler maintenant</div>}
+                                            </div>
+
+                                            {form.proprietaire === 'oui' && (
+                                                <div className="encadre-proprio">
+                                                    <strong>⌂ Déjà propriétaire</strong>
+                                                    {location
+                                                        ? "Cette personne possède déjà un bien : pensez à lui proposer une estimation ou un mandat de gestion."
+                                                        : "Cette personne possède déjà un bien : c'est souvent un achat avec revente. Proposez-lui une estimation, c'est un mandat potentiel en plus de la vente."}
+                                                </div>
+                                            )}
+
+                                            {apercu.lignes.length > 0 ? (
+                                                <div>
+                                                    {apercu.lignes.map((l, i) => (
+                                                        <div key={i} className="detail-block" style={{ padding: '10px 15px' }}>
+                                                            <div className="detail-value" style={{ fontSize: '14px' }}>{l}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <div className="info-box">
+                                                    {location
+                                                        ? (['Local commercial', 'Bureau'].includes(form.property_type)
+                                                            ? "Aucune information ne permet encore de classer ce prospect. Renseignez ses revenus et sa date d'emménagement : ce sont les critères qui pèsent le plus."
+                                                            : "Aucune information ne permet encore de classer ce prospect. Renseignez ses revenus, ses garants et sa date d'emménagement : ce sont les critères qui pèsent le plus.")
+                                                        : "Aucune information ne permet encore de classer ce prospect. Renseignez son financement et son échéance : ce sont les deux critères qui pèsent le plus."}
+                                                </div>
+                                            )}
+
+                                            <div className="info-box" style={{ marginTop: '15px' }}>
+                                                Ce classement change dès que vous modifiez les champs.
+                                                Il n'est enregistré qu'après avoir cliqué sur Enregistrer.
+                                            </div>
+                                        </div>
+
+                                        <div className="panel">
+                                            <div className="panel-title">Fiche</div>
+                                            <div className="detail-block">
+                                                <div className="detail-label">Statut</div>
+                                                <div className="detail-value">
+                                                    <span className={`statut-badge statut-${lead.status || 'nouveau'}`}>
+                                                        {(STATUTS.find((x) => x[0] === (lead.status || 'nouveau')) || STATUTS[0])[1]}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <div className="detail-block">
+                                                <div className="detail-label">Origine</div>
+                                                <div className="detail-value">{SOURCES[lead.source] || SOURCES.manuel}</div>
+                                            </div>
+                                            {lead.consent_at && (
+                                                <div className="detail-block">
+                                                    <div className="detail-label">Consentement à être recontacté</div>
+                                                    <div className="detail-value">{dateHeure(lead.consent_at)}</div>
+                                                </div>
+                                            )}
+                                            <div className="detail-block">
+                                                <div className="detail-label">Créé le</div>
+                                                <div className="detail-value">
+                                                    {lead.created_at
+                                                        ? new Date(lead.created_at).toLocaleDateString('fr-FR',
+                                                            { day: 'numeric', month: 'long', year: 'numeric' })
+                                                        : 'Date inconnue'}
+                                                </div>
+                                            </div>
+                                            <div className="detail-block">
+                                                <div className="detail-label">Référence</div>
+                                                <div className="detail-value">Lead #{lead.id}</div>
+                                            </div>
+                                        </div>
+
+                                        <div className="panel">
+                                            <div className="panel-title">Supprimer ce prospect</div>
+                                            <div className="panel-note">
+                                                Efface définitivement la fiche, ses notes, ses relances et son
+                                                historique. À utiliser pour une demande d'effacement de ses données,
+                                                pour retirer un doublon, ou si cette fiche vient d'une notification
+                                                LeBonCoin/SeLoger qui n'était pas une vraie demande de contact
+                                                (dites-le-nous si ça arrive : le tri automatique s'améliore avec
+                                                chaque cas signalé). Cette action est irréversible.
+                                            </div>
+                                            {!confirmerSuppression ? (
+                                                <button className="btn danger petit" onClick={() => setConfirmerSuppression(true)}>
+                                                    Supprimer ce prospect
+                                                </button>
+                                            ) : (
+                                                <div className="btn-ligne">
+                                                    <button className="btn danger plein petit" disabled={occupe} onClick={supprimerProspect}>
+                                                        Oui, supprimer définitivement
+                                                    </button>
+                                                    <button className="btn secondary petit" onClick={() => setConfirmerSuppression(false)}>
+                                                        Annuler
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        ) : null}
+                    </div>
+                </>
+            );
+        }
+
+        ReactDOM.render(<LeadProfile />, document.getElementById('root'));
+    </script>
+</body>
+</html>

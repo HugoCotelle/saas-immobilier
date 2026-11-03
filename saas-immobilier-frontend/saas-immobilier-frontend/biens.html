@@ -1,0 +1,1223 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZELYRO - Biens</title>
+    <meta name="robots" content="noindex">
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="carrousel.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <script src="vendor/lecteur-excel.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="zelyro.css">
+    <style>
+        .recherche { margin-bottom: 24px; }
+        .import-etapes { display: grid; gap: 22px; }
+        .import-etape-titre { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 8px; }
+        .import-etape-titre span { color: var(--sage-600); margin-right: 6px; }
+        .import-fichier { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+        .import-fichier input[type=file] { width: auto; max-width: 100%; padding: 10px; background: var(--surface); }
+        .colonnes-reconnues { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+        .colonnes-ignorees { font-size: 12px; color: var(--ink-3); margin-bottom: 14px; }
+        .import-resultat p { margin: 0 0 6px; }
+        .import-resultat ul { margin: 6px 0 0 18px; padding: 0; font-size: 13px; }
+        .import-avertissement { background: #F3E9CF; color: #7A5C14; border: 1px solid #E6D6A8; border-radius: var(--radius-sm); padding: 12px 16px; font-size: 13px; line-height: 1.6; margin-bottom: 14px; }
+        .apercu-table td { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ref-bien { font-size: 12px; color: var(--ink-3); margin-top: -8px; margin-bottom: 10px; }
+        .cases { display: flex; flex-wrap: wrap; gap: 10px 22px; margin-top: 4px; }
+        .cases label { display: flex; align-items: center; gap: 8px; margin: 0; text-transform: none; letter-spacing: 0; font-size: 14px; font-weight: 400; color: var(--ink-2); cursor: pointer; }
+        .cases input[type=checkbox] { width: auto; margin: 0; }
+        .bien-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+        .bien-actions .btn { margin-left: 0; }
+        .onglets-transaction { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+        .onglets-transaction button { cursor: pointer; border: 1px solid var(--line, #E3DCCC); background: var(--surface); color: var(--ink-2); border-radius: 999px; padding: 7px 16px; font-size: 13px; font-family: inherit; }
+        .onglets-transaction button.actif { background: var(--sage-600, #4F6353); border-color: var(--sage-600, #4F6353); color: #fff; }
+        .bien-badge-location { display: inline-block; font-size: 12px; font-weight: 600; color: var(--sage-600, #4F6353); background: #E7EDE4; border-radius: 999px; padding: 3px 10px; margin-right: 8px; }
+    </style>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <script src="/pwa.js" defer></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+
+        const VIDE = {
+            reference: '', title: '', address: '', zip: '', city: '', price: '', size: '', rooms: '',
+            property_type: '', description: '', activites_autorisees: [], extraction_air: '',
+            transaction: 'vente', meuble: '', dpe: '', ges: ''
+        };
+
+        const CLASSES = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+        const Energie = ({ dpe, ges }) => (!dpe && !ges) ? null : (
+            <div className="ener-ligne">
+                {dpe && <span className={`ener ener-dpe-${dpe}`} title={`DPE : classe ${dpe}`}>DPE <b>{dpe}</b></span>}
+                {ges && <span className={`ener ener-ges-${ges}`} title={`GES : classe ${ges}`}>GES <b>{ges}</b></span>}
+            </div>
+        );
+
+        // Photos : réduites dans le navigateur avant l'envoi (1000 px, JPEG), pour rester légères.
+        const PHOTOS_MAX = 10;
+        const lireFichier = (fichier) => new Promise((ok, ko) => {
+            const r = new FileReader();
+            r.onload = () => ok(r.result);
+            r.onerror = () => ko(new Error('lecture'));
+            r.readAsDataURL(fichier);
+        });
+        const chargerImage = (src) => new Promise((ok, ko) => {
+            const im = new Image();
+            im.onload = () => ok(im);
+            im.onerror = () => ko(new Error('image'));
+            im.src = src;
+        });
+        function reduire(im, cote, qualite) {
+            const k = Math.min(1, cote / Math.max(im.width, im.height));
+            const c = document.createElement('canvas');
+            c.width = Math.max(1, Math.round(im.width * k));
+            c.height = Math.max(1, Math.round(im.height * k));
+            const g = c.getContext('2d');
+            g.fillStyle = '#fff';
+            g.fillRect(0, 0, c.width, c.height);
+            g.drawImage(im, 0, 0, c.width, c.height);
+            return c.toDataURL('image/jpeg', qualite);
+        }
+        const octets = (dataUrl) => Math.floor((dataUrl.length - dataUrl.indexOf(',') - 1) * 3 / 4);
+        async function preparerPhoto(fichier) {
+            if (!/^image\//.test(fichier.type)) throw new Error(`${fichier.name} n'est pas une image.`);
+            if (fichier.size > 25 * 1024 * 1024) throw new Error(`${fichier.name} est trop lourde (25 Mo au maximum).`);
+            let im;
+            try { im = await chargerImage(await lireFichier(fichier)); }
+            catch (e) { throw new Error(`${fichier.name} ne peut pas être lue (format non pris en charge par ce navigateur).`); }
+            let image = null;
+            for (const [cote, q] of [[1000, 0.72], [1000, 0.6], [800, 0.6], [640, 0.55]]) {
+                image = reduire(im, cote, q);
+                if (octets(image) <= 300000) break;
+            }
+            if (octets(image) > 340000) throw new Error(`${fichier.name} reste trop lourde après réduction.`);
+            return { image, miniature: reduire(im, 360, 0.7) };
+        }
+
+        // Le rapprochement avec les prospects compare l'adresse enregistrée au secteur recherché
+        // (« Paris 15 », « Lille »...) : elle doit donc contenir le code postal et la ville.
+        const CP_RE = /\b\d{5}\b/;
+        // « 12 rue Nationale, 59000 Lille » -> { rue, zip, city } (sert à remplir le formulaire de modification).
+        function separerAdresse(adresse) {
+            const a = (adresse || '').trim();
+            const m = a.match(/^(.*?)[,\s]*\b(\d{5})\b[,\s]*(.*)$/);
+            return m ? { rue: m[1].trim(), zip: m[2], city: m[3].trim() } : { rue: a, zip: '', city: '' };
+        }
+
+        // Pour un local commercial ou un bureau : activités autorisées et extraction d'air.
+        const TYPES_PRO = ['Local commercial', 'Bureau'];
+        const ACTIVITES = [
+            ['commerce', 'Commerce de détail'], ['restauration', 'Restauration'],
+            ['services', 'Services ou profession libérale'], ['bureau', 'Bureaux'],
+            ['artisanat', 'Artisanat ou activité'], ['autre', 'Autre']
+        ];
+        const libelleActivite = (code) => (ACTIVITES.find((a) => a[0] === code) || [code, code])[1];
+
+        // ---------- Lecture d'un fichier Excel ou CSV (tout se passe dans le navigateur) ----------
+
+        const TAILLE_PAQUET = 300;     // même valeur que le serveur
+        const MAX_LIGNES_FICHIER = 3000;
+        const MAX_OCTETS = 5 * 1024 * 1024;
+
+        // Un export Excel français est souvent en Windows-1252 : on essaie
+        // l'UTF-8 strict d'abord, puis on se rabat sur Windows-1252.
+        function decoderTexte(buffer) {
+            try {
+                return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+            } catch (e) {
+                return new TextDecoder('windows-1252').decode(buffer);
+            }
+        }
+
+        // Lecture CSV avec guillemets, séparateur détecté (point-virgule, tabulation ou virgule).
+        function lireCSV(texte) {
+            if (texte.charCodeAt(0) === 0xFEFF) texte = texte.slice(1);
+            const premiere = texte.split(/\r?\n/, 1)[0];
+            const nb = (c) => premiere.split(c).length - 1;
+            const sep = [';', '\t', ','].reduce((meilleur, c) => (nb(c) > nb(meilleur) ? c : meilleur), ';');
+            const lignes = [];
+            let ligne = [], champ = '', guillemets = false;
+            const finLigne = () => {
+                ligne.push(champ);
+                champ = '';
+                if (ligne.some((x) => x.trim() !== '')) lignes.push(ligne);
+                ligne = [];
+            };
+            for (let i = 0; i < texte.length; i++) {
+                const c = texte[i];
+                if (guillemets) {
+                    if (c === '"') {
+                        if (texte[i + 1] === '"') { champ += '"'; i++; } else guillemets = false;
+                    } else champ += c;
+                } else if (c === '"') guillemets = true;
+                else if (c === sep) { ligne.push(champ); champ = ''; }
+                else if (c === '\n' || c === '\r') {
+                    if (c === '\r' && texte[i + 1] === '\n') i++;
+                    finLigne();
+                } else champ += c;
+            }
+            if (champ !== '' || ligne.length > 0) finLigne();
+            return lignes;
+        }
+
+        const sansAccents = (t) => String(t || '').normalize('NFKD').replace(/[̀-ͯ]/g, '')
+            .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+        // Les titres de colonnes que les logiciels immobiliers utilisent le plus souvent.
+        const SYNONYMES = {
+            reference: ['reference', 'ref', 'reference bien', 'numero mandat', 'n mandat', 'no mandat', 'mandat', 'code bien', 'id annonce', 'reference annonce', 'numero'],
+            title: ['titre', 'titre annonce', 'intitule', 'libelle', 'designation', 'annonce'],
+            address: ['adresse', 'adresse du bien', 'localisation', 'secteur'],
+            city: ['ville', 'commune'],
+            zip: ['code postal', 'cp'],
+            price: ['prix', 'prix de vente', 'prix fai', 'prix net vendeur', 'montant', 'loyer', 'loyer mensuel'],
+            size: ['surface', 'surface habitable', 'superficie', 'm2'],
+            rooms: ['pieces', 'nb pieces', 'nombre de pieces', 'nombre pieces', 'nb de pieces'],
+            property_type: ['type de bien', 'type bien', 'nature', 'categorie', 'type'],
+            description: ['description', 'descriptif', 'texte annonce', 'texte', 'commentaire'],
+            activites_autorisees: ['activites autorisees', 'activite autorisee', 'activites', 'destination', 'usage'],
+            extraction_air: ['extraction', 'extraction d air', 'extraction air', 'conduit d extraction', 'hotte', 'ventilation'],
+            transaction: ['transaction', 'type de transaction', 'vente ou location', 'vente location', 'location vente', 'nature de l operation', 'operation'],
+            meuble: ['meuble', 'meublee', 'bien meuble', 'ameublement'],
+            dpe: ['dpe', 'classe dpe', 'classe energie', 'classe energetique', 'diagnostic de performance energetique', 'etiquette energie', 'etiquette dpe', 'consommation energetique'],
+            ges: ['ges', 'classe ges', 'classe climat', 'etiquette climat', 'etiquette ges', 'emissions de ges', 'gaz a effet de serre']
+        };
+
+        const NOMS_CHAMPS = {
+            reference: 'Référence', title: 'Titre', address: 'Adresse', city: 'Ville', zip: 'Code postal',
+            price: 'Prix ou loyer', size: 'Surface', rooms: 'Pièces', property_type: 'Type de bien', description: 'Description',
+            activites_autorisees: 'Activités autorisées', extraction_air: "Extraction d'air",
+            transaction: 'Vente ou location', meuble: 'Meublé', dpe: 'DPE', ges: 'GES'
+        };
+
+        // Pour chaque champ, la colonne dont le titre ressemble le plus (le synonyme le plus long gagne).
+        function reconnaitreColonnes(entetes) {
+            const meilleur = {};
+            entetes.forEach((brut, index) => {
+                const h = sansAccents(brut);
+                if (!h) return;
+                Object.keys(SYNONYMES).forEach((champ) => {
+                    SYNONYMES[champ].forEach((syn) => {
+                        if (h === syn || h.startsWith(syn + ' ')) {
+                            if (!meilleur[champ] || syn.length > meilleur[champ].force) {
+                                meilleur[champ] = { index, force: syn.length, entete: String(brut).trim() };
+                            }
+                        }
+                    });
+                });
+            });
+            // Une colonne ne sert qu'à un seul champ : la plus précise l'emporte.
+            const prises = {};
+            Object.keys(meilleur).forEach((champ) => {
+                const m = meilleur[champ];
+                if (!prises[m.index] || prises[m.index].force < m.force) prises[m.index] = { champ, force: m.force };
+            });
+            const resultat = {};
+            Object.keys(meilleur).forEach((champ) => {
+                if (prises[meilleur[champ].index].champ === champ) resultat[champ] = meilleur[champ];
+            });
+            return resultat;
+        }
+
+        // Reçoit les lignes déjà lues (CSV ou Excel) : tableau de lignes, chacune un tableau de textes.
+        function analyserFichier(lignes) {
+            if (lignes.length < 2) {
+                return { erreur: "Le fichier est vide, ou ne contient que la ligne des titres de colonnes." };
+            }
+            const colonnes = reconnaitreColonnes(lignes[0]);
+            if (!colonnes.title && !colonnes.reference && !colonnes.address && !colonnes.property_type) {
+                return { erreur: "Aucune colonne reconnue. La première ligne du fichier doit contenir les titres des colonnes (titre, adresse, prix...). Téléchargez le modèle pour voir le format attendu." };
+            }
+            if (lignes.length - 1 > MAX_LIGNES_FICHIER) {
+                return { erreur: `Ce fichier contient plus de ${MAX_LIGNES_FICHIER} biens. Découpez-le en plusieurs fichiers.` };
+            }
+            const valeur = (ligne, champ) => (colonnes[champ] ? String(ligne[colonnes[champ].index] || '').trim() : '');
+            const biens = lignes.slice(1).map((l) => {
+                // Excel enregistre le code postal 01000 comme le nombre 1000 : on rend son 0 au code à 4 chiffres.
+                const adresse = valeur(l, 'address'), cp = valeur(l, 'zip').replace(/^(\d{4})$/, '0$1'), ville = valeur(l, 'city');
+                const parties = [adresse];
+                if (cp && !adresse.includes(cp)) parties.push(cp);
+                if (ville && !adresse.toLowerCase().includes(ville.toLowerCase())) parties.push(ville);
+                return {
+                    reference: valeur(l, 'reference'),
+                    title: valeur(l, 'title'),
+                    address: parties.filter(Boolean).join(' '),
+                    price: valeur(l, 'price'),
+                    size: valeur(l, 'size'),
+                    rooms: valeur(l, 'rooms'),
+                    property_type: valeur(l, 'property_type'),
+                    description: valeur(l, 'description'),
+                    activites_autorisees: valeur(l, 'activites_autorisees'),
+                    extraction_air: valeur(l, 'extraction_air'),
+                    transaction: valeur(l, 'transaction'),
+                    meuble: valeur(l, 'meuble'),
+                    dpe: valeur(l, 'dpe'),
+                    ges: valeur(l, 'ges')
+                };
+            });
+            const utilisees = Object.keys(colonnes).map((c) => colonnes[c].index);
+            return {
+                biens,
+                reconnues: Object.keys(colonnes).map((c) => ({ champ: c, entete: colonnes[c].entete })),
+                ignorees: lignes[0].map((e) => String(e).trim()).filter((e, i) => e && !utilisees.includes(i)),
+                avecTransaction: !!colonnes.transaction,
+                sansAdresse: biens.filter((b) => !b.address).length,
+                sansCP: biens.filter((b) => b.address && !CP_RE.test(b.address)).length,
+                sansType: biens.filter((b) => !b.property_type).length
+            };
+        }
+
+        // Modèle de fichier : séparateur point-virgule et BOM, pour s'ouvrir correctement dans Excel en français.
+        const MODELE_CSV = '﻿' + [
+            'reference;titre;adresse;code postal;ville;vente ou location;prix ou loyer;surface;pieces;type;meuble;dpe;ges;description',
+            'DP-1042;Maison familiale avec jardin;12 rue des Tilleuls;60300;Senlis;vente;395000;120;5;Maison;;D;C;Jardin de 420 m², garage',
+            'DP-1038;Appartement T3 lumineux;8 avenue du Maréchal Foch;60500;Chantilly;vente;245000;68;3;Appartement;;C;B;Balcon, cave',
+            'DP-2007;Studio proche gare;4 rue de la Gare;60300;Senlis;location;640;22;1;Studio;oui;E;D;Loyer mensuel charges comprises'
+        ].join('\r\n') + '\r\n';
+
+        function telechargerModele() {
+            const blob = new Blob([MODELE_CSV], { type: 'text/csv;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'modele-biens-zelyro.csv';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        const prixLisible = (v) => {
+            // Même lecture que le serveur : « 245000.5 » ou « 245000,50 » = 245 000 (les 1 ou 2 derniers chiffres après un séparateur sont des décimales).
+            let t = String(v).replace(/[^\d.,]/g, '');
+            t = t.replace(/[.,]\d{1,2}$/, '').replace(/[.,]/g, '');
+            const n = parseInt(t, 10);
+            return Number.isFinite(n) && v !== '' ? `${n.toLocaleString('fr-FR')} €` : '—';
+        };
+
+        const estLocation = (b) => b.transaction === 'location';
+        const prixAffiche = (b) => (b.price || b.price === 0)
+            ? `${b.price.toLocaleString('fr-FR')} €${estLocation(b) ? ' / mois' : ''}` : '—';
+        // Lecture indicative du texte d'une cellule, pour l'aperçu seulement : le serveur fait foi.
+        const transactionDuFichier = (texte, defaut) => {
+            const t = sansAccents(texte);
+            if (/\b(location|louer|locataire|bail|loyer)\b/.test(t)) return 'location';
+            if (/\b(vente|vendre|achat|vendu)\b/.test(t)) return 'vente';
+            return defaut;
+        };
+
+        function BiensApp() {
+            const [biens, setBiens] = useState([]);
+            const [filtre, setFiltre] = useState('');
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [message, setMessage] = useState(null);
+            const [user, setUser] = useState(null);
+            const [formOuvert, setFormOuvert] = useState(false);
+            const [form, setForm] = useState(VIDE);
+            const [saving, setSaving] = useState(false);
+            const [editionId, setEditionId] = useState(null);      // id du bien en cours de modification, sinon création
+            const [importOuvert, setImportOuvert] = useState(false);
+            const [analyse, setAnalyse] = useState(null);
+            const [progression, setProgression] = useState(null);
+            const [bilan, setBilan] = useState(null);
+            const [onglet, setOnglet] = useState('tout');                // tout | vente | location
+            const [transactionImport, setTransactionImport] = useState('vente');   // vente | location : pour les lignes qui ne le précisent pas
+            const [photos, setPhotos] = useState([]);              // photos déjà enregistrées du bien en cours de modification
+            const [photosAjout, setPhotosAjout] = useState([]);    // photos choisies, envoyées à l'enregistrement
+            const [photoEnCours, setPhotoEnCours] = useState(false);
+            const [couvertures, setCouvertures] = useState({ miniatures: {}, nombres: {} });
+            const [adresseReception, setAdresseReception] = useState(null);   // adresse e-mail de l'agence pour recevoir un export
+            const [adresseCopiee, setAdresseCopiee] = useState(false);
+
+            useEffect(() => {
+                if (!importOuvert || adresseReception) return;
+                fetch(`${API_URL}/api/v1/mail-capture`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } })
+                    .then((r) => (r.ok ? r.json() : null))
+                    .then((d) => { if (d && d.address) setAdresseReception(d.address); })
+                    .catch(() => {});
+            }, [importOuvert]);
+
+            const copierAdresse = async () => {
+                try {
+                    await navigator.clipboard.writeText(adresseReception);
+                    setAdresseCopiee(true);
+                    setTimeout(() => setAdresseCopiee(false), 2000);
+                } catch (e) { /* le navigateur refuse : l'adresse reste affichée, on la copie à la main */ }
+            };
+
+            useEffect(() => {
+                const token = localStorage.getItem('token');
+                const userData = localStorage.getItem('user');
+                if (!token) {
+                    window.location.replace('/login.html');
+                    return;
+                }
+                if (userData) setUser(JSON.parse(userData));
+                fetchBiens(token);
+            }, []);
+
+            const fetchBiens = async (token) => {
+                try {
+                    setLoading(true);
+                    const response = await fetch(`${API_URL}/api/v1/properties`, {
+                        method: 'GET',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+                    });
+                    if (!response.ok) {
+                        if (response.status === 401) {
+                            localStorage.removeItem('token');
+                            localStorage.removeItem('user');
+                            window.location.replace('/login.html');
+                            return;
+                        }
+                        throw new Error(`Erreur API: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    setBiens(data);
+                    setError(null);
+                    chargerCouvertures(token);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            // Les miniatures arrivent après la liste : l'affichage des biens n'attend pas les photos.
+            const chargerCouvertures = async (token) => {
+                try {
+                    const r = await fetch(`${API_URL}/api/v1/properties/photos-couverture`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (r.ok) setCouvertures(await r.json());
+                } catch (e) { /* les biens s'affichent sans photo */ }
+            };
+            // Toutes les photos d'un bien (petites versions), chargées quand on fait défiler la carte.
+            const photosDuBien = async (id) => {
+                const r = await fetch(`${API_URL}/api/v1/properties/${id}/photos?miniature=1`, {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                });
+                if (!r.ok) throw new Error('photos');
+                return (await r.json()).map((p) => p.image);
+            };
+            const appel = (chemin, options = {}) => fetch(`${API_URL}${chemin}`, {
+                ...options,
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+            });
+            const choisirPhotos = async (e) => {
+                const fichiers = Array.from(e.target.files || []);
+                e.target.value = '';
+                if (!fichiers.length) return;
+                const place = PHOTOS_MAX - photos.length - photosAjout.length;
+                if (place <= 0) { setError(`${PHOTOS_MAX} photos au maximum par bien.`); return; }
+                setPhotoEnCours(true);
+                setError(null);
+                const prises = [];
+                try {
+                    for (const fichier of fichiers.slice(0, place)) prises.push(await preparerPhoto(fichier));
+                    if (fichiers.length > place) setError(`${PHOTOS_MAX} photos au maximum par bien : les photos en trop n'ont pas été ajoutées.`);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setPhotosAjout((anciennes) => [...anciennes, ...prises]);
+                    setPhotoEnCours(false);
+                }
+            };
+            const supprimerPhoto = async (photo) => {
+                if (!window.confirm('Supprimer cette photo ?')) return;
+                const r = await appel(`/api/v1/properties/${editionId}/photos/${photo.id}`, { method: 'DELETE' });
+                if (r.ok) setPhotos((l) => l.filter((p) => p.id !== photo.id));
+                else setError('La photo n\'a pas pu être supprimée.');
+            };
+            const photoEnPremier = async (photo) => {
+                const r = await appel(`/api/v1/properties/${editionId}/photos/${photo.id}/principale`, { method: 'POST' });
+                if (r.ok) setPhotos((l) => [photo, ...l.filter((p) => p.id !== photo.id)]);
+                else setError('La photo n\'a pas pu être déplacée.');
+            };
+
+            const enregistrerBien = async () => {
+                if (!form.title.trim()) {
+                    setError('Le titre du bien est obligatoire.');
+                    return;
+                }
+                const zip = form.zip.trim(), city = form.city.trim();
+                if (!/^\d{5}$/.test(zip)) {
+                    setError('Le code postal est obligatoire (5 chiffres) : sans lui, le bien ne peut pas être rapproché des bons prospects.');
+                    return;
+                }
+                if (!city) {
+                    setError('La ville est obligatoire : sans elle, le bien ne peut pas être rapproché des bons prospects.');
+                    return;
+                }
+                const adresseComplete = [form.address.trim(), `${zip} ${city}`].filter(Boolean).join(', ');
+                const token = localStorage.getItem('token');
+                setSaving(true);
+                try {
+                    const modification = editionId !== null;
+                    const response = await fetch(`${API_URL}/api/v1/properties${modification ? `/${editionId}` : ''}`, {
+                        method: modification ? 'PUT' : 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({
+                            reference: form.reference.trim() || null,
+                            title: form.title.trim(),
+                            address: adresseComplete,
+                            price: form.price === '' ? null : parseInt(form.price, 10),
+                            size: form.size === '' ? null : parseInt(form.size, 10),
+                            rooms: form.rooms === '' ? null : parseInt(form.rooms, 10),
+                            property_type: form.property_type || null,
+                            description: form.description.trim() || null,
+                            transaction: form.transaction,
+                            dpe: form.dpe || null,
+                            ges: form.ges || null,
+                            // Le meublé ne concerne que les logements à louer.
+                            ...(form.transaction === 'location' && !TYPES_PRO.includes(form.property_type) ? {
+                                meuble: form.meuble === '' ? null : form.meuble === 'oui'
+                            } : {}),
+                            // Hors local commercial / bureau, ces champs sont cachés : on ne touche pas à ce qui est enregistré.
+                            ...(TYPES_PRO.includes(form.property_type) ? {
+                                activites_autorisees: form.activites_autorisees,
+                                extraction_air: form.extraction_air === '' ? null : form.extraction_air === 'oui'
+                            } : {})
+                        })
+                    });
+                    if (!response.ok) {
+                        const d = await response.json().catch(() => ({}));
+                        if (response.status === 401) { localStorage.removeItem('token'); localStorage.removeItem('user'); window.location.replace('/login.html'); return; }
+                        throw new Error(d.message || `${modification ? 'Modification' : 'Création'} impossible (${response.status})`);
+                    }
+                    const enregistre = await response.json().catch(() => ({}));
+                    let echecsPhotos = 0;
+                    for (const ph of photosAjout) {
+                        const r = enregistre.id ? await appel(`/api/v1/properties/${enregistre.id}/photos`, {
+                            method: 'POST', body: JSON.stringify(ph)
+                        }).catch(() => null) : null;
+                        if (!r || !r.ok) echecsPhotos += 1;
+                    }
+                    setMessage((modification
+                        ? `${form.title.trim()} a été mis à jour.`
+                        : `${form.title.trim()} a été ajouté au portefeuille.`)
+                        + (echecsPhotos ? ` ${echecsPhotos} photo(s) n'ont pas pu être envoyées : rouvrez le bien pour les ajouter de nouveau.` : ''));
+                    setPhotos([]);
+                    setPhotosAjout([]);
+                    setForm(VIDE);
+                    setEditionId(null);
+                    setFormOuvert(false);
+                    setError(null);
+                    await fetchBiens(token);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setSaving(false);
+                }
+            };
+
+            const choisirFichier = async (e) => {
+                const fichier = e.target.files && e.target.files[0];
+                e.target.value = '';
+                setBilan(null);
+                setAnalyse(null);
+                setError(null);
+                if (!fichier) return;
+                if (fichier.size > MAX_OCTETS) {
+                    setError("Ce fichier dépasse 5 Mo. Découpez-le en plusieurs fichiers.");
+                    return;
+                }
+                try {
+                    const contenu = await fichier.arrayBuffer();
+                    // Excel (.xlsx) ou CSV : le contenu du fichier décide, pas son extension.
+                    const lignes = typeDeFichier(contenu) === 'autre' ? lireCSV(decoderTexte(contenu)) : await lireExcel(contenu);
+                    const resultat = analyserFichier(lignes);
+                    if (resultat.erreur) { setError(resultat.erreur); return; }
+                    setAnalyse({ nom: fichier.name, ...resultat });
+                    setTransactionImport('vente');
+                } catch (err) {
+                    setError(err && err.message && /Excel|classeur|navigateur/.test(err.message) ? err.message
+                        : "Ce fichier ne peut pas être lu. Choisissez un fichier Excel (.xlsx) ou CSV.");
+                }
+            };
+
+            const lancerImport = async () => {
+                const token = localStorage.getItem('token');
+                const lignes = analyse.biens;
+                const total = lignes.length;
+                const cumul = {
+                    imported: 0, updated: 0, duplicates: 0, invalid: [], invalid_count: 0, over_quota: 0,
+                    quota_message: null, unknown_types: [], without_address: 0, without_type: 0
+                };
+                let echec = null;
+                setError(null);
+                setProgression({ fait: 0, total });
+                try {
+                    for (let i = 0; i < total; i += TAILLE_PAQUET) {
+                        const response = await fetch(`${API_URL}/api/v1/properties/import`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                            body: JSON.stringify({
+                                rows: lignes.slice(i, i + TAILLE_PAQUET), offset: i,
+                                default_transaction: transactionImport
+                            })
+                        });
+                        if (response.status === 401) {
+                            localStorage.removeItem('token');
+                            localStorage.removeItem('user');
+                            window.location.href = '/login.html';
+                            return;
+                        }
+                        if (!response.ok) {
+                            const d = await response.json().catch(() => ({}));
+                            throw new Error(response.status === 429
+                                ? "Trop d'imports en peu de temps. Réessayez dans une heure."
+                                : (d.message || `Import impossible (${response.status})`));
+                        }
+                        const d = await response.json();
+                        cumul.imported += d.imported;
+                        cumul.updated += d.updated;
+                        cumul.duplicates += d.duplicates;
+                        cumul.over_quota += d.over_quota;
+                        cumul.invalid_count += d.invalid_count;
+                        cumul.invalid = cumul.invalid.concat(d.invalid).slice(0, 50);
+                        cumul.quota_message = d.quota_message || cumul.quota_message;
+                        cumul.without_address += d.without_address;
+                        cumul.without_type += d.without_type;
+                        d.unknown_types.forEach((t) => { if (!cumul.unknown_types.includes(t)) cumul.unknown_types.push(t); });
+                        setProgression({ fait: Math.min(i + TAILLE_PAQUET, total), total });
+                    }
+                } catch (err) {
+                    echec = err.message;
+                }
+                setProgression(null);
+                setAnalyse(null);
+                setBilan(cumul);
+                if (echec) {
+                    setError(`${echec} Les lignes déjà envoyées ont bien été enregistrées : vous pouvez relancer l'import, rien ne sera dupliqué.`);
+                }
+                await fetchBiens(token);
+            };
+
+            const handleLogout = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.replace('/login.html');
+            };
+
+            const set = (k, v) => { setForm({ ...form, [k]: v }); setError(null); };
+
+            const ouvrirNouveau = () => {
+                setEditionId(null); setForm(VIDE); setFormOuvert(true);
+                setPhotos([]); setPhotosAjout([]);
+                setImportOuvert(false); setMessage(null); setError(null);
+            };
+            const basculerActivite = (code) => {
+                const actuelles = form.activites_autorisees;
+                set('activites_autorisees', actuelles.includes(code) ? actuelles.filter((c) => c !== code) : [...actuelles, code]);
+            };
+            const fermerFormulaire = () => { setFormOuvert(false); setEditionId(null); setForm(VIDE); setPhotos([]); setPhotosAjout([]); setError(null); };
+            const modifierBien = (b) => {
+                const adr = separerAdresse(b.address);
+                setForm({
+                    reference: b.reference ?? '', title: b.title ?? '', address: adr.rue, zip: adr.zip, city: adr.city,
+                    price: b.price ?? '', size: b.size ?? '', rooms: b.rooms ?? '',
+                    property_type: b.property_type ?? '', description: b.description ?? '',
+                    activites_autorisees: b.activites_autorisees ?? [],
+                    extraction_air: b.extraction_air === true ? 'oui' : b.extraction_air === false ? 'non' : '',
+                    transaction: b.transaction === 'location' ? 'location' : 'vente',
+                    meuble: b.meuble === true ? 'oui' : b.meuble === false ? 'non' : '',
+                    dpe: b.dpe ?? '', ges: b.ges ?? ''
+                });
+                setPhotos([]); setPhotosAjout([]);
+                appel(`/api/v1/properties/${b.id}/photos`).then((r) => r.ok ? r.json() : []).then(setPhotos).catch(() => {});
+                setEditionId(b.id); setFormOuvert(true);
+                setImportOuvert(false); setMessage(null); setError(null);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            };
+
+            const f = filtre.trim().toLowerCase();
+            const nbVente = biens.filter((b) => !estLocation(b)).length;
+            const nbLocation = biens.length - nbVente;
+            const biensOnglet = onglet === 'tout' ? biens : biens.filter((b) => estLocation(b) === (onglet === 'location'));
+            const biensFiltres = f
+                ? biensOnglet.filter((b) =>
+                    (b.title || '').toLowerCase().includes(f) ||
+                    (b.reference || '').toLowerCase().includes(f) ||
+                    (b.address || '').toLowerCase().includes(f) ||
+                    (b.property_type || '').toLowerCase().includes(f))
+                : biensOnglet;
+
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style={{ color: 'inherit', textDecoration: 'none' }}>ZELYRO</a></div>
+                            <nav>
+                                <a href="/taches.html">À faire</a>
+                                <a href="/prospects.html">Leads</a>
+                                <a href="/biens.html" className="active">Biens</a>
+                                <a href="/matching.html">Matching</a>
+                                <a href="/propositions.html">Propositions</a>
+                                <a href="/dashboard.html">Dashboard</a>
+                                <a href="/compte.html">Compte</a>
+                                {user && user.is_admin && <a href="/admin.html">Admin</a>}
+                            </nav>
+                            <div className="user-info">
+                                {user && <span className="user-email">{user.email}</span>}
+                                <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="container">
+                        <div className="titre-ligne">
+                            <div>
+                                <h1 className="page-title">Biens</h1>
+                                <p className="page-subtitle">
+                                    {biens.length} bien{biens.length > 1 ? 's' : ''} au portefeuille
+                                    {nbLocation > 0 && ` (${nbVente} à vendre, ${nbLocation} à louer)`}
+                                </p>
+                            </div>
+                            <div className="btn-ligne">
+                                <button className="btn secondary" onClick={() => { setImportOuvert(!importOuvert); fermerFormulaire(); setMessage(null); setBilan(null); setAnalyse(null); }}>
+                                    {importOuvert ? 'Fermer l\u2019import' : 'Importer un fichier'}
+                                </button>
+                                <button className="btn" onClick={() => { (formOuvert && editionId === null) ? fermerFormulaire() : ouvrirNouveau(); }}>
+                                    {(formOuvert && editionId === null) ? 'Fermer' : '+ Ajouter un bien'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {error && <div className="error">{error}</div>}
+                        {message && <div className="success">{message}</div>}
+
+                        {importOuvert && (
+                            <div className="panel">
+                                <div className="panel-title">Importer des biens depuis un fichier</div>
+                                <div className="panel-note">
+                                    Votre logiciel (Netty, Hektor, Apimo, AC3...) sait en général exporter
+                                    votre stock en CSV ou en Excel. Chargez ce fichier ici : les biens sont
+                                    ajoutés au portefeuille et proposés aux prospects qui correspondent.
+                                    Vous pouvez réimporter le même fichier plus tard : les biens qui ont
+                                    la même référence sont mis à jour, pas dupliqués.
+                                </div>
+
+                                <div className="import-avertissement" style={{ background: 'var(--surface-2, #F4F1EA)', color: 'var(--ink)', border: '1px solid var(--line, #E3DED3)' }}>
+                                    <strong style={{ fontWeight: 600 }}>Pour ne plus importer à la main.</strong>{' '}
+                                    Réglez votre logiciel pour qu'il envoie son export (CSV ou Excel) chaque semaine à cette
+                                    adresse, ou transférez-le vous-même par e-mail : les biens sont ajoutés ou mis à jour
+                                    par référence, sans doublon. Le résultat de chaque envoi apparaît dans le journal de
+                                    réception, sur la page Compte.
+                                    {adresseReception && (
+                                        <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
+                                            <code id="adresse-reception" style={{ fontSize: '13px', wordBreak: 'break-all' }}>{adresseReception}</code>
+                                            <button className="btn secondary petit" onClick={copierAdresse}>
+                                                {adresseCopiee ? 'Adresse copiée' : "Copier l'adresse"}
+                                            </button>
+                                        </div>
+                                    )}
+                                    <div className="petit-texte" style={{ marginTop: '8px' }}>
+                                        Votre éditeur de logiciel ou votre passerelle de diffusion peut aussi envoyer vos biens
+                                        directement à l'API de Zelyro (adresse /api/v1/inbound/properties) avec une clé créée
+                                        sur la page Compte.
+                                    </div>
+                                </div>
+
+                                <div className="import-etapes">
+                                    <div>
+                                        <div className="import-etape-titre"><span>1.</span>Préparez le fichier</div>
+                                        <div className="panel-note" style={{ marginBottom: '12px' }}>
+                                            La première ligne contient les titres des colonnes. Colonnes
+                                            reconnues : référence, titre, adresse, code postal, ville, prix (ou loyer),
+                                            vente ou location, surface, pièces, type de bien, description, DPE et GES (une lettre de A à G), meublé (oui ou non)
+                                            et, pour les locaux commerciaux et bureaux, activités autorisées et extraction
+                                            d'air (oui ou non). Pour une location, la colonne prix contient le loyer
+                                            mensuel. Seul le titre est
+                                            indispensable, mais sans adresse ni type, un bien n'apparaîtra
+                                            dans aucune correspondance. Le fichier peut être au format Excel
+                                            (.xlsx) ou CSV ; si le classeur a plusieurs feuilles, la première
+                                            feuille qui contient des données est lue.
+                                        </div>
+                                        <button className="btn secondary petit" onClick={telechargerModele}>
+                                            Télécharger un modèle de fichier
+                                        </button>
+                                    </div>
+
+                                    <div>
+                                        <div className="import-etape-titre"><span>2.</span>Choisissez votre fichier</div>
+                                        <div className="import-fichier">
+                                            <label htmlFor="fichier-biens" style={{ display: 'none' }}>Fichier Excel ou CSV des biens</label>
+                                            <input id="fichier-biens" type="file" accept=".csv,.txt,.xlsx,.xlsm,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                                onChange={choisirFichier} disabled={!!progression} />
+                                        </div>
+                                    </div>
+
+                                    {analyse && (
+                                        <div>
+                                            <div className="import-etape-titre"><span>3.</span>Vérifiez, puis importez</div>
+                                            <div className="panel-note" style={{ marginBottom: '4px' }}>
+                                                {analyse.nom} : {analyse.biens.length} bien{analyse.biens.length > 1 ? 's' : ''} trouvé{analyse.biens.length > 1 ? 's' : ''}.
+                                                Colonnes reconnues :
+                                            </div>
+                                            <div className="colonnes-reconnues">
+                                                {analyse.reconnues.map((c) => (
+                                                    <span key={c.champ} className="pastille">
+                                                        {NOMS_CHAMPS[c.champ]} ← {c.entete}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                            {analyse.ignorees.length > 0 && (
+                                                <div className="colonnes-ignorees">
+                                                    Colonnes ignorées : {analyse.ignorees.join(', ')}
+                                                </div>
+                                            )}
+                                            <div className="form-group" style={{ maxWidth: '420px', marginTop: '14px' }}>
+                                                <label htmlFor="transaction-import">
+                                                    {analyse.avecTransaction ? 'Quand une ligne ne précise pas vente ou location, le bien est' : 'Ces biens sont'}
+                                                </label>
+                                                <select id="transaction-import" value={transactionImport}
+                                                    onChange={(e) => setTransactionImport(e.target.value)} disabled={!!progression}>
+                                                    <option value="vente">Des biens à vendre</option>
+                                                    <option value="location">Des biens à louer</option>
+                                                </select>
+                                            </div>
+                                            {(analyse.sansAdresse > 0 || analyse.sansCP > 0 || analyse.sansType > 0) && (
+                                                <div className="import-avertissement">
+                                                    {analyse.sansAdresse > 0 && <div>{analyse.sansAdresse} bien{analyse.sansAdresse > 1 ? 's' : ''} sans adresse.</div>}
+                                                    {analyse.sansCP > 0 && <div>{analyse.sansCP} bien{analyse.sansCP > 1 ? 's' : ''} sans code postal (ajoutez une colonne « code postal » au fichier).</div>}
+                                                    {analyse.sansType > 0 && <div>{analyse.sansType} bien{analyse.sansType > 1 ? 's' : ''} sans type de bien.</div>}
+                                                    Ils seront importés, mais ne seront proposés à aucun prospect tant qu'il manque ces informations.
+                                                </div>
+                                            )}
+                                            <div className="table-scroll" style={{ marginBottom: '18px' }}>
+                                                <table className="admin-table apercu-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Réf.</th><th>Titre</th><th>Adresse</th><th>Vente / location</th><th>Prix ou loyer</th><th>Pièces</th><th>Type</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {analyse.biens.slice(0, 5).map((b, i) => (
+                                                            <tr key={i}>
+                                                                <td>{b.reference || '—'}</td>
+                                                                <td>{b.title || '—'}</td>
+                                                                <td>{b.address || '—'}</td>
+                                                                {(() => {
+                                                                    const location = transactionDuFichier(b.transaction, transactionImport) === 'location';
+                                                                    return (
+                                                                        <>
+                                                                            <td>{location ? 'Location' : 'Vente'}</td>
+                                                                            <td>{prixLisible(b.price)}{location && b.price ? ' / mois' : ''}</td>
+                                                                        </>
+                                                                    );
+                                                                })()}
+                                                                <td>{b.rooms || '—'}</td>
+                                                                <td>{b.property_type || '—'}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            {analyse.biens.length > 5 && (
+                                                <div className="colonnes-ignorees">
+                                                    Aperçu des 5 premières lignes sur {analyse.biens.length}.
+                                                </div>
+                                            )}
+                                            <div className="btn-ligne">
+                                                <button className="btn" onClick={lancerImport} disabled={!!progression}>
+                                                    {progression
+                                                        ? `Import en cours (${progression.fait} sur ${progression.total})...`
+                                                        : `Importer ${analyse.biens.length} bien${analyse.biens.length > 1 ? 's' : ''}`}
+                                                </button>
+                                                <button className="btn secondary" onClick={() => setAnalyse(null)} disabled={!!progression}>
+                                                    Annuler
+                                                </button>
+                                            </div>
+                                            {progression && (
+                                                <div className="usage-piste" style={{ marginTop: '14px' }}>
+                                                    <div className="usage-barre" style={{ width: `${Math.round(100 * progression.fait / progression.total)}%` }}></div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {bilan && (
+                                        <div className="import-resultat">
+                                            <div className="success">
+                                                <p>
+                                                    {bilan.imported} bien{bilan.imported > 1 ? 's' : ''} ajouté{bilan.imported > 1 ? 's' : ''}
+                                                    {bilan.updated > 0 && `, ${bilan.updated} mis à jour`}
+                                                    {bilan.duplicates > 0 && `, ${bilan.duplicates} déjà présent${bilan.duplicates > 1 ? 's' : ''} (ignoré${bilan.duplicates > 1 ? 's' : ''})`}.
+                                                </p>
+                                                {bilan.invalid_count > 0 && (
+                                                    <>
+                                                        <p>{bilan.invalid_count} ligne{bilan.invalid_count > 1 ? 's' : ''} non importée{bilan.invalid_count > 1 ? 's' : ''} :</p>
+                                                        <ul>
+                                                            {bilan.invalid.slice(0, 5).map((l, i) => (
+                                                                <li key={i}>ligne {l.ligne + 1} : {l.raison}</li>
+                                                            ))}
+                                                            {bilan.invalid_count > 5 && <li>et {bilan.invalid_count - 5} autre{bilan.invalid_count - 5 > 1 ? 's' : ''}.</li>}
+                                                        </ul>
+                                                    </>
+                                                )}
+                                            </div>
+                                            {bilan.quota_message && <div className="error">{bilan.quota_message}</div>}
+                                            {bilan.unknown_types.length > 0 && (
+                                                <div className="import-avertissement">
+                                                    Type de bien non reconnu : {bilan.unknown_types.map((t) => `« ${t} »`).join(', ')}.
+                                                    Ces biens n'ont pas de type, donc moins de points de correspondance.
+                                                    Types connus : Appartement, Maison, Villa, Studio, Penthouse, Terrain, Local commercial, Bureau.
+                                                </div>
+                                            )}
+                                            {(bilan.without_address > 0) && (
+                                                <div className="import-avertissement">
+                                                    {bilan.without_address} bien{bilan.without_address > 1 ? 's' : ''} sans adresse : sans elle, ils n'apparaîtront dans aucune correspondance.
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {formOuvert && (
+                            <div className="panel">
+                                <div className="panel-title">{editionId !== null ? 'Modifier le bien' : 'Nouveau bien'}</div>
+                                {editionId !== null && (
+                                    <div className="panel-note">
+                                        Les correspondances avec vos prospects sont recalculées dès l'enregistrement.
+                                    </div>
+                                )}
+                                <div className="panel-note">
+                                    Le titre, le code postal et la ville sont obligatoires. Le code postal,
+                                    la ville et le type déterminent à quels prospects le bien sera proposé :
+                                    sans eux, il n'apparaîtrait dans aucune correspondance. La référence
+                                    (numéro de mandat ou d'annonce) permet de retrouver ce bien quand vous
+                                    importerez un fichier.
+                                </div>
+
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>Ce bien est</label>
+                                        <select value={form.transaction} onChange={(e) => set('transaction', e.target.value)}>
+                                            <option value="vente">À vendre</option>
+                                            <option value="location">À louer</option>
+                                        </select>
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Référence</label>
+                                        <input type="text" value={form.reference}
+                                            onChange={(e) => set('reference', e.target.value)}
+                                            placeholder="N° de mandat ou d'annonce" />
+                                    </div>
+                                </div>
+
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>Titre <span className="obligatoire">*</span></label>
+                                        <input type="text" value={form.title}
+                                            onChange={(e) => set('title', e.target.value)}
+                                            placeholder="T3 lumineux centre-ville" />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>{form.transaction === 'location' ? 'Loyer mensuel (€ par mois)' : 'Prix (€)'}</label>
+                                        <input type="number" value={form.price}
+                                            onChange={(e) => set('price', e.target.value)}
+                                            placeholder={form.transaction === 'location' ? '850' : '249000'} />
+                                    </div>
+                                </div>
+
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>Adresse (numéro et rue)</label>
+                                        <input type="text" value={form.address}
+                                            onChange={(e) => set('address', e.target.value)}
+                                            placeholder="12 rue Nationale" />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Code postal <span className="obligatoire">*</span></label>
+                                        <input type="text" inputMode="numeric" autoComplete="postal-code" maxLength={5} value={form.zip}
+                                            onChange={(e) => set('zip', e.target.value.replace(/\D/g, '').slice(0, 5))}
+                                            placeholder="59000" />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Ville <span className="obligatoire">*</span></label>
+                                        <input type="text" autoComplete="address-level2" value={form.city}
+                                            onChange={(e) => set('city', e.target.value)}
+                                            placeholder="Lille" />
+                                    </div>
+                                </div>
+
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>Surface (m²)</label>
+                                        <input type="number" value={form.size}
+                                            onChange={(e) => set('size', e.target.value)}
+                                            placeholder="68" />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Nombre de pièces</label>
+                                        <input type="number" value={form.rooms}
+                                            onChange={(e) => set('rooms', e.target.value)}
+                                            placeholder="3" />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Type de bien</label>
+                                        <select value={form.property_type}
+                                            onChange={(e) => set('property_type', e.target.value)}>
+                                            <option value="">Non précisé</option>
+                                            <option value="Appartement">Appartement</option>
+                                            <option value="Maison">Maison</option>
+                                            <option value="Villa">Villa</option>
+                                            <option value="Studio">Studio</option>
+                                            <option value="Penthouse">Penthouse</option>
+                                            <option value="Terrain">Terrain</option>
+                                            <option value="Local commercial">Local commercial</option>
+                                            <option value="Bureau">Bureau</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label>DPE (classe énergie)</label>
+                                        <select value={form.dpe} onChange={(e) => set('dpe', e.target.value)}>
+                                            <option value="">Non renseigné</option>
+                                            {CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="form-group">
+                                        <label>GES (classe climat)</label>
+                                        <select value={form.ges} onChange={(e) => set('ges', e.target.value)}>
+                                            <option value="">Non renseigné</option>
+                                            {CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+                                {form.transaction === 'location' && form.dpe === 'G' && (
+                                    <div className="ener-alerte" style={{ marginBottom: 10 }}>
+                                        Un logement classé G ne peut plus être mis en location (nouveau bail) : à vérifier avant de le proposer.
+                                    </div>
+                                )}
+
+                                {form.transaction === 'location' && !TYPES_PRO.includes(form.property_type) && (
+                                    <div className="form-row">
+                                        <div className="form-group">
+                                            <label>Meublé</label>
+                                            <select value={form.meuble} onChange={(e) => set('meuble', e.target.value)}>
+                                                <option value="">Non renseigné</option>
+                                                <option value="oui">Meublé</option>
+                                                <option value="non">Non meublé</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {TYPES_PRO.includes(form.property_type) && (
+                                    <>
+                                        <div className="form-row">
+                                            <div className="form-group">
+                                                <label>Extraction d'air (ventilation pour une cuisine)</label>
+                                                <select value={form.extraction_air}
+                                                    onChange={(e) => set('extraction_air', e.target.value)}>
+                                                    <option value="">Non renseigné</option>
+                                                    <option value="oui">Oui, une extraction existe</option>
+                                                    <option value="non">Non, pas d'extraction</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div className="form-group">
+                                            <label>Activités autorisées dans le local</label>
+                                            <div className="cases">
+                                                {ACTIVITES.map(([code, libelle]) => (
+                                                    <label key={code}>
+                                                        <input type="checkbox" checked={form.activites_autorisees.includes(code)}
+                                                            onChange={() => basculerActivite(code)} />
+                                                        {libelle}
+                                                    </label>
+                                                ))}
+                                            </div>
+                                            <div className="panel-note" style={{ marginTop: '8px' }}>
+                                                D'après la destination du local, le règlement de copropriété ou le bail.
+                                                Sans extraction d'air, un restaurant ne peut pas y installer de cuisine :
+                                                le bien ne lui sera pas proposé. Laissez vide si vous ne savez pas, le bien
+                                                ne sera alors pas écarté.
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+
+                                <div className="form-group">
+                                    <label>Photos ({photos.length + photosAjout.length}/{PHOTOS_MAX})</label>
+                                    {(photos.length + photosAjout.length) > 0 && (
+                                        <div className="photos-grille">
+                                            {photos.map((p, i) => (
+                                                <div className="photo-tuile" key={'p' + p.id}>
+                                                    <img src={p.image} alt={`Photo ${i + 1} du bien`} />
+                                                    {i === 0 && <span className="photo-principale">Principale</span>}
+                                                    <div className="photo-actions">
+                                                        {i > 0 ? <button type="button" onClick={() => photoEnPremier(p)}>En premier</button> : <span></span>}
+                                                        <button type="button" onClick={() => supprimerPhoto(p)}>Supprimer</button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {photosAjout.map((p, i) => (
+                                                <div className="photo-tuile" key={'n' + i}>
+                                                    <img src={p.miniature} alt={`Nouvelle photo ${i + 1}`} />
+                                                    {photos.length === 0 && i === 0 && <span className="photo-principale">Principale</span>}
+                                                    <div className="photo-actions">
+                                                        <span style={{ fontSize: 11, color: '#fff' }}>à envoyer</span>
+                                                        <button type="button" onClick={() => setPhotosAjout((l) => l.filter((_, k) => k !== i))}>Retirer</button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    <div className="photo-ajout">
+                                        <input type="file" accept="image/*" multiple onChange={choisirPhotos}
+                                            disabled={photoEnCours || (photos.length + photosAjout.length) >= PHOTOS_MAX} />
+                                    </div>
+                                    <div className="panel-note" style={{ marginTop: '6px' }}>
+                                        {photoEnCours ? 'Préparation des photos...' : 'Les photos sont réduites automatiquement. Les nouvelles photos sont envoyées quand vous enregistrez le bien.'}
+                                    </div>
+                                </div>
+
+                                <div className="form-group">
+                                    <label>Description</label>
+                                    <textarea value={form.description}
+                                        onChange={(e) => set('description', e.target.value)}
+                                        placeholder="Ce qu'il faut retenir sur ce bien : exposition, travaux, copropriété..."></textarea>
+                                </div>
+
+                                <button className="btn" onClick={enregistrerBien} disabled={saving}>
+                                    {saving ? 'Enregistrement...' : (editionId !== null ? 'Enregistrer les modifications' : 'Ajouter le bien')}
+                                </button>
+                                {editionId !== null && (
+                                    <button className="btn secondary" onClick={fermerFormulaire} disabled={saving}>
+                                        Annuler
+                                    </button>
+                                )}
+                            </div>
+                        )}
+
+                        {!loading && nbLocation > 0 && nbVente > 0 && (
+                            <div className="onglets-transaction" role="tablist" aria-label="Vente ou location">
+                                <button type="button" role="tab" className={onglet === 'tout' ? 'actif' : ''} aria-selected={onglet === 'tout'} onClick={() => setOnglet('tout')}>Tout ({biens.length})</button>
+                                <button type="button" role="tab" className={onglet === 'vente' ? 'actif' : ''} aria-selected={onglet === 'vente'} onClick={() => setOnglet('vente')}>À vendre ({nbVente})</button>
+                                <button type="button" role="tab" className={onglet === 'location' ? 'actif' : ''} aria-selected={onglet === 'location'} onClick={() => setOnglet('location')}>À louer ({nbLocation})</button>
+                            </div>
+                        )}
+
+                        {!loading && biens.length > 0 && (
+                            <input className="recherche" type="text" value={filtre}
+                                onChange={(e) => setFiltre(e.target.value)}
+                                placeholder="Filtrer par titre, référence, adresse ou type..." />
+                        )}
+
+                        {loading ? (
+                            <div className="loading">
+                                <div className="loader"></div>
+                                <p style={{ marginTop: '20px' }}>Chargement du portefeuille...</p>
+                            </div>
+                        ) : biens.length === 0 ? (
+                            <div className="panel">
+                                <div className="empty-state">
+                                    Aucun bien au portefeuille.<br />
+                                    Utilisez le bouton « Ajouter un bien » pour commencer.
+                                </div>
+                            </div>
+                        ) : biensFiltres.length === 0 ? (
+                            <div className="panel">
+                                <div className="empty-state">
+                                    Aucun bien ne correspond à « {filtre} ».
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="biens-grid">
+                                {biensFiltres.map((b) => (
+                                    <div key={b.id} className="bien-card">
+                                        {couvertures.miniatures[String(b.id)] ? (
+                                            <Carrousel key={`${b.id}-${couvertures.nombres[String(b.id)]}-${couvertures.miniatures[String(b.id)].length}`}
+                                                couverture={couvertures.miniatures[String(b.id)]}
+                                                nombre={couvertures.nombres[String(b.id)] || 1}
+                                                charger={() => photosDuBien(b.id)}
+                                                alt={`Photos de ${b.title}`} />
+                                        ) : null}
+                                        <div className="bien-header">
+                                            <div className="bien-titre">{b.title}</div>
+                                            <div className="bien-prix">
+                                                {prixAffiche(b)}
+                                            </div>
+                                        </div>
+                                        <div className="bien-adresse">
+                                            {b.address || 'Adresse non renseignée'}
+                                        </div>
+                                        {b.address && !CP_RE.test(b.address) && (
+                                            <div className="field-hint" style={{ color: 'var(--warm)', marginTop: 0, marginBottom: 8 }}>
+                                                Code postal manquant : ce bien risque de ne pas apparaître dans les correspondances.{' '}
+                                                <button type="button" className="lien-bouton" onClick={() => modifierBien(b)}>Compléter</button>
+                                            </div>
+                                        )}
+                                        {b.reference && <div className="ref-bien">Réf. {b.reference}</div>}
+                                        <Energie dpe={b.dpe} ges={b.ges} />
+                                        {estLocation(b) && b.dpe === 'G' && (
+                                            <div className="ener-alerte">Classé G : location interdite pour un nouveau bail.</div>
+                                        )}
+                                        <div className="bien-field">
+                                            <span className="bien-label">Surface :</span>
+                                            <span className="bien-value">{b.size ? `${b.size} m²` : 'N/A'}</span>
+                                        </div>
+                                        <div className="bien-field">
+                                            <span className="bien-label">Pièces :</span>
+                                            <span className="bien-value">{b.rooms || 'N/A'}</span>
+                                        </div>
+                                        {estLocation(b) && b.meuble !== null && b.meuble !== undefined && !TYPES_PRO.includes(b.property_type) && (
+                                            <div className="bien-field">
+                                                <span className="bien-label">Meublé :</span>
+                                                <span className="bien-value">{b.meuble ? 'Oui' : 'Non'}</span>
+                                            </div>
+                                        )}
+                                        {TYPES_PRO.includes(b.property_type) && (b.extraction_air !== null && b.extraction_air !== undefined) && (
+                                            <div className="bien-field">
+                                                <span className="bien-label">Extraction d'air :</span>
+                                                <span className="bien-value">{b.extraction_air ? 'Oui' : 'Non'}</span>
+                                            </div>
+                                        )}
+                                        {b.activites_autorisees && b.activites_autorisees.length > 0 && (
+                                            <div className="bien-field">
+                                                <span className="bien-label">Activités :</span>
+                                                <span className="bien-value">{b.activites_autorisees.map(libelleActivite).join(', ')}</span>
+                                            </div>
+                                        )}
+                                        {b.description && (
+                                            <div className="bien-desc">{b.description}</div>
+                                        )}
+                                        {estLocation(b) && <span className="bien-badge-location">À louer</span>}
+                                        {b.property_type && (
+                                            <span className="bien-type">{b.property_type}</span>
+                                        )}
+                                        <div className="bien-actions">
+                                            <button className="btn secondary petit" onClick={() => modifierBien(b)}
+                                                aria-label={`Modifier ${b.title}`}>
+                                                Modifier
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </>
+            );
+        }
+
+        ReactDOM.render(<BiensApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>

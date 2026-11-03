@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZELYRO - Matching</title>
+    <meta name="robots" content="noindex">
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="carrousel.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <meta name="theme-color" content="#F6F2EA">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="zelyro.css">
+    <style>
+        .content-wrapper { grid-template-columns: 1fr 1.2fr; }
+        .panel { margin-bottom: 0; }
+        .panel-title { margin-bottom: 18px; }
+    </style>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <script src="/pwa.js" defer></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Déclarée au même niveau que dans les autres pages, hors du
+        // composant : c'est la seule ligne à changer le jour où l'adresse
+        // du serveur change.
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+
+        // Tri alphabétique sur le nom de famille (le nom est saisi « Prénom Nom »),
+        // sans tenir compte des accents ni des majuscules. Le nom de famille est le
+        // dernier mot, précédé de ses particules : « Marie Le Gall » se classe à L,
+        // « Charles de Gaulle » à G (de, du et des sont ignorés). À nom égal, on
+        // départage par le prénom.
+        const PARTICULES = ['de', 'du', 'des', 'le', 'la', 'les', 'van', 'von', 'der', 'den', 'di', 'da', 'del'];
+        const cleNom = (nom) => {
+            const mots = String(nom || '').trim().split(/\s+/).filter(Boolean);
+            if (mots.length <= 1) return mots.join(' ');
+            let debut = mots.length - 1;
+            while (debut > 0 && PARTICULES.includes(mots[debut - 1].toLowerCase())) debut--;
+            const famille = mots.slice(debut).join(' ').replace(/^(de|du|des)\s+/i, '');
+            return famille + ' ' + mots.slice(0, debut).join(' ');
+        };
+        const parNom = (a, b) => cleNom(a.name).localeCompare(cleNom(b.name), 'fr', { sensitivity: 'base' });
+
+        // Recherche : chaque mot saisi doit se retrouver dans le nom, l'e-mail,
+        // le téléphone, le secteur ou le type de bien (accents et majuscules ignorés).
+        const normaliser = (s) => String(s == null ? '' : s)
+            .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+        const correspond = (lead, recherche) => {
+            const termes = normaliser(recherche).split(/\s+/).filter(Boolean);
+            if (termes.length === 0) return true;
+            const texte = normaliser([lead.name, lead.email, lead.phone, lead.location, lead.property_type, lead.transaction === 'location' ? 'location locataire' : ''].join(' '));
+            return termes.every((t) => texte.includes(t));
+        };
+
+        const estLocation = (x) => x.transaction === 'location';
+        // Local commercial ou bureau : le locataire est un professionnel, on n'affiche aucun garant.
+        const estPro = (x) => ['Local commercial', 'Bureau'].includes(x.property_type);
+        // Un loyer se lit « 850 € / mois » : sans ça, on prendrait un loyer pour un prix de vente.
+        const Energie = ({ dpe, ges }) => (!dpe && !ges) ? null : (
+            <div className="ener-ligne">
+                {dpe && <span className={`ener ener-dpe-${dpe}`} title={`DPE : classe ${dpe}`}>DPE <b>{dpe}</b></span>}
+                {ges && <span className={`ener ener-ges-${ges}`} title={`GES : classe ${ges}`}>GES <b>{ges}</b></span>}
+            </div>
+        );
+        const montant = (v, loc) => `${v.toLocaleString('fr-FR')} €${loc ? ' / mois' : ''}`;
+        const SITUATIONS = {
+            cdi: 'CDI', fonctionnaire: 'Fonctionnaire', cdd: 'CDD ou intérim',
+            independant: "Indépendant ou chef d'entreprise", retraite: 'Retraité', etudiant: 'Étudiant', autre: 'Autre'
+        };
+
+        function MatchingApp() {
+            const [leads, setLeads] = useState([]);
+            const [selectedLeadId, setSelectedLeadId] = useState(null);
+            const [qualityFilter, setQualityFilter] = useState('all');
+            const [recherche, setRecherche] = useState('');
+            const [filtreTransaction, setFiltreTransaction] = useState('tout');   // tout | vente | location
+            const [couvertures, setCouvertures] = useState({ miniatures: {}, nombres: {} });
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [user, setUser] = useState(null);
+
+            useEffect(() => {
+                const token = localStorage.getItem('token');
+                const userData = localStorage.getItem('user');
+                if (!token) {
+                    window.location.replace('/login.html');
+                    return;
+                }
+                if (userData) setUser(JSON.parse(userData));
+                fetchMatches(token);
+            }, []);
+
+            // Photos des biens : couverture et nombre, puis les autres photos à la demande (défilement).
+            const chargerCouvertures = async (token) => {
+                try {
+                    const r = await fetch(`${API_URL}/api/v1/properties/photos-couverture`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (r.ok) setCouvertures(await r.json());
+                } catch (e) { /* les biens s'affichent sans photo */ }
+            };
+            const photosDuBien = async (id) => {
+                const r = await fetch(`${API_URL}/api/v1/properties/${id}/photos?miniature=1`, {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                });
+                if (!r.ok) throw new Error('photos');
+                return (await r.json()).map((p) => p.image);
+            };
+
+            const fetchMatches = async (token) => {
+                try {
+                    setLoading(true);
+                    const response = await fetch(`${API_URL}/api/v1/improved-matches`, {
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+                    });
+                    if (!response.ok) {
+                        if (response.status === 401) {
+                            localStorage.removeItem('token');
+                            localStorage.removeItem('user');
+                            window.location.replace('/login.html');
+                            return;
+                        }
+                        throw new Error(`Erreur API: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    setLeads(data);
+                    chargerCouvertures(token);
+                    if (data.length > 0) setSelectedLeadId([...data].sort(parNom)[0].id);
+                    setError(null);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleLogout = () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.replace('/login.html');
+            };
+
+            // Palier de couleur selon le score /100 : le même que sur la page Prospects (voir zelyro.css).
+            const palier = (score, q) => typeof score !== 'number'
+                ? (q === 'hot' ? 'p-vert' : q === 'warm' ? 'p-orange' : 'p-gris')
+                : score >= 90 ? 'p-go' : score >= 80 ? 'p-vert' : score >= 65 ? 'p-jaune' : score >= 45 ? 'p-orange' : 'p-gris';
+
+            const qualityBadge = (quality, lead, score) => {
+                const classes = { hot: 'badge-hot', warm: 'badge-warm', cold: 'badge-cold' };
+                const labels = { hot: lead && estLocation(lead) ? 'Locataire actif' : 'Acheteur actif', warm: 'Projet en cours', cold: 'Premier contact' };
+                if (!labels[quality]) return null;
+                return <span className={`lead-badge ${classes[quality]} ${palier(score, quality)}`}
+                    title="Score de qualité du prospect. Le détail est sur sa fiche.">
+                    {labels[quality]}{typeof score === 'number' ? ` · ${score}/100` : ''}
+                </span>;
+            };
+
+            const financingLabel = (status) => ({
+                approved: 'Approuvé',
+                in_progress: 'En cours',
+                pending: 'En attente',
+                rejected: 'Rejeté',
+                unknown: 'Non renseigné'
+            }[status] || status);
+
+            const urgencyLabel = (urgency) => ({
+                immediate: 'Immédiat',
+                '1-3_months': '1 à 3 mois',
+                '3-6_months': '3 à 6 mois',
+                '6plus_months': 'Plus de 6 mois',
+                unknown: 'Non renseigné'
+            }[urgency] || urgency);
+
+            const nbLocation = leads.filter(estLocation).length;
+            const parRecherche = leads
+                .filter(lead => filtreTransaction === 'tout' || estLocation(lead) === (filtreTransaction === 'location'))
+                .filter(lead => correspond(lead, recherche));
+            const filteredLeads = parRecherche
+                .filter(lead => qualityFilter === 'all' ? true : lead.lead_quality === qualityFilter)
+                .sort(parNom);
+            // Si le prospect sélectionné n'est plus dans la liste (filtre ou recherche),
+            // on affiche le premier de la liste plutôt qu'une fiche hors liste.
+            const idAffiche = filteredLeads.some(l => l.id === selectedLeadId)
+                ? selectedLeadId
+                : (filteredLeads[0] ? filteredLeads[0].id : null);
+            const selectedLead = leads.find(l => l.id === idAffiche);
+            const count = (q) => parRecherche.filter(l => l.lead_quality === q).length;
+
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style={{ color: 'inherit', textDecoration: 'none' }}>ZELYRO</a></div>
+                            <nav>
+                                <a href="/taches.html">À faire</a>
+                                <a href="/prospects.html">Leads</a>
+                                <a href="/biens.html">Biens</a>
+                                <a href="/matching.html" className="active">Matching</a>
+                                <a href="/propositions.html">Propositions</a>
+                                <a href="/dashboard.html">Dashboard</a>
+                                <a href="/compte.html">Compte</a>
+                                {user && user.is_admin && <a href="/admin.html">Admin</a>}
+                            </nav>
+                            <div className="user-info">
+                                {user && <span className="user-email">{user.email}</span>}
+                                <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="container">
+                        <h1 className="page-title">Matching</h1>
+                        <p className="page-subtitle">
+                            Les meilleures correspondances pour chacun de vos {leads.length} prospects
+                        </p>
+
+                        {error && <div className="error">Erreur: {error}</div>}
+
+                        {loading ? (
+                            <div className="loading">
+                                <div className="loader"></div>
+                                <p style={{ marginTop: '20px' }}>Chargement des correspondances...</p>
+                            </div>
+                        ) : leads.length === 0 ? (
+                            <div className="panel">
+                                <div className="empty-state">Aucun prospect à rapprocher pour le moment.</div>
+                            </div>
+                        ) : (
+                            <>
+                                <input className="recherche" type="text" value={recherche}
+                                    onChange={(e) => setRecherche(e.target.value)}
+                                    placeholder="Rechercher un prospect (nom, secteur, e-mail...)" />
+
+                                {nbLocation > 0 && nbLocation < leads.length && (
+                                    <div className="filters">
+                                        {[['tout', 'Achat et location'], ['vente', 'Achat'], ['location', 'Location']].map(([v, l]) => (
+                                            <button key={v} className={`filter-button ${filtreTransaction === v ? 'active' : ''}`}
+                                                onClick={() => setFiltreTransaction(v)}>{l}</button>
+                                        ))}
+                                    </div>
+                                )}
+
+                                <div className="filters">
+                                    <button
+                                        className={`filter-button ${qualityFilter === 'all' ? 'active' : ''}`}
+                                        onClick={() => setQualityFilter('all')}>
+                                        Tous ({parRecherche.length})
+                                    </button>
+                                    <button
+                                        className={`filter-button ${qualityFilter === 'hot' ? 'active' : ''}`}
+                                        onClick={() => setQualityFilter('hot')}>
+                                        {nbLocation > 0 ? 'Prospects actifs' : 'Acheteurs actifs'} ({count('hot')})
+                                    </button>
+                                    <button
+                                        className={`filter-button ${qualityFilter === 'warm' ? 'active' : ''}`}
+                                        onClick={() => setQualityFilter('warm')}>
+                                        Projets en cours ({count('warm')})
+                                    </button>
+                                    <button
+                                        className={`filter-button ${qualityFilter === 'cold' ? 'active' : ''}`}
+                                        onClick={() => setQualityFilter('cold')}>
+                                        Premiers contacts ({count('cold')})
+                                    </button>
+                                </div>
+
+                                <div className="content-wrapper">
+                                    <div className="panel leads-panel">
+                                        <div className="panel-title">Prospects</div>
+                                        {filteredLeads.length === 0 ? (
+                                            <div className="empty-state">
+                                                {recherche.trim()
+                                                    ? `Aucun prospect ne correspond à « ${recherche.trim()} »`
+                                                    : 'Aucun prospect dans cette catégorie'}
+                                            </div>
+                                        ) : (
+                                            filteredLeads.map(lead => (
+                                                <div
+                                                    key={lead.id}
+                                                    className={`lead-item ${lead.lead_quality || ''} ${palier(lead.quality_score, lead.lead_quality)} ${idAffiche === lead.id ? 'selected' : ''}`}
+                                                    onClick={() => setSelectedLeadId(lead.id)}>
+                                                    {palier(lead.quality_score, lead.lead_quality) === 'p-go' && <div className="pastille-go">À appeler maintenant</div>}
+                                                    <div className="lead-name">{lead.name}</div>
+                                                    <div className="lead-field">
+                                                        <span className="lead-label">Email :</span>
+                                                        <span className="lead-value">{lead.email || 'N/A'}</span>
+                                                    </div>
+                                                    <div className="lead-field">
+                                                        <span className="lead-label">Tél. :</span>
+                                                        <span className="lead-value">{lead.phone || 'N/A'}</span>
+                                                    </div>
+                                                    <div className="lead-field">
+                                                        <span className="lead-label">{estLocation(lead) ? 'Loyer max :' : 'Budget :'}</span>
+                                                        <span className="lead-value">
+                                                            {lead.budget ? montant(lead.budget, estLocation(lead)) : 'N/A'}
+                                                        </span>
+                                                    </div>
+                                                    <div className="lead-field">
+                                                        <span className="lead-label">Secteur :</span>
+                                                        <span className="lead-value">{lead.location || 'N/A'}</span>
+                                                    </div>
+                                                    {qualityBadge(lead.lead_quality, lead, lead.quality_score)}
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+
+                                    <div className="panel">
+                                        {selectedLead ? (
+                                            <>
+                                                <div className="panel-title">{selectedLead.name}</div>
+
+                                                <div className="detail-block">
+                                                    <div className="detail-label">{estLocation(selectedLead) ? 'Loyer maximum (location)' : 'Budget'}</div>
+                                                    <div className="detail-value">
+                                                        {selectedLead.budget ? montant(selectedLead.budget, estLocation(selectedLead)) : 'Non renseigné'}
+                                                    </div>
+                                                </div>
+                                                <div className="detail-block">
+                                                    <div className="detail-label">Type recherché</div>
+                                                    <div className="detail-value">{selectedLead.property_type || 'Non renseigné'}</div>
+                                                </div>
+                                                <div className="detail-block">
+                                                    <div className="detail-label">Localisation</div>
+                                                    <div className="detail-value">{selectedLead.location || 'Non renseignée'}</div>
+                                                </div>
+
+                                                {(estLocation(selectedLead) && (selectedLead.revenus || (selectedLead.garants && !estPro(selectedLead)) || selectedLead.situation_pro)) ||
+                                                 (selectedLead.financing_status && selectedLead.financing_status !== 'unknown') ||
+                                                 (selectedLead.purchase_urgency && selectedLead.purchase_urgency !== 'unknown') ? (
+                                                    <div className="info-box">
+                                                        {estLocation(selectedLead) && selectedLead.revenus > 0 && (
+                                                            <div className="info-item">
+                                                                Revenus : {montant(selectedLead.revenus, true)}
+                                                                {selectedLead.budget > 0 && ` (${(selectedLead.revenus / selectedLead.budget).toFixed(1).replace('.', ',')} fois le loyer maximum)`}
+                                                            </div>
+                                                        )}
+                                                        {estLocation(selectedLead) && !estPro(selectedLead) && selectedLead.garants > 0 && (
+                                                            <div className="info-item">Garants : {selectedLead.garants}</div>
+                                                        )}
+                                                        {estLocation(selectedLead) && selectedLead.situation_pro && (
+                                                            <div className="info-item">Situation : {SITUATIONS[selectedLead.situation_pro] || selectedLead.situation_pro}</div>
+                                                        )}
+                                                        {!estLocation(selectedLead) && selectedLead.financing_status && selectedLead.financing_status !== 'unknown' && (
+                                                            <div className="info-item">Financement : {financingLabel(selectedLead.financing_status)}</div>
+                                                        )}
+                                                        {selectedLead.purchase_urgency && selectedLead.purchase_urgency !== 'unknown' && (
+                                                            <div className="info-item">{estLocation(selectedLead) ? 'Emménagement' : 'Échéance'} : {urgencyLabel(selectedLead.purchase_urgency)}</div>
+                                                        )}
+                                                    </div>
+                                                ) : null}
+
+                                                <a href={`/leads-profile.html?id=${selectedLead.id}`} className="edit-button">
+                                                    Éditer les détails
+                                                </a>
+                                                {selectedLead.email && selectedLead.matches && selectedLead.matches.length > 0 && (
+                                                    <a href={`/propositions.html?id=${selectedLead.id}`} className="edit-button"
+                                                       style={{ marginLeft: '10px' }}>
+                                                        Préparer un e-mail
+                                                    </a>
+                                                )}
+
+                                                <div className="section-divider"></div>
+
+                                                <div className="panel-title">
+                                                    Biens correspondants
+                                                    {selectedLead.matches && selectedLead.matches.length > 0 &&
+                                                        ` (${selectedLead.matches.length})`}
+                                                </div>
+
+                                                {selectedLead.matches && selectedLead.matches.length > 0 ? (
+                                                    selectedLead.matches.map((match, idx) => (
+                                                        <div key={idx} className="match-card">
+                                                            {couvertures.miniatures[String(match.property_id)] && (
+                                                                <Carrousel key={`${match.property_id}-${couvertures.nombres[String(match.property_id)]}`}
+                                                                    couverture={couvertures.miniatures[String(match.property_id)]}
+                                                                    nombre={couvertures.nombres[String(match.property_id)] || 1}
+                                                                    charger={() => photosDuBien(match.property_id)}
+                                                                    className="carrousel-large"
+                                                                    alt={`Photos de ${match.title || match.name || 'ce bien'}`} />
+                                                            )}
+                                                            <div className="match-header">
+                                                                <div>
+                                                                    <div className="match-title">{match.title || match.name}</div>
+                                                                    <div className="match-address">{match.address || 'Adresse non renseignée'}</div>
+                                                                </div>
+                                                                <div className="match-score">{match.score}%</div>
+                                                            </div>
+                                                            <div className="match-field">
+                                                                {match.type || 'N/A'}
+                                                                {match.rooms ? ` · ${match.rooms} pièces` : ''}
+                                                                {match.size ? ` · ${match.size} m²` : ''}
+                                                            </div>
+                                                            <div className="match-price">
+                                                                {match.price ? montant(match.price, estLocation(match)) : (estLocation(match) ? 'Loyer non renseigné' : 'Prix non renseigné')}
+                                                            </div>
+                                                            <Energie dpe={match.dpe} ges={match.ges} />
+                                                            {match.reasons && match.reasons.length > 0 && (
+                                                                <div className="raisons" aria-label="Pourquoi ce bien correspond">
+                                                                    {match.reasons.map((raison, i) => (
+                                                                        <span key={i} className="raison">{raison}</span>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ))
+                                                ) : (
+                                                    <div className="empty-state">
+                                                        {estLocation(selectedLead)
+                                                            ? 'Aucun bien à louer ne correspond à ce prospect'
+                                                            : 'Aucun bien à vendre ne correspond à ce prospect'}
+                                                    </div>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <div className="empty-state">Sélectionnez un prospect pour voir ses correspondances</div>
+                                        )}
+                                    </div>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </>
+            );
+        }
+
+        ReactDOM.render(<MatchingApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>
