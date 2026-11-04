@@ -5,32 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Les biens sélectionnés pour vous</title>
     <meta name="robots" content="noindex">
-    <meta name="theme-color" content="#F6F2EA">
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <meta name="theme-color" content="#F3F4F1">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F3F4F1'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234A504C'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="zelyro.css">
     <style>
         body.auth { align-items: flex-start; }
         .annonces-carte { max-width: 680px; margin: 24px auto; }
-        .annonces-carte .auth-header h1 { font-size: 30px; letter-spacing: 0.02em; }
+        .annonces-carte .auth-header h1 { font-size: 30px; }
         .annonces-carte .auth-header h1::before { display: none; }
         .masque { display: none; }
         .liste-annonces { display: grid; gap: 16px; margin-top: 8px; }
-        .annonce { border: 1px solid var(--line, #E3DCCC); border-radius: 12px; padding: 20px; background: #FFFEFB; text-align: left; }
-        .annonce h2 { font-family: Georgia, serif; font-weight: 500; font-size: 21px; margin: 0 0 6px; }
-        .annonce .prix { font-weight: 600; font-size: 18px; color: var(--sage-700, #3E4F43); margin: 0 0 10px; }
-        .annonce .adresse { color: var(--ink-2, #44504A); margin: 0 0 10px; font-size: 14px; }
+        .annonce { border: 1px solid var(--line-strong); border-radius: 8px; padding: 20px; background: #fff; text-align: left; }
+        .annonce h2 { font-family: var(--titre); font-weight: 700; letter-spacing: -.02em; font-size: 23px; margin: 0 0 6px; }
+        .annonce .prix { font-family: var(--titre); font-weight: 700; letter-spacing: -.02em; font-size: 22px; color: var(--ink); margin: 0 0 10px; }
+        .annonce .adresse { color: var(--ink-2); margin: 0 0 10px; font-size: 15px; }
         .annonce .caracteristiques { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
-        .annonce .caracteristiques li { background: var(--sage-100, #E7EDE4); color: var(--sage-700, #3E4F43); border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 600; }
-        .annonce .description { margin: 0; font-size: 14px; line-height: 1.6; color: var(--ink-2, #44504A); white-space: pre-line; }
+        .annonce .caracteristiques li { background: var(--surface-2); color: var(--ink-2); border-radius: 4px; padding: 4px 10px; font-size: 13px; font-weight: 600; }
+        .annonce .description { margin: 0; font-size: 15px; line-height: 1.6; color: var(--ink-2, #44504A); white-space: pre-line; }
         .annonce .actions { margin-top: 16px; }
         .annonce .actions button { width: auto; padding: 11px 20px; }
-        a.bouton-rdv { display: inline-block; margin-top: 14px; padding: 11px 20px; border-radius: 6px; background: var(--sage-600, #4F6353); color: #fff; text-decoration: none; font-weight: 600; font-size: 15px; }
+        a.bouton-rdv { display: inline-block; margin-top: 14px; padding: 11px 22px; border-radius: 6px; background: var(--ink); border: 2px solid var(--ink); color: #fff; text-decoration: none; font-weight: 700; font-size: 15px; transition: background-color .2s, color .2s; }
+        a.bouton-rdv:hover { background: var(--go); color: var(--ink); }
         .rappel-rdv { margin: 0 0 4px; text-align: center; }
         .rappel-rdv a.bouton-rdv { margin-top: 0; }
-        .annonce .merci { margin: 14px 0 0; font-size: 14px; color: var(--sage-700, #3E4F43); font-weight: 600; }
+        .annonce .merci { margin: 14px 0 0; font-size: 15px; color: #14602A; font-weight: 600; }
         .annonce .erreur-visite { margin: 10px 0 0; font-size: 13px; color: var(--danger, #A8452F); }
         .contact-agence { margin-top: 24px; font-size: 14px; color: var(--ink-2, #44504A); line-height: 1.6; text-align: center; }
-        .pied-formulaire { text-align: center; margin-top: 22px; font-size: 12px; color: var(--ink-3, #6A7168); line-height: 1.7; }
+        .pied-formulaire { text-align: center; margin-top: 22px; font-size: 13px; color: var(--ink-3); line-height: 1.7; }
         .pied-formulaire a { color: var(--ink-3, #6A7168); }
     </style>
 <script src="/stats.js" defer></script>

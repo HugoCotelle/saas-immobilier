@@ -3,53 +3,54 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ZELYRO - À faire</title>
+    <title>Zelyro - À faire</title>
     <script src="vendor/react.production.min.js"></script>
     <script src="vendor/react-dom.production.min.js"></script>
     <script src="vendor/babel.min.js"></script>
     <script src="/blague.js" defer></script>
-    <meta name="theme-color" content="#F6F2EA">
+    <meta name="theme-color" content="#F3F4F1">
     <meta name="robots" content="noindex">
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F3F4F1'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234A504C'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="zelyro.css">
     <style>
         .tete-taches { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 16px; }
         .filtres-taches { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 26px; align-items: center; }
-        .filtres-taches button { background: transparent; border: 1px solid var(--line-strong); border-radius: 999px; padding: 7px 15px; font: inherit; font-size: 13px; color: var(--ink-2); cursor: pointer; }
-        .filtres-taches button.actif { background: var(--sage-600); border-color: var(--sage-600); color: #fff; }
+        .filtres-taches button { border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 8px 16px; font: inherit; font-size: 14px; font-weight: 600; color: var(--ink); background: var(--surface); cursor: pointer; }
+        .filtres-taches button:hover { border-color: var(--ink); }
+        .filtres-taches button.actif { background: var(--ink); border-color: var(--ink); color: #fff; }
         .filtres-taches .espace { flex: 1; }
-        .groupe-titre { font-family: var(--serif); font-size: 21px; margin: 34px 0 14px; display: flex; align-items: baseline; gap: 12px; }
-        .groupe-titre .nb { font-family: var(--sans); font-size: 13px; color: var(--ink-3); }
-        .tache { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--line-strong); border-radius: var(--radius); padding: 20px 22px; margin-bottom: 14px; }
-        .tache.urgent { border-left-color: var(--hot); }
-        .tache.important { border-left-color: var(--warm); }
-        .tache.normal { border-left-color: var(--sage-300); }
+        .groupe-titre { font-family: var(--titre); font-weight: 700; letter-spacing: -.025em; font-size: 24px; margin: 34px 0 14px; display: flex; align-items: baseline; gap: 12px; }
+        .groupe-titre .nb { font-family: var(--sans); font-weight: 600; font-size: 14px; color: var(--ink-3); }
+        .tache { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; margin-bottom: 14px; }
+        .tache.urgent { border-color: var(--ink); }
+        .tache.important { border-color: var(--ink-3); }
+        .tache.normal { border-color: var(--line); }
         .tache-haut { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; align-items: flex-start; }
-        .tache-titre { font-family: var(--serif); font-size: 20px; line-height: 1.3; color: var(--ink); }
+        .tache-titre { font-family: var(--titre); font-weight: 700; letter-spacing: -.02em; font-size: 22px; line-height: 1.3; color: var(--ink); }
         .tache-badges { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
         .tache-motifs { margin: 12px 0 0; padding: 0; list-style: none; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
         .tache-motifs li { padding-left: 16px; position: relative; margin-bottom: 4px; }
-        .tache-motifs li::before { content: ""; position: absolute; left: 0; top: 9px; width: 6px; height: 6px; border-radius: 50%; background: var(--sage-300); }
+        .tache-motifs li::before { content: ""; position: absolute; left: 0; top: 9px; width: 6px; height: 6px; border-radius: 1px; background: var(--line-strong); }
         .tache-motifs li:first-child { color: var(--ink); }
         .tache-motifs li:first-child::before { background: var(--sage-600); }
         .tache-infos { display: flex; flex-wrap: wrap; gap: 6px 8px; margin-top: 12px; }
-        .puce { background: var(--surface-2); color: var(--ink-2); border-radius: 999px; padding: 4px 11px; font-size: 12px; }
+        .puce { background: var(--surface-2); color: var(--ink-2); border-radius: 4px; padding: 4px 10px; font-size: 13px; font-weight: 500; }
         .tache-contact { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 14px; color: var(--ink-2); }
-        .tache-contact a { color: var(--sage-700); text-decoration: none; border-bottom: 1px solid var(--sage-300); }
-        .tache-proposition { margin-top: 14px; background: var(--sage-50); border: 1px solid var(--sage-100); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 14px; line-height: 1.55; }
-        .tache-relances { margin-top: 12px; font-size: 13px; color: var(--ink-3); }
+        .tache-contact a { color: var(--ink); font-weight: 600; text-decoration: none; border-bottom: 2px solid var(--go); }
+        .tache-proposition { margin-top: 14px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 14px; line-height: 1.55; }
+        .tache-relances { margin-top: 12px; font-size: 14px; color: var(--ink-3); }
         .tache-actions { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
         .tache-fait { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
         .tache-fait .form-row { grid-template-columns: 220px 1fr; }
         @media (max-width: 800px) { .tache-fait .form-row { grid-template-columns: 1fr; } }
-        .toast-ok { background: var(--sage-50); border: 1px solid var(--sage-100); color: var(--sage-700); border-radius: var(--radius-sm); padding: 12px 16px; font-size: 14px; margin-bottom: 18px; }
-        .resp { font-size: 12px; color: var(--ink-3); }
+        .toast-ok { background: var(--vert-bg); border: 1px solid #B8E2C2; color: #14602A; border-radius: var(--radius-sm); padding: 12px 16px; font-size: 14px; margin-bottom: 18px; }
+        .resp { font-size: 13px; color: var(--ink-3); }
         .recherche-taches { position: relative; margin: 20px 0 14px; }
         .recherche-taches input { width: 100%; padding-right: 44px; }
         .recherche-taches .effacer { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: transparent; border: 0; font-size: 22px; line-height: 1; color: var(--ink-3); cursor: pointer; padding: 4px 10px; }
         .nb-resultats { font-size: 13px; color: var(--ink-3); margin: -4px 0 14px; }
         .tache-actions .btn:first-child { margin-left: 0; }
-        .visite-quand { font-family: var(--serif); font-size: 15px; color: var(--sage-700); margin-top: 4px; }
+        .visite-quand { font-family: var(--titre); font-weight: 700; font-size: 17px; color: var(--ink); margin-top: 4px; }
     </style>
 </head>
 <body>
@@ -346,7 +347,7 @@
                 <>
                     <header>
                         <div className="header-content">
-                            <div className="logo"><a href="/taches.html" style={{ color: 'inherit', textDecoration: 'none' }}>ZELYRO</a></div>
+                            <div className="logo"><a href="/taches.html" style={{ color: 'inherit', textDecoration: 'none' }}>Zelyro</a></div>
                             <nav>
                                 <a href="/taches.html" className="active">À faire</a>
                                 <a href="/prospects.html">Leads</a>

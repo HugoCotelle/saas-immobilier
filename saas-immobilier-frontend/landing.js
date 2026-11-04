@@ -428,7 +428,7 @@
                 defi.classList.add('gagne');
                 if (!deja90 && anim !== false) {
                     var r = res.getBoundingClientRect();
-                    eclats(r.left + r.width / 2, r.top + 120, ['#39FF14', '#D4B15F', '#1F3A2E', '#FFFDF9']);
+                    eclats(r.left + r.width / 2, r.top + 120, ['#39FF14', '#9BFF85', '#0A0D0B', '#FFFFFF']);
                 }
                 deja90 = true;
             } else {
@@ -586,7 +586,7 @@
             if (s === 4) {
                 fini = true; piste.classList.add('signe');
                 var r = $('.s-jeton', piste).getBoundingClientRect();
-                setTimeout(function () { eclats(r.left + r.width / 2, r.top, ['#D4B15F', '#EBD9A6', '#1F3A2E', '#A9B9A2']); }, 500);
+                setTimeout(function () { eclats(r.left + r.width / 2, r.top, ['#39FF14', '#9BFF85', '#0A0D0B', '#B7BBB6']); }, 500);
             }
             maj();
             if (fini) zero.focus();

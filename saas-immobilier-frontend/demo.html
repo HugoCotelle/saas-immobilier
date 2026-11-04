@@ -5,50 +5,49 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Démo Zelyro</title>
 <meta name="description" content="Démo interactive de Zelyro en cinq écrans : les demandes arrivent, sont classées par score, puis suivies jusqu'à la visite. Exemple avec des données fictives.">
-<meta name="theme-color" content="#F6F2EA">
+<meta name="theme-color" content="#F3F4F1">
 <link rel="canonical" href="https://www.zelyro.fr/demo.html">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F3F4F1'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234A504C'/%3E%3C/svg%3E">
 <style>
 /* Polices hébergées avec le site (aucune requête vers Google Fonts). */
-@font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('/vendor/fonts/inter-latin-wght-normal.woff2') format('woff2')}
-@font-face{font-family:'Playfair Display';font-style:normal;font-weight:400 900;font-display:swap;src:url('/vendor/fonts/playfair-display-latin-wght-normal.woff2') format('woff2')}
-@font-face{font-family:'Playfair Display';font-style:italic;font-weight:400 900;font-display:swap;src:url('/vendor/fonts/playfair-display-latin-wght-italic.woff2') format('woff2')}
+@font-face{font-family:'Familjen Grotesk';font-style:normal;font-weight:400 700;font-display:swap;src:url('/vendor/fonts/familjen-grotesk-latin-wght-normal.woff2') format('woff2')}
+@font-face{font-family:'Hanken Grotesk';font-style:normal;font-weight:100 900;font-display:swap;src:url('/vendor/fonts/hanken-grotesk-latin-wght-normal.woff2') format('woff2')}
 
-/* Layout: one narrow column built for a phone held in one hand. A step fills the screen, a fixed Suivant button sits at the thumb. Brand: Zelyro cream, sage and ink. */
+/* Layout: one narrow column built for a phone held in one hand. A step fills the screen, a fixed Suivant button sits at the thumb. Brand: Zelyro cold greys, ink and neon green. */
 :root{
   color-scheme:light;
-  --bg:#F6F2EA; --surface:#FFFEFB; --ink:#1F2A24; --muted:#5B6660; --line:#E3DDD0;
-  --accent:#4A5D4F; --accent-soft:#E3E8DD; --on-accent:#F6F2EA;
+  --bg:#F3F4F1; --surface:#FFFFFF; --ink:#0A0D0B; --muted:#585D59; --line:#DADCD6;
+  --accent:#0A0D0B; --accent-soft:#EEF0EC; --on-accent:#FFFFFF;
   --c-chaud:#2A8450; --c-chaud-ink:#FFFFFF;
   --c-proprio:#DCF2CC; --c-proprio-ink:#2D5A1B; --c-proprio-line:#8FCB6F;
   --c-pot:#F4902C; --c-pot-ink:#2B1600;
   --c-froid:#D2402F; --c-froid-ink:#FFFFFF;
   --wa:#128C4A; --wa-ink:#FFFFFF;
-  --hero-bg:#1F2A24; --hero-ink:#F6F2EA;
-  --display:'Playfair Display',Georgia,'Times New Roman',serif;
-  --sans:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --hero-bg:#0A0D0B; --hero-ink:#F2F3F0;
+  --display:'Familjen Grotesk','Helvetica Neue',Arial,sans-serif;
+  --sans:'Hanken Grotesk','Helvetica Neue',Arial,sans-serif;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
-    --bg:#151B17; --surface:#1E2621; --ink:#EDEAE0; --muted:#A3ADA6; --line:#2D3730;
-    --accent:#9DB5A0; --accent-soft:#28332C; --on-accent:#151B17;
+    --bg:#0A0D0B; --surface:#151916; --ink:#F2F3F0; --muted:#B2B7B2; --line:#262B27;
+    --accent:#39FF14; --accent-soft:#1D221E; --on-accent:#0A0D0B;
     --c-chaud:#3DAA68; --c-chaud-ink:#08140C;
     --c-proprio:#2A3E20; --c-proprio-ink:#C6E8AE; --c-proprio-line:#6FA855;
     --c-pot:#F7A54A; --c-pot-ink:#2B1600;
     --c-froid:#E8604F; --c-froid-ink:#1C0805;
     --wa:#25D366; --wa-ink:#06210F;
-    --hero-bg:#26352B; --hero-ink:#F1EEE4; color-scheme:dark;
+    --hero-bg:#151916; --hero-ink:#F2F3F0; color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
-  --bg:#151B17; --surface:#1E2621; --ink:#EDEAE0; --muted:#A3ADA6; --line:#2D3730;
-  --accent:#9DB5A0; --accent-soft:#28332C; --on-accent:#151B17;
+  --bg:#0A0D0B; --surface:#151916; --ink:#F2F3F0; --muted:#B2B7B2; --line:#262B27;
+  --accent:#39FF14; --accent-soft:#1D221E; --on-accent:#0A0D0B;
   --c-chaud:#3DAA68; --c-chaud-ink:#08140C;
     --c-proprio:#2A3E20; --c-proprio-ink:#C6E8AE; --c-proprio-line:#6FA855;
     --c-pot:#F7A54A; --c-pot-ink:#2B1600;
     --c-froid:#E8604F; --c-froid-ink:#1C0805;
     --wa:#25D366; --wa-ink:#06210F;
-    --hero-bg:#26352B; --hero-ink:#F1EEE4; color-scheme:dark;
+    --hero-bg:#151916; --hero-ink:#F2F3F0; color-scheme:dark;
 }
 [hidden]{display:none!important}
 html,body{height:100%}
@@ -59,9 +58,9 @@ img{max-width:100%}
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
   padding-top:max(16px,env(safe-area-inset-top,0px));padding-bottom:16px}
 header.top{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.brand{display:flex;align-items:center;gap:10px;font-family:var(--display);font-size:17px;letter-spacing:.2em;font-weight:500}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--display);font-size:22px;letter-spacing:-.025em;font-weight:700}
 .brand i{display:block;width:9px;height:9px;background:var(--accent);transform:rotate(45deg)}
-.count{font-size:13px;color:var(--muted);letter-spacing:.08em;font-variant-numeric:tabular-nums}
+.count{font-size:13px;color:var(--muted);letter-spacing:0;font-variant-numeric:tabular-nums}
 .progress{display:flex;gap:6px;margin-top:14px}
 .progress span{flex:1;height:4px;border-radius:2px;background:var(--line);transition:background .25s}
 .progress span.on{background:var(--accent)}
@@ -69,10 +68,10 @@ main{flex:1;display:flex;flex-direction:column;padding-top:16px;min-width:0}
 .step{display:flex;flex-direction:column;gap:12px;animation:rise .3s ease both}
 @keyframes rise{from{transform:translateY(8px)}to{transform:none}}
 @media (prefers-reduced-motion:reduce){.step{animation:none}.progress span{transition:none}}
-.eyebrow{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);display:flex;align-items:center;gap:8px}
+.eyebrow{font-size:14px;font-weight:700;letter-spacing:0;color:var(--ink);display:flex;align-items:center;gap:8px}
 .eyebrow i{width:7px;height:7px;background:var(--accent);transform:rotate(45deg);display:block}
-h1{font-family:var(--display);font-weight:500;font-size:clamp(27px,8vw,38px);line-height:1.1;letter-spacing:-.01em;margin:0;text-wrap:balance}
-h1 em{color:var(--accent);font-style:italic}
+h1{font-family:var(--display);font-weight:700;font-size:clamp(30px,9vw,42px);line-height:1.04;letter-spacing:-.03em;margin:0;text-wrap:balance}
+h1 em{font-style:normal;color:#0A0D0B;background:linear-gradient(transparent 64%,#39FF14 64%);padding:0 .05em}
 .lede{margin:0;color:var(--muted);font-size:16px;max-width:34em}
 .note{font-size:13px;color:var(--muted)}
 .list{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
@@ -110,19 +109,17 @@ button.row:focus-visible,.btn:focus-visible,.copy:focus-visible{outline:2px soli
 .crit .bar b{display:block;height:100%;background:var(--accent);border-radius:3px}
 .crit .val{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
 .hint{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
-.tap{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 1.6s ease-in-out infinite}
-@keyframes pulse{50%{transform:scale(1.6);opacity:.45}}
-@media (prefers-reduced-motion:reduce){.tap{animation:none}}
+.tap{width:8px;height:8px;border-radius:2px;background:var(--ink);transform:rotate(45deg)}
 .todo{display:grid;grid-template-columns:52px minmax(0,1fr);gap:8px 14px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px}
 .todo .n{font-family:var(--display);font-size:42px;line-height:1;font-weight:600;font-variant-numeric:tabular-nums}
 .todo .n.warn{color:var(--c-froid)}
-.todo .k{font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.todo .k{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 .todo .t{font-size:15.5px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;display:grid;gap:10px}
 .bien{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px 12px;align-items:flex-start}
 .bien strong{font-size:15.5px}
 .bubble{background:var(--accent-soft);border-radius:14px 14px 14px 4px;padding:12px 14px;font-size:15px}
-.bubble .lbl{font-size:11.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin-bottom:4px}
+.bubble .lbl{font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);margin-bottom:4px}
 .notif{display:flex;align-items:center;gap:10px;background:var(--c-proprio);color:var(--c-proprio-ink);border-radius:12px;padding:10px 12px;font-size:14px;font-weight:500}
 .notif i{width:8px;height:8px;border-radius:50%;background:var(--c-chaud);flex:none}
 .cta{display:grid;gap:10px}
@@ -155,7 +152,7 @@ nav.nav .btn[disabled]{visibility:hidden}
 .badge.g{background:var(--c-chaud);color:var(--c-chaud-ink)}
 .badge.o{background:var(--c-pot);color:var(--c-pot-ink)}
 .badge.l{background:var(--c-proprio);color:var(--c-proprio-ink);box-shadow:inset 0 0 0 2px var(--c-proprio-line)}
-.grp-h .k{font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.grp-h .k{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 .grp-h .t{font-size:14.5px}
 .grp ul{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
 .grp li{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 14px}
@@ -186,7 +183,7 @@ svg.ic{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;strok
 
 <div class="app" id="app">
   <header class="top">
-    <div class="brand"><i></i>ZELYRO</div>
+    <div class="brand"><i></i>Zelyro</div>
     <div class="count" id="count">1 / 5</div>
   </header>
   <div class="progress" id="progress" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
