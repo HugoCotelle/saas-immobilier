@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ZELYRO - Affiche avec QR code</title>
+    <title>Zelyro - Affiche avec QR code</title>
     <meta name="robots" content="noindex">
-    <meta name="theme-color" content="#F6F2EA">
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <meta name="theme-color" content="#F3F4F1">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F3F4F1'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234A504C'/%3E%3C/svg%3E">
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
     <script src="/pwa.js" defer></script>
@@ -15,15 +15,15 @@
         .outils { max-width: 760px; margin: 0 auto 24px; }
         .outils .form-group { margin-bottom: 14px; }
         .outils .btn-ligne { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
-        .feuille { background: #FFFEFB; border: 1px solid var(--line, #E3DCCC); border-radius: 12px; max-width: 760px;
-                   margin: 0 auto 40px; padding: 56px 48px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
-        .feuille .agence { font-family: Georgia, serif; letter-spacing: .14em; text-transform: uppercase; font-size: 18px; color: #3E4F43; margin: 0 0 40px; }
-        .feuille h1 { font-family: Georgia, serif; font-weight: 500; font-size: 44px; line-height: 1.15; margin: 0 0 18px; color: #1F2A24; }
-        .feuille .phrase { font-size: 20px; line-height: 1.5; color: #44504A; margin: 0 auto 36px; max-width: 520px; }
-        .feuille .qr { display: inline-block; padding: 18px; background: #fff; border: 2px solid #1F2A24; border-radius: 14px; }
+        .feuille { background: #fff; border: 1px solid var(--line); border-radius: 8px; max-width: 760px;
+                   margin: 0 auto 40px; padding: 56px 48px; text-align: center; }
+        .feuille .agence { font-family: var(--titre); font-weight: 700; letter-spacing: -.01em; font-size: 22px; color: #0A0D0B; margin: 0 0 40px; }
+        .feuille h1 { font-family: var(--titre); font-weight: 700; letter-spacing: -.03em; font-size: 52px; line-height: 1.05; margin: 0 0 18px; color: #0A0D0B; text-wrap: balance; }
+        .feuille .phrase { font-size: 20px; line-height: 1.5; color: #383D39; margin: 0 auto 36px; max-width: 520px; }
+        .feuille .qr { display: inline-block; padding: 18px; background: #fff; border: 3px solid #0A0D0B; border-radius: 8px; }
         .feuille .qr svg { display: block; width: 320px; height: 320px; }
-        .feuille .adresse { margin: 22px 0 0; font-size: 13px; color: #6A7168; word-break: break-all; }
-        .feuille .mention { margin: 36px 0 0; font-size: 12px; color: #6A7168; line-height: 1.6; }
+        .feuille .adresse { margin: 22px 0 0; font-size: 13px; color: #585D59; word-break: break-all; }
+        .feuille .mention { margin: 36px 0 0; font-size: 13px; color: #585D59; line-height: 1.6; }
         .masque { display: none; }
         @media print {
             @page { size: A4; margin: 0; }
@@ -32,7 +32,7 @@
             .container { padding: 0 !important; max-width: none !important; }
             .feuille { border: none; box-shadow: none; border-radius: 0; margin: 0; max-width: none; min-height: 297mm;
                        padding: 22mm 18mm; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; }
-            .feuille h1 { font-size: 54px; }
+            .feuille h1 { font-size: 62px; }
             .feuille .qr svg { width: 380px; height: 380px; }
         }
     </style>
@@ -40,7 +40,7 @@
 <body>
     <header>
         <div class="header-content">
-            <div class="logo">ZELYRO</div>
+            <div class="logo">Zelyro</div>
             <nav>
                 <a href="/prospects.html">Leads</a>
                 <a href="/biens.html">Biens</a>

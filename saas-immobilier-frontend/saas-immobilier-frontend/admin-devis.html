@@ -3,62 +3,62 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ZELYRO - Générateur de devis</title>
-<meta name="theme-color" content="#F6F2EA">
+<title>Zelyro - Générateur de devis</title>
+<meta name="theme-color" content="#F3F4F1">
 <meta name="robots" content="noindex">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F3F4F1'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234A504C'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="zelyro.css">
 <style>
-#devis-app{--dv-cream:#F6F2EA;--dv-green:#1F3A2E;--dv-sage:#4F6353;--dv-gold:#D4B15F;--dv-ink:#1F2A24;--dv-grey:#6B7468;--dv-line:#E3DCCB;font-family:'Albert Sans',-apple-system,'Helvetica Neue',Arial,sans-serif;color:var(--dv-ink)}
+#devis-app{--dv-cream:#F3F4F1;--dv-green:#0A0D0B;--dv-sage:#4A504C;--dv-gold:#39FF14;--dv-ink:#0A0D0B;--dv-grey:#585D59;--dv-line:#DADCD6;font-family:'Hanken Grotesk',-apple-system,'Helvetica Neue',Arial,sans-serif;color:var(--dv-ink)}
 #devis-app,#devis-app *{box-sizing:border-box}
 #devis-app .dv-app{display:grid;grid-template-columns:400px 1fr;gap:0;min-height:100vh}
 #devis-app .dv-panel{background:#fff;border-right:1px solid var(--dv-line);padding:22px 22px 40px;height:100vh;overflow:auto;position:sticky;top:0}
-#devis-app .dv-panel h1{font-family:'Playfair Display',Georgia,serif;font-size:22px;margin:0 0 4px;color:var(--dv-green);font-weight:600}
+#devis-app .dv-panel h1{font-family:'Familjen Grotesk','Helvetica Neue',Arial,sans-serif;font-size:22px;margin:0 0 4px;color:var(--dv-green);font-weight:600}
 #devis-app .dv-panel .dv-sub{font-size:13px;color:var(--dv-grey);margin:0 0 16px;line-height:1.4}
-#devis-app .dv-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:10px;padding:12px 16px;font:600 14px 'Albert Sans',sans-serif;cursor:pointer}
+#devis-app .dv-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:10px;padding:12px 16px;font:600 14px 'Hanken Grotesk',sans-serif;cursor:pointer}
 #devis-app .dv-btn-main{background:var(--dv-green);color:#fff;width:100%}
-#devis-app .dv-btn-main:hover{background:#17301f}
+#devis-app .dv-btn-main:hover{background:#000}
 #devis-app .dv-btn-ghost{background:transparent;color:var(--dv-sage);padding:8px 0;font-weight:500;font-size:13px}
 #devis-app .dv-tip{font-size:12px;color:var(--dv-grey);margin:8px 0 0;line-height:1.45}
 #devis-app fieldset{border:0;padding:0;margin:20px 0 0}
-#devis-app legend{font:600 11px 'Albert Sans';letter-spacing:.14em;text-transform:uppercase;color:var(--dv-sage);padding:0;margin-bottom:10px;width:100%;border-bottom:1px solid var(--dv-line);padding-bottom:6px}
+#devis-app legend{font:700 13px 'Hanken Grotesk';letter-spacing:0;text-transform:none;color:var(--dv-sage);padding:0;margin-bottom:10px;width:100%;border-bottom:1px solid var(--dv-line);padding-bottom:6px}
 #devis-app label{display:block;font-size:12px;color:var(--dv-grey);margin:10px 0 4px}
-#devis-app input,#devis-app select{width:100%;font:14px 'Albert Sans',sans-serif;color:var(--dv-ink);padding:9px 10px;border:1px solid #D5CDB8;border-radius:8px;background:#FFFDF6}
+#devis-app input,#devis-app select{width:100%;font:14px 'Hanken Grotesk',sans-serif;color:var(--dv-ink);padding:9px 10px;border:1px solid #B9BDB5;border-radius:8px;background:#fff}
 #devis-app input:focus,#devis-app select:focus{outline:2px solid var(--dv-gold);outline-offset:0;border-color:var(--dv-gold)}
 #devis-app .dv-row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 #devis-app details{margin-top:20px;border-top:1px solid var(--dv-line);padding-top:12px}
-#devis-app summary{cursor:pointer;font:600 11px 'Albert Sans';letter-spacing:.14em;text-transform:uppercase;color:var(--dv-sage)}
+#devis-app summary{cursor:pointer;font:700 13px 'Hanken Grotesk';letter-spacing:0;text-transform:none;color:var(--dv-sage)}
 #devis-app .dv-warn{margin-top:14px;background:#FFF6DD;border:1px solid #E8D69A;border-radius:10px;padding:10px 12px;font-size:12.5px;line-height:1.45;color:#5b4a14}
 #devis-app .dv-warn b{font-weight:600}
 #devis-app .dv-stage{padding:28px 20px 60px;overflow:auto;display:flex;justify-content:center;align-items:flex-start}
-#devis-app .dv-sheet{width:210mm;min-height:296.5mm;background:#fff;box-shadow:0 8px 30px rgba(31,58,46,.18);padding:9mm 16mm 6mm;display:flex;flex-direction:column;font-size:9.2pt;line-height:1.4;position:relative}
+#devis-app .dv-sheet{width:210mm;min-height:296.5mm;background:#fff;box-shadow:0 8px 30px rgba(10,13,11,.18);padding:9mm 16mm 6mm;display:flex;flex-direction:column;font-size:9.2pt;line-height:1.4;position:relative}
 #devis-app .dv-sh-head{display:flex;justify-content:space-between;align-items:flex-start}
-#devis-app .dv-brand .dv-name{font-family:'Playfair Display',Georgia,serif;font-size:26pt;color:var(--dv-green);font-weight:600;line-height:1}
+#devis-app .dv-brand .dv-name{font-family:'Familjen Grotesk','Helvetica Neue',Arial,sans-serif;font-size:27pt;letter-spacing:-.025em;color:var(--dv-green);font-weight:700;line-height:1}
 #devis-app .dv-brand .dv-dia{color:var(--dv-sage);font-size:15pt;margin-right:7px;vertical-align:5px}
 #devis-app .dv-brand .dv-tag{font-size:8pt;color:var(--dv-grey);margin-top:6px;max-width:75mm;line-height:1.35}
 #devis-app .dv-doc{text-align:right}
-#devis-app .dv-doc-t{font-family:'Playfair Display',Georgia,serif;font-size:22pt;letter-spacing:.22em;color:var(--dv-green);line-height:1;margin-right:-.22em}
+#devis-app .dv-doc-t{font-family:'Familjen Grotesk','Helvetica Neue',Arial,sans-serif;font-size:24pt;letter-spacing:-.02em;color:var(--dv-green);line-height:1;font-weight:700}
 #devis-app .dv-doc dl{margin:6px 0 0;display:grid;grid-template-columns:auto auto;gap:2px 12px;justify-content:end;font-size:8.8pt}
 #devis-app .dv-doc dt{color:var(--dv-grey)}
 #devis-app .dv-doc dd{margin:0;font-weight:600;text-align:right}
 #devis-app .dv-rule{height:2px;background:var(--dv-gold);margin:4mm 0 3.5mm}
 #devis-app .dv-parties{display:grid;grid-template-columns:1fr 1fr;gap:5mm}
 #devis-app .dv-party{background:var(--dv-cream);border-radius:3px;padding:2.8mm 5mm}
-#devis-app .dv-party h4{margin:0 0 5px;font:600 7.5pt 'Albert Sans';letter-spacing:.18em;text-transform:uppercase;color:var(--dv-sage)}
+#devis-app .dv-party h4{margin:0 0 5px;font:700 8pt 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--dv-sage)}
 #devis-app .dv-party .dv-n{font-weight:700;font-size:10.8pt;color:var(--dv-green);margin:0 0 2px}
 #devis-app .dv-party p{margin:0;font-size:8.6pt;line-height:1.45}
 #devis-app .dv-party .dv-k{color:var(--dv-grey)}
-#devis-app .dv-ph{color:#B1B5A8;font-style:italic}
-#devis-app h3{break-after:avoid;font-family:'Playfair Display',Georgia,serif;font-weight:500;font-size:12.5pt;color:var(--dv-green);margin:3.4mm 0 1.6mm;padding-bottom:1mm;border-bottom:1px solid var(--dv-line)}
+#devis-app .dv-ph{color:#A8ACA6}
+#devis-app h3{break-after:avoid;font-family:'Familjen Grotesk','Helvetica Neue',Arial,sans-serif;font-weight:500;font-size:12.5pt;color:var(--dv-green);margin:3.4mm 0 1.6mm;padding-bottom:1mm;border-bottom:1px solid var(--dv-line)}
 #devis-app .dv-objet{margin:0;font-size:8.8pt;line-height:1.35}
 #devis-app table{width:100%;border-collapse:collapse;font-size:9pt}
-#devis-app thead th{background:var(--dv-green);color:#fff;font:600 8pt 'Albert Sans';text-transform:none;padding:5.5px 9px;text-align:right}
+#devis-app thead th{background:var(--dv-green);color:#fff;font:600 8pt 'Hanken Grotesk';text-transform:none;padding:5.5px 9px;text-align:right}
 #devis-app thead th:first-child{text-align:left}
 #devis-app tbody td{padding:3.5px 9px;border-bottom:1px solid var(--dv-line);vertical-align:top;text-align:right;white-space:nowrap}
 #devis-app tbody td:first-child{text-align:left;white-space:normal;width:54%}
 #devis-app tbody .dv-d1{font-weight:600;color:var(--dv-ink)}
 #devis-app tbody .dv-d2{font-size:7.8pt;color:var(--dv-grey);margin-top:1px;line-height:1.35}
-#devis-app tbody .dv-empty td{color:#B1B5A8;font-style:italic;text-align:left}
+#devis-app tbody .dv-empty td{color:#A8ACA6;font-style:normal;text-align:left}
 #devis-app .dv-totals{margin:2.5mm 0 0 auto;width:78mm;font-size:9.4pt}
 #devis-app .dv-totals div{display:flex;justify-content:space-between;padding:3.5px 10px;border-bottom:1px solid var(--dv-line)}
 #devis-app .dv-totals .dv-ttc{background:var(--dv-green);color:#fff;font-weight:700;font-size:10.6pt;border:0;margin-top:2px;padding:8px 10px}
@@ -70,7 +70,7 @@
 #devis-app .dv-legal p{margin:0 0 3px}
 #devis-app .dv-sign{break-inside:avoid;display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin-top:2mm;flex:1 1 auto;margin-bottom:3mm}
 #devis-app .dv-box{border:1px solid var(--dv-line);border-radius:3px;padding:2.2mm 4.5mm;min-height:26mm;font-size:8.4pt}
-#devis-app .dv-box h5{margin:0 0 4px;font:600 7.5pt 'Albert Sans';letter-spacing:.18em;text-transform:uppercase;color:var(--dv-sage)}
+#devis-app .dv-box h5{margin:0 0 4px;font:700 8pt 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--dv-sage)}
 #devis-app .dv-box .dv-who{font-weight:600}
 #devis-app .dv-box .dv-g{color:var(--dv-grey)}
 #devis-app .dv-intro{font-size:8.6pt;margin:0 0 2mm}
@@ -92,7 +92,7 @@
 #devis-app label{font-weight:400;font-size:12px;margin:10px 0 4px;color:var(--dv-grey)}
 #devis-app input,#devis-app select{height:auto;margin:0;box-shadow:none}
 #devis-app .dv-sheet{flex:none}
-@font-face{font-family:'Albert Sans';src:url('vendor/fonts/albert-sans-latin-wght-normal.woff2') format('woff2');font-weight:100 900;font-style:normal;font-display:swap}
+@font-face{font-family:'Hanken Grotesk';src:url('vendor/fonts/albert-sans-latin-wght-normal.woff2') format('woff2');font-weight:100 900;font-style:normal;font-display:swap}
 #devis-app .dv-app{grid-template-columns:400px minmax(0,1fr);gap:28px;align-items:start}
 #devis-app .dv-panel{height:auto;max-height:calc(100vh - 100px);position:sticky;top:84px;border:1px solid var(--dv-line);border-radius:14px;padding:22px 22px 30px;background:#fff}
 #devis-app .dv-stage{padding:0;overflow:auto}
@@ -113,7 +113,7 @@
 
 <header>
   <div class="header-content">
-    <div class="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style="color:inherit;text-decoration:none">ZELYRO</a></div>
+    <div class="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style="color:inherit;text-decoration:none">Zelyro</a></div>
     <nav>
       <a href="/taches.html">À faire</a>
       <a href="/prospects.html">Leads</a>
@@ -178,8 +178,8 @@
 
  <details id="zel"><summary>Informations Zelyro (à compléter une fois)</summary>
   <label for="z_siege">Siège social</label><input id="z_siege" autocomplete="off">
-  <div class="dv-row2"><div><label for="z_siren">SIREN</label><input id="z_siren" autocomplete="off"></div>
-  <div><label for="z_rcs">N° RCS Paris</label><input id="z_rcs" autocomplete="off"></div></div>
+  <div class="dv-row2"><div><label for="z_siren">SIREN</label><input id="z_siren" autocomplete="off" value="131 948 648"></div>
+  <div><label for="z_rcs">N° RCS Paris</label><input id="z_rcs" autocomplete="off" value="131 948 648"></div></div>
   <div class="dv-row2"><div><label for="z_tva">N° de TVA intracom.</label><input id="z_tva" autocomplete="off"></div>
   <div><label for="z_tel">Téléphone</label><input id="z_tel" autocomplete="off"></div></div>
   <label for="z_iban">IBAN et BIC</label><input id="z_iban" autocomplete="off">
@@ -235,10 +235,10 @@ function addDays(d,n){var x=new Date(d);x.setDate(x.getDate()+n);return x}
 function addMonths(d,n){var x=new Date(d);var day=x.getDate();x.setDate(1);x.setMonth(x.getMonth()+n);var last=new Date(x.getFullYear(),x.getMonth()+1,0).getDate();x.setDate(Math.min(day,last));return x}
 
 var ZKEYS=['z_siege','z_siren','z_rcs','z_tva','z_tel','z_iban'];
-var ZDEF={z_siege:'59 rue de Ponthieu, 75008 Paris'};
+var ZDEF={z_siege:'59 rue de Ponthieu, 75008 Paris',z_siren:'131 948 648',z_rcs:'131 948 648'};
 function load(){
   var s={};try{s=JSON.parse(localStorage.getItem('zelyro_devis_zel')||'{}')}catch(e){}
-  ZKEYS.forEach(function(k){$(k).value=(s[k]!=null?s[k]:(ZDEF[k]||''))});
+  ZKEYS.forEach(function(k){$(k).value=(s[k]?s[k]:(ZDEF[k]||''))});
 }
 function save(){var s={};ZKEYS.forEach(function(k){s[k]=$(k).value});try{localStorage.setItem('zelyro_devis_zel',JSON.stringify(s))}catch(e){}}
 
@@ -330,7 +330,6 @@ function render(){
   if(!$('z_siren').value.trim())miss.push('SIREN de Zelyro');
   if(!$('z_rcs').value.trim())miss.push('n° RCS de Zelyro');
   if(!$('z_tva').value.trim())miss.push('n° de TVA de Zelyro');
-  if(!$('z_tel').value.trim())miss.push('téléphone de Zelyro');
   if(!$('z_iban').value.trim())miss.push('IBAN et BIC de Zelyro');
   var w=$('warn');
   if(miss.length){w.hidden=false;w.innerHTML='<b>Pas encore sur le devis :</b> '+miss.join(', ')+'. Ouvre « Informations Zelyro » en bas du panneau pour les ajouter.'}else{w.hidden=true}

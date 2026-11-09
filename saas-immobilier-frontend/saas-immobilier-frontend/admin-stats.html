@@ -3,20 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ZELYRO - Statistiques du site</title>
+    <title>Zelyro - Statistiques du site</title>
     <script src="vendor/react.production.min.js"></script>
     <script src="vendor/react-dom.production.min.js"></script>
     <script src="vendor/babel.min.js"></script>
     <script src="carte-donnees.js"></script>
-    <meta name="theme-color" content="#F6F2EA">
+    <meta name="theme-color" content="#F3F4F1">
     <meta name="robots" content="noindex">
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F3F4F1'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234A504C'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="zelyro.css">
     <style>
         .direct-haut { display: flex; flex-wrap: wrap; align-items: center; gap: 28px; }
         .direct-nombre { font-family: var(--serif); font-size: 64px; line-height: 1; color: var(--ink); font-variant-numeric: tabular-nums; }
         .direct-texte { color: var(--ink-2); font-size: 14px; line-height: 1.7; }
-        .point-vivant { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--hot); margin-right: 8px; animation: pouls 1.8s ease-out infinite; }
+        .point-vivant { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--hot); margin-right: 8px; }
         .point-vivant.eteint { background: var(--cold); animation: none; }
         @keyframes pouls { 0% { box-shadow: 0 0 0 0 rgba(154, 63, 39, .45); } 70% { box-shadow: 0 0 0 10px rgba(154, 63, 39, 0); } 100% { box-shadow: 0 0 0 0 rgba(154, 63, 39, 0); } }
         .stats-deux { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; }
@@ -72,22 +72,22 @@
         const nomPage = (p) => (p === '/' ? 'Accueil' : p);
         const appareilLibelle = { ordinateur: 'Ordinateur', mobile: 'Mobile', tablette: 'Tablette' };
 
-        // Projections du fond de carte (les mêmes formules que celles du script qui l'a dessiné).
         function cartePour(vue) {
             const c = window.ZELYRO_CARTE;
             return vue === 'france' ? c.france : (vue === 'europe' ? c.europe : c.monde);
         }
+        // Projections du fond de carte (les mêmes formules que celles du script qui l'a dessiné).
         function projeter(vue, lon, lat) {
             const m = cartePour(vue);
-            if (vue === 'france') {
-                return [m.tx + m.k * lon * Math.PI / 180, m.ty - m.k * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))];
-            }
             if (vue === 'europe') {
                 // Projection azimutale équivalente de Lambert, centrée sur l'Europe (lon0, lat0).
                 const l = (lon - m.lon0) * Math.PI / 180, p = lat * Math.PI / 180, p0 = m.lat0 * Math.PI / 180;
                 const kk = Math.sqrt(2 / (1 + Math.sin(p0) * Math.sin(p) + Math.cos(p0) * Math.cos(p) * Math.cos(l)));
                 return [m.tx + m.k * kk * Math.cos(p) * Math.sin(l),
                         m.ty - m.k * kk * (Math.cos(p0) * Math.sin(p) - Math.sin(p0) * Math.cos(p) * Math.cos(l))];
+            }
+            if (vue === 'france') {
+                return [m.tx + m.k * lon * Math.PI / 180, m.ty - m.k * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))];
             }
             const l = lon * Math.PI / 180, p = lat * Math.PI / 180, p2 = p * p, p4 = p2 * p2;
             const X = l * (0.8707 - 0.131979 * p2 + p4 * (-0.013791 + p4 * (0.003971 * p2 - 0.001529 * p4)));
@@ -262,7 +262,7 @@
                 <>
                     <header>
                         <div className="header-content">
-                            <div className="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style={{ color: 'inherit', textDecoration: 'none' }}>ZELYRO</a></div>
+                            <div className="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style={{ color: 'inherit', textDecoration: 'none' }}>Zelyro</a></div>
                             <nav>
                                 <a href="/taches.html">À faire</a>
                                 <a href="/prospects.html">Leads</a>

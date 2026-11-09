@@ -851,9 +851,8 @@ body.lp main { flex: 1 0 auto; }
    Noir / blanc / gris froid + vert fluo seul. Plus de crème, de laiton,
    ni d'italique serif. Ne concerne que les pages publiques (public.css).
    ========================================================================== */
-@font-face{font-family:"Unbounded";src:url("/vendor/fonts/unbounded-latin-wght-normal.woff2") format("woff2");font-weight:200 900;font-display:swap}
-@font-face{font-family:"Albert Sans";src:url("/vendor/fonts/albert-sans-latin-wght-normal.woff2") format("woff2");font-weight:100 900;font-display:swap}
-@font-face{font-family:"Playfair Display";src:url("/vendor/fonts/playfair-display-latin-wght-normal.woff2") format("woff2");font-weight:400 900;font-display:swap}
+@font-face{font-family:"Familjen Grotesk";src:url("/vendor/fonts/familjen-grotesk-latin-wght-normal.woff2") format("woff2");font-weight:400 700;font-display:swap}
+@font-face{font-family:"Hanken Grotesk";src:url("/vendor/fonts/hanken-grotesk-latin-wght-normal.woff2") format("woff2");font-weight:100 900;font-display:swap}
 
 :root {
     --bg: #F3F4F1; --surface: #FFFFFF; --surface-2: #E8EAE5;
@@ -870,17 +869,17 @@ body.lp main { flex: 1 0 auto; }
     --shadow-hover: 0 10px 24px -12px rgba(10, 13, 11, .3);
     --shadow-card: 0 1px 2px rgba(10, 13, 11, .05), 0 6px 16px -8px rgba(10, 13, 11, .12);
     --shadow-lift: 0 2px 4px rgba(10, 13, 11, .06), 0 18px 36px -16px rgba(10, 13, 11, .24);
-    --titre: "Unbounded", "Helvetica Neue", Arial, sans-serif;
-    --serif: "Unbounded", "Helvetica Neue", Arial, sans-serif;
-    --logo-font: "Playfair Display", Georgia, "Times New Roman", serif;
-    --sans: "Albert Sans", "Helvetica Neue", Arial, sans-serif;
+    --titre: "Familjen Grotesk", "Helvetica Neue", Arial, sans-serif;
+    --serif: "Familjen Grotesk", "Helvetica Neue", Arial, sans-serif;
+    --logo-font: "Familjen Grotesk", "Helvetica Neue", Arial, sans-serif;
+    --sans: "Hanken Grotesk", "Helvetica Neue", Arial, sans-serif;
 }
 body.pub, body.lp { background: var(--bg); color: var(--ink); font-size: 17px; font-family: var(--sans); }
 .pub :focus-visible { outline: 2px solid var(--ink); }
 ::selection { background: var(--laiton); color: var(--ink); }
 
 /* Titres : Unbounded, serrés, sans italique */
-.pub h1, .pub h2, .pub h3 { font-family: var(--titre); font-weight: 700; letter-spacing: -.04em; line-height: 1.08; color: var(--ink); text-wrap: balance; }
+.pub h1, .pub h2, .pub h3 { font-family: var(--titre); font-weight: 700; letter-spacing:-.025em; line-height: 1.08; color: var(--ink); text-wrap: balance; }
 .pub h1 em, .pub h2 em, .pub h3 em, .hero h1 em, .lp-copy h1 em, .lp-merci h1 em {
     font-style: normal; font-weight: 700; color: inherit; padding: 0 .04em;
     background: linear-gradient(transparent 58%, var(--laiton) 58% 90%, transparent 90%);
@@ -892,7 +891,7 @@ body.pub, body.lp { background: var(--bg); color: var(--ink); font-size: 17px; f
 
 /* En-tête, logo, navigation */
 header.site-header, .site-header { background: rgba(243, 244, 241, .94); border-bottom: 1px solid var(--line); }
-.logo { font-family: var(--logo-font); font-weight: 500; font-size: 27px; letter-spacing: .005em; text-transform: none; line-height: 1; gap: 11px; }
+.logo { font-family: var(--logo-font); font-weight: 700; font-size: 27px; letter-spacing: -.025em; text-transform: none; line-height: 1; gap: 11px; }
 .logo::before { width: 13px; height: 13px; border-radius: 3px; background: var(--sage-600); }
 .site-nav a { font-family: var(--sans); font-size: 15.5px; font-weight: 600; color: var(--ink-2); }
 .site-nav a::after { height: 2px; background: var(--laiton); border-radius: 2px; }
@@ -929,7 +928,7 @@ header.site-header, .site-header { background: rgba(243, 244, 241, .94); border-
 .hero::before, .final-card::before, .deep::before, .hero-visual::before, .final-card::after { background: none; border: 0; }
 .hero::after { background: repeating-linear-gradient(90deg, rgba(10, 13, 11, .045) 0 1px, transparent 1px 120px); -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 80%); mask-image: linear-gradient(to bottom, #000 0%, transparent 80%); }
 .legal-hero { background: var(--surface); border-bottom: 2px solid var(--ink); }
-.legal-hero h1 { font-size: clamp(30px, 4vw, 48px); letter-spacing: -.045em; }
+.legal-hero h1 { font-size: clamp(34px, 4.6vw, 56px); letter-spacing:-.03em; }
 .deep { background: var(--ink); }
 .deep h2, .deep h3, .checks h3 { color: var(--on-deep); }
 .deep .deep-summary li { color: var(--on-deep-muted); }
@@ -953,14 +952,14 @@ header.site-header, .site-header { background: rgba(243, 244, 241, .94); border-
 .price-card.featured p, .price-card.featured li, .price-card.featured .price-per { color: var(--on-deep-muted); }
 .price-card.featured .btn { background: var(--laiton); border-color: var(--laiton); color: var(--ink); }
 .price-card.featured .btn:hover { background: #9BFF85; border-color: #9BFF85; color: var(--ink); }
-.price-amount .amount { font-family: var(--titre); font-size: 34px; font-weight: 700; letter-spacing: -.05em; }
+.price-amount .amount { font-family: var(--titre); font-size: 34px; font-weight: 700; letter-spacing:-.03em; }
 .lp-carte { box-shadow: 0 18px 44px -24px rgba(10, 13, 11, .3); border: 1.5px solid var(--line-strong); }
-.simu-resultat dd { font-family: var(--titre); font-size: 20px; font-weight: 700; letter-spacing: -.04em; }
-.est-range { font-family: var(--titre); font-size: 22px; font-weight: 700; letter-spacing: -.04em; }
+.simu-resultat dd { font-family: var(--titre); font-size: 20px; font-weight: 700; letter-spacing:-.025em; }
+.est-range { font-family: var(--titre); font-size: 22px; font-weight: 700; letter-spacing:-.025em; }
 .constat-list .n { font-family: var(--titre); color: var(--ink); font-size: 22px; }
-.score-line b, .ring b { font-family: var(--titre); color: var(--ink); letter-spacing: -.04em; }
+.score-line b, .ring b { font-family: var(--titre); color: var(--ink); letter-spacing:-.025em; }
 .mock-logo, .mock-title, .mock-lead-name, .mock-match-title { font-family: var(--sans); font-weight: 700; letter-spacing: -.01em; }
-.mock-logo { font-family: var(--logo-font); font-weight: 500; letter-spacing: 0; }
+.mock-logo { font-family: var(--logo-font); font-weight: 700; letter-spacing: -.02em; }
 
 /* Rouge d'alerte / bandeaux « à compléter » restent lisibles mais froids */
 .dd-retour.dd-erreur { color: #8E1F1F; }
@@ -973,8 +972,8 @@ header.site-header, .site-header { background: rgba(243, 244, 241, .94); border-
 }
 .deep h2 em, .final-card h2 em { background-image: none; }
 .hero::after { display: none; }
-.lp-copy h1, .lp-merci h1 { font-size: clamp(30px, 3.5vw, 46px); line-height: 1.12; letter-spacing: -.045em; }
-.lp-carte h2 { font-size: clamp(22px, 2.2vw, 28px); line-height: 1.12; }
+.lp-copy h1, .lp-merci h1 { font-size: clamp(34px, 4vw, 52px); line-height: 1.12; letter-spacing:-.03em; }
+.lp-carte h2 { font-size: clamp(24px, 2.4vw, 31px); line-height: 1.12; }
 .pub p a:not(.btn), .pub li a:not(.btn), .pub dd a:not(.btn) { color: var(--ink); font-weight: 600; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; text-decoration-color: var(--ink); }
 .pub p a:not(.btn):hover, .pub li a:not(.btn):hover { background: var(--laiton); text-decoration-color: var(--ink); }
 .price-card:hover { transform: none; box-shadow: none; border-color: var(--ink); }
@@ -987,3 +986,4 @@ header.site-header, .site-header { background: rgba(243, 244, 241, .94); border-
 .pub .toc li a:not(.btn), .pub .site-footer a:not(.btn), .pub .site-nav a:not(.btn), .pub .foot-col li a:not(.btn) { font-weight: inherit; text-decoration: none; }
 .pub .toc li a:not(.btn) { font-weight: 500; color: var(--ink-2); }
 .pub .toc li a:not(.btn):hover { background: var(--laiton); color: var(--ink); }
+.price-card.featured .price-badge { color: var(--ink); }

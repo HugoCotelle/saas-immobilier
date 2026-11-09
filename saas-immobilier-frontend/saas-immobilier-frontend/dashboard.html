@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ZELYRO - Dashboard</title>
+    <title>Zelyro - Dashboard</title>
     <meta name="robots" content="noindex">
     <script src="vendor/react.production.min.js"></script>
     <script src="vendor/react-dom.production.min.js"></script>
     <script src="vendor/babel.min.js"></script>
-    <meta name="theme-color" content="#F6F2EA">
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <meta name="theme-color" content="#F3F4F1">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F3F4F1'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234A504C'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="zelyro.css">
     <style>
         .content-grid { grid-template-columns: 1fr 1fr; }
@@ -82,8 +82,8 @@
                         aria-label={`Nouveaux prospects par semaine sur ${valeurs.length} semaines : ${valeurs.join(', ')}`}>
                         <defs>
                             <linearGradient id="tendance-aire" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor="#4F6353" stopOpacity="0.28" />
-                                <stop offset="100%" stopColor="#4F6353" stopOpacity="0" />
+                                <stop offset="0%" stopColor="#0A0D0B" stopOpacity="0.14" />
+                                <stop offset="100%" stopColor="#0A0D0B" stopOpacity="0" />
                             </linearGradient>
                         </defs>
                         {[0, 0.5, 1].map((f) => (
@@ -352,7 +352,7 @@
                 <>
                     <header>
                         <div className="header-content">
-                            <div className="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style={{ color: 'inherit', textDecoration: 'none' }}>ZELYRO</a></div>
+                            <div className="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style={{ color: 'inherit', textDecoration: 'none' }}>Zelyro</a></div>
                             <nav>
                                 <a href="/taches.html">À faire</a>
                                 <a href="/prospects.html">Leads</a>

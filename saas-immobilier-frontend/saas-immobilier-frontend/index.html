@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Zelyro — Qualification et suivi des prospects pour agences immobilières</title>
 <meta name="description" content="Zelyro qualifie automatiquement les prospects d’une agence immobilière, les rapproche de ses biens avec un score expliqué et organise leur suivi jusqu’à la signature.">
-<meta name="theme-color" content="#F6F2EA">
+<meta name="theme-color" content="#F3F4F1">
 <link rel="canonical" href="https://www.zelyro.fr/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Zelyro — Qualification et suivi des prospects pour agences immobilières">
@@ -21,9 +21,9 @@
 <meta name="twitter:title" content="Zelyro — Qualification et suivi des prospects pour agences immobilières">
 <meta name="twitter:description" content="Chaque lead. Chaque bien. Aucune opportunité perdue.">
 <meta name="twitter:image" content="https://www.zelyro.fr/og-image.png">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
-<link rel="preload" href="/vendor/fonts/unbounded-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="/vendor/fonts/albert-sans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F3F4F1'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234A504C'/%3E%3C/svg%3E">
+<link rel="preload" href="/vendor/fonts/familjen-grotesk-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/vendor/fonts/hanken-grotesk-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/landing.css">
 <script type="application/ld+json">
 {
@@ -102,6 +102,7 @@
 </script>
 <script>document.documentElement.className+=' js';</script>
 <script src="/stats.js" defer></script>
+<script src="/consentement.js" defer></script>
 <script src="/landing.js" defer></script>
 </head>
 <body>
@@ -279,7 +280,6 @@
     <section class="section chapitre" id="qualification" aria-labelledby="titre-qualif">
         <div class="cadre">
             <div class="tete">
-                <p class="numero">01 · Qualifier</p>
                 <h2 id="titre-qualif">Composez un prospect. <em>Regardez son score.</em></h2>
                 <p class="chapo">Cochez ce que vous savez d’un prospect : Zelyro en tire un score sur 100 et vous explique chaque raison. Pas de boîte noire, un classement que l’on peut comprendre.</p>
             </div>
@@ -360,7 +360,6 @@
     <section class="section chapitre ch-sombre" id="rapprochement" aria-labelledby="titre-rappr">
         <div class="cadre">
             <div class="tete">
-                <p class="numero">02 · Rapprocher</p>
                 <h2 id="titre-rappr">Quel bien pour Julien&nbsp;? <em>Zelyro vous le dit, et pourquoi.</em></h2>
                 <p class="chapo">Choisissez un bien, puis faites varier son prix. Le score de correspondance sur 100 et ses raisons suivent des règles claires, en vente comme en location.</p>
             </div>
@@ -406,7 +405,6 @@
     <section class="section chapitre" id="estimation" aria-labelledby="titre-estim">
         <div class="cadre grille-e">
             <div class="tete">
-                <p class="numero">03 · Estimer</p>
                 <h2 id="titre-estim">Julien est déjà propriétaire. <em>Que vaut son bien&nbsp;?</em></h2>
                 <p class="chapo">Saisissez l’adresse de son bien&nbsp;: Zelyro calcule une fourchette de valeur à partir des ventes réelles des environs (base DVF, publiée par l’État). Un outil interne pour préparer l’appel. L’estimation est indicative et se confirme en visite.</p>
                 <div class="e-panneau">
@@ -439,7 +437,6 @@
     <section class="section chapitre ch-creme2" id="suivi" aria-labelledby="titre-suivi">
         <div class="cadre">
             <div class="tete">
-                <p class="numero">04 · Suivre</p>
                 <h2 id="titre-suivi">De la première demande <em>à la signature.</em></h2>
                 <p class="chapo">Chaque prospect avance par statut&nbsp;: Nouveau, Contacté, Visite, Offre, Signé ou Perdu. Des notes datées gardent l’historique, et des rappels indiquent quand recontacter. Faites avancer Julien.</p>
             </div>
@@ -470,7 +467,6 @@
     <section class="section chapitre" id="outils" aria-labelledby="titre-outils">
         <div class="cadre">
             <div class="tete">
-                <p class="numero">05 · Recevoir et piloter</p>
                 <h2 id="titre-outils">Tout arrive au même endroit. <em>Vous voyez tout.</em></h2>
             </div>
             <div class="bento">
@@ -839,6 +835,7 @@
                 <ul>
                     <li><a href="/mentions-legales.html">Mentions légales</a></li>
                     <li><a href="/confidentialite.html">Politique de confidentialité</a></li>
+                    <li><a href="/confidentialite.html#cookies" data-gerer-cookies>Gérer mes cookies</a></li>
                     <li><a href="/confidentialite.html#audience">Mesure d’audience (refuser)</a></li>
                     <li><a href="/cgu.html">Conditions générales d’utilisation</a></li>
                     <li><a href="/accord-sous-traitance.html">Accord de sous-traitance (DPA)</a></li>

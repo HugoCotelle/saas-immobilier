@@ -5,33 +5,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Choisissez votre créneau de visite</title>
     <meta name="robots" content="noindex">
-    <meta name="theme-color" content="#F6F2EA">
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F6F2EA'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234F6353'/%3E%3C/svg%3E">
+    <meta name="theme-color" content="#F3F4F1">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F3F4F1'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234A504C'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="zelyro.css">
     <style>
         body.auth { align-items: flex-start; }
         .rdv-carte { max-width: 620px; margin: 24px auto; }
-        .rdv-carte .auth-header h1 { font-size: 28px; letter-spacing: 0.02em; }
+        .rdv-carte .auth-header h1 { font-size: 30px; }
         .rdv-carte .auth-header h1::before { display: none; }
         .masque { display: none; }
         .rdv-bloc { text-align: left; }
-        .rdv-fixe { border: 1px solid var(--sage-600, #4F6353); background: var(--sage-100, #E7EDE4); border-radius: 12px; padding: 18px 20px; margin: 0 0 20px; }
+        .rdv-fixe { border: 1px solid var(--ink); background: var(--surface-2); border-radius: 8px; padding: 18px 20px; margin: 0 0 20px; }
         .rdv-fixe p { margin: 0 0 4px; }
-        .rdv-fixe .quand { font-family: Georgia, serif; font-size: 22px; color: var(--sage-700, #3E4F43); }
+        .rdv-fixe .quand { font-family: var(--titre); font-weight: 700; letter-spacing: -.02em; font-size: 24px; color: var(--ink); }
         .rdv-fixe .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
         .rdv-carte button { width: auto; padding: 11px 20px; }
-        .rdv-carte button.secondaire { background: transparent; color: var(--sage-700, #3E4F43); border: 1px solid var(--line, #E3DCCC); }
+        .rdv-carte button.secondaire { background: transparent; color: var(--ink); border: 2px solid var(--ink); }
+        .rdv-carte button.secondaire:hover { background: var(--ink); color: #fff; }
         .jours { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; padding: 0; list-style: none; }
-        .jours button { padding: 9px 14px; border-radius: 999px; font-size: 14px; background: #FFFEFB; color: var(--ink, #1F2A24); border: 1px solid var(--line, #E3DCCC); }
-        .jours button[aria-pressed="true"] { background: var(--sage-600, #4F6353); color: #fff; border-color: var(--sage-600, #4F6353); }
+        .jours button { padding: 9px 14px; border-radius: 6px; font-size: 15px; font-weight: 600; background: #fff; color: var(--ink); border: 1px solid var(--line-strong); }
+        .jours button[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
         .heures { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; margin: 0 0 18px; }
-        .heures button { padding: 10px 0; width: 100%; background: #FFFEFB; color: var(--ink, #1F2A24); border: 1px solid var(--line, #E3DCCC); border-radius: 8px; font-size: 15px; }
-        .heures button[aria-pressed="true"] { background: var(--sage-600, #4F6353); color: #fff; border-color: var(--sage-600, #4F6353); }
+        .heures button { padding: 10px 0; width: 100%; background: #fff; color: var(--ink); border: 1px solid var(--line-strong); border-radius: 6px; font-size: 16px; font-weight: 600; }
+        .heures button[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
         .rdv-choix { margin: 0 0 8px; font-size: 15px; color: var(--ink-2, #44504A); }
-        .rdv-message { margin: 14px 0 0; font-size: 14px; color: var(--sage-700, #3E4F43); font-weight: 600; }
+        .rdv-message { margin: 14px 0 0; font-size: 15px; color: #14602A; font-weight: 600; }
         .rdv-erreur { margin: 14px 0 0; font-size: 14px; color: var(--danger, #A8452F); }
         .rdv-vide { padding: 18px 0; color: var(--ink-2, #44504A); line-height: 1.6; }
-        .pied-formulaire { text-align: center; margin-top: 22px; font-size: 12px; color: var(--ink-3, #6A7168); line-height: 1.7; }
+        .pied-formulaire { text-align: center; margin-top: 22px; font-size: 13px; color: var(--ink-3); line-height: 1.7; }
         .pied-formulaire a { color: var(--ink-3, #6A7168); }
     </style>
 <script src="/stats.js" defer></script>
