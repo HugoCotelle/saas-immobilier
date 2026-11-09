@@ -67,9 +67,11 @@
 
     var banniere = null;
 
+    var defilementAvant = null;
     function fermer() {
         if (banniere && banniere.parentNode) banniere.parentNode.removeChild(banniere);
         banniere = null;
+        if (defilementAvant !== null) { document.documentElement.style.overflow = defilementAvant; defilementAvant = null; }
     }
     function choisir(c) {
         var avant = lire();
@@ -88,41 +90,54 @@
         var st = document.createElement('style');
         st.id = 'cookies-style';
         st.textContent =
-            '.cookies-bandeau{position:fixed;left:16px;bottom:16px;z-index:9999;max-width:440px;width:calc(100% - 32px);' +
-            'background:#fff;color:#0A0D0B;border:1px solid #B9BDB5;border-radius:8px;padding:18px 20px;' +
-            'box-shadow:0 2px 12px rgba(10,13,11,.12);font:400 14px/1.5 "Hanken Grotesk",system-ui,sans-serif}' +
-            '.cookies-bandeau h2{font:700 16px/1.3 "Familjen Grotesk","Hanken Grotesk",system-ui,sans-serif;margin:0 0 6px;color:#0A0D0B}' +
-            '.cookies-bandeau p{margin:0 0 14px;color:#2b302c}' +
+            '.cookies-voile{position:fixed;top:0;right:0;bottom:0;left:0;z-index:9999;display:flex;align-items:center;' +
+            'justify-content:center;padding:16px;background:rgba(10,13,11,.6)}' +
+            '.cookies-bandeau{width:100%;max-width:460px;background:#fff;color:#0A0D0B;border:1px solid #B9BDB5;border-radius:8px;' +
+            'padding:26px 26px 24px;box-shadow:0 8px 32px rgba(10,13,11,.28);font:400 15px/1.55 "Hanken Grotesk",system-ui,sans-serif}' +
+            '.cookies-bandeau:focus{outline:none}' +
+            '.cookies-bandeau h2{font:700 20px/1.25 "Familjen Grotesk","Hanken Grotesk",system-ui,sans-serif;margin:0 0 10px;color:#0A0D0B}' +
+            '.cookies-bandeau p{margin:0 0 20px;color:#2b302c}' +
             '.cookies-bandeau a{color:#0A0D0B;text-decoration:underline;text-decoration-color:#39FF14;text-decoration-thickness:2px;text-underline-offset:3px}' +
-            '.cookies-actions{display:flex;gap:10px}' +
-            '.cookies-actions button{flex:1;font:600 14px/1 "Hanken Grotesk",system-ui,sans-serif;padding:12px 14px;' +
-            'background:#fff;color:#0A0D0B;border:1.5px solid #0A0D0B;border-radius:6px;cursor:pointer;min-height:44px}' +
+            '.cookies-actions{display:flex;gap:12px}' +
+            '.cookies-actions button{flex:1;font:600 15px/1 "Hanken Grotesk",system-ui,sans-serif;padding:14px;' +
+            'background:#fff;color:#0A0D0B;border:1.5px solid #0A0D0B;border-radius:6px;cursor:pointer;min-height:48px}' +
             '.cookies-actions button:hover,.cookies-actions button:focus-visible{background:#39FF14;outline:none}' +
             '.cookies-actions button:focus-visible{box-shadow:0 0 0 2px #fff,0 0 0 4px #0A0D0B}' +
-            '@media (max-width:520px){.cookies-bandeau{left:8px;right:8px;bottom:8px;width:auto;max-width:none}}';
+            '@media (max-width:520px){.cookies-bandeau{padding:22px 20px 20px}.cookies-actions{flex-direction:column}}';
         document.head.appendChild(st);
     }
 
     function afficher(focus) {
         if (banniere) return;
         style();
+        // Fenêtre au centre de l'écran : le visiteur doit faire un choix (Refuser ou Accepter, à égalité)
+        // avant de continuer. Aucun des deux boutons n'est mis en avant par rapport à l'autre.
         banniere = document.createElement('div');
-        banniere.className = 'cookies-bandeau';
-        banniere.setAttribute('role', 'region');
-        banniere.setAttribute('aria-label', 'Choix sur les cookies');
+        banniere.className = 'cookies-voile';
         banniere.innerHTML =
-            '<h2>Cookies et mesure publicitaire</h2>' +
+            '<div class="cookies-bandeau" role="dialog" aria-modal="true" aria-labelledby="cookies-titre" tabindex="-1">' +
+            '<h2 id="cookies-titre">Cookies et mesure publicitaire</h2>' +
             '<p>Nous aimerions mesurer l’effet de nos annonces Google sur le nombre de demandes de démonstration. ' +
             'Cela dépose des cookies de Google sur votre navigateur. Vous pouvez refuser : le site fonctionne de la même façon. ' +
             '<a href="/confidentialite.html#cookies">En savoir plus</a></p>' +
             '<div class="cookies-actions"><button type="button" data-choix="non">Refuser</button>' +
-            '<button type="button" data-choix="oui">Accepter</button></div>';
+            '<button type="button" data-choix="oui">Accepter</button></div></div>';
         banniere.addEventListener('click', function (e) {
             var b = e.target.closest ? e.target.closest('button[data-choix]') : null;
             if (b) choisir(b.getAttribute('data-choix'));
         });
+        banniere.addEventListener('keydown', function (e) {   // le clavier reste dans la fenêtre tant qu'elle est ouverte
+            if (e.key !== 'Tab') return;
+            var els = banniere.querySelectorAll('button, a[href]');
+            var premier = els[0], dernier = els[els.length - 1];
+            if (e.shiftKey && document.activeElement === premier) { e.preventDefault(); dernier.focus(); }
+            else if (!e.shiftKey && document.activeElement === dernier) { e.preventDefault(); premier.focus(); }
+        });
+        defilementAvant = document.documentElement.style.overflow;
+        document.documentElement.style.overflow = 'hidden';
         document.body.appendChild(banniere);
-        if (focus) { var premier = banniere.querySelector('button'); if (premier) premier.focus(); }
+        var fenetre = banniere.querySelector('.cookies-bandeau');   // le focus va à la fenêtre, sans mettre un bouton en avant
+        if (fenetre) fenetre.focus();
     }
 
     function demarrer() {
