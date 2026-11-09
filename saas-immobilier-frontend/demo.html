@@ -70,8 +70,11 @@ main{flex:1;display:flex;flex-direction:column;padding-top:16px;min-width:0}
 @media (prefers-reduced-motion:reduce){.step{animation:none}.progress span{transition:none}}
 .eyebrow{font-size:14px;font-weight:700;letter-spacing:0;color:var(--ink);display:flex;align-items:center;gap:8px}
 .eyebrow i{width:7px;height:7px;background:var(--accent);transform:rotate(45deg);display:block}
-h1{font-family:var(--display);font-weight:700;font-size:clamp(30px,9vw,42px);line-height:1.04;letter-spacing:-.03em;margin:0;text-wrap:balance}
+h1{font-family:var(--display);font-weight:700;font-size:clamp(30px,9vw,42px);line-height:1.12;letter-spacing:-.03em;margin:0;text-wrap:balance}
 h1 em{font-style:normal;color:#0A0D0B;background:linear-gradient(transparent 64%,#39FF14 64%);padding:0 .05em}
+/* Mode sombre : surlignage plein (texte noir sur vert fluo), sinon le haut des lettres noires se perd sur le fond sombre. */
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) h1 em{background:linear-gradient(transparent 14%,#39FF14 14%,#39FF14 92%,transparent 92%);color:#0A0D0B;padding:0 .12em;-webkit-box-decoration-break:clone;box-decoration-break:clone}}
+:root[data-theme="dark"] h1 em{background:linear-gradient(transparent 14%,#39FF14 14%,#39FF14 92%,transparent 92%);color:#0A0D0B;padding:0 .12em;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 .lede{margin:0;color:var(--muted);font-size:16px;max-width:34em}
 .note{font-size:13px;color:var(--muted)}
 .list{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
