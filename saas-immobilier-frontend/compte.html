@@ -425,7 +425,8 @@
                 '(from:(seloger.com OR seloger.fr OR leboncoin.fr OR leboncoin.com) OR '
                 + 'subject:(seloger OR leboncoin OR "demande de visite" OR "demande de contact" OR "demande de renseignements" '
                 + 'OR "nouveau contact" OR "votre annonce")) '
-                + '-subject:(alerte OR "nouvelles annonces" OR "correspondant à vos critères")';
+                + '-subject:(alerte OR "nouvelles annonces" OR "correspondant à vos critères" OR "nouveau prospect" '
+                + 'OR "précisez votre recherche") -from:zelyro.fr';
             const echapperXml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
             const telechargerFiltreGmail = () => {
@@ -1282,7 +1283,8 @@
                                                 <p className="field-hint">
                                                     Ce filtre transfère les messages envoyés par SeLoger ou LeBonCoin, et ceux dont l'objet contient
                                                     « seloger », « leboncoin », « demande de visite », « demande de contact », « demande de renseignements »,
-                                                    « nouveau contact » ou « votre annonce » (hors alertes « nouvelles annonces »).
+                                                    « nouveau contact » ou « votre annonce » (hors alertes « nouvelles annonces » et hors les e-mails envoyés par Zelyro lui-même,
+                                                    pour ne pas créer de boucle).
                                                     Si Gmail refuse le fichier, créez le filtre à la main : « Créer un filtre », collez ceci dans « Contient les mots » :
                                                 </p>
                                                 <p className="field-hint" style={{ userSelect: 'all', fontFamily: 'ui-monospace, monospace', overflowWrap: 'anywhere' }}>
