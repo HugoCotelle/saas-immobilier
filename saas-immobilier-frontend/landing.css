@@ -810,3 +810,19 @@ html:not(.anim) .fp-go{--y:-117px}html:not(.anim) .fp-jaune{--y:-39px}html:not(.
 .c-sc small{font-size:12px}
 .heros h1 em{font-size:.5em;white-space:nowrap;width:fit-content;max-width:100%;padding:0 .06em}
 .final-carte h2 em,.ch-sombre h2 em{color:var(--laiton);background:none;padding:0;margin:0}
+
+/* ---------- Appel final affiné : surface nette, titre en deux temps, liste classée à plat ---------- */
+.final-carte{border-radius:12px;gap:clamp(32px,5vw,72px)}
+.final-carte::after{display:none}
+.final-carte h2{font-size:clamp(34px,4.2vw,54px);text-wrap:balance}
+.final-carte h2 em{display:block}
+.final-carte p{max-width:46ch}
+.final-carte .actions{margin-top:32px}
+.final-carte .btn-contour-clair{border-color:rgba(242,243,240,.6);border-width:2px}
+.final-carte .btn-contour-clair:hover{border-color:var(--sur-sombre)}
+.final-carte p.final-note{margin-top:20px;font-size:14px;color:var(--sur-sombre-2)}
+.final-pile{height:340px}
+.fp{box-shadow:none;width:min(340px,100%);padding:14px 16px 14px 22px}
+.fp-go{box-shadow:none}
+.final-legende{position:absolute;left:calc(50% - 190px);bottom:0;font-size:13px;color:var(--sur-sombre-2)}
+@media (max-width:1180px){.final-legende{left:50%;transform:translateX(-50%);white-space:nowrap}.final-carte.trie .fp,html:not(.anim) .fp{--x:0px}}
