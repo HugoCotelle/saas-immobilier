@@ -826,3 +826,33 @@ html:not(.anim) .fp-go{--y:-117px}html:not(.anim) .fp-jaune{--y:-39px}html:not(.
 .fp-go{box-shadow:none}
 .final-legende{position:absolute;left:calc(50% - 190px);bottom:0;font-size:13px;color:var(--sur-sombre-2)}
 @media (max-width:1180px){.final-legende{left:50%;transform:translateX(-50%);white-space:nowrap}.final-carte.trie .fp,html:not(.anim) .fp{--x:0px}}
+
+/* ---------- Appel final : version vivante (fiches détaillées, bande défilante, gros 100) ---------- */
+.final-carte{padding-bottom:0;overflow:hidden}
+.final-carte::before{content:"100";display:block;position:absolute;inset:auto;right:-1%;bottom:70px;font-family:var(--titre);font-weight:700;font-size:clamp(180px,26vw,360px);line-height:.8;letter-spacing:-.05em;color:transparent;-webkit-text-stroke:2px rgba(57,255,20,.2);background:none;opacity:1;mix-blend-mode:normal;z-index:-1;pointer-events:none}
+.final-sur{display:inline-flex;align-items:center;gap:10px;margin:0 0 20px;font-family:var(--titre);font-weight:700;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--laiton)}
+.final-sur::before{content:"";width:9px;height:9px;background:var(--laiton);transform:rotate(45deg)}
+.final-carte .actions .btn-clair{box-shadow:5px 5px 0 var(--sur-sombre);transition:transform .2s var(--ease),box-shadow .2s var(--ease),background-color .2s}
+.final-carte .actions .btn-clair:hover{transform:translate(2px,2px);box-shadow:3px 3px 0 var(--sur-sombre)}
+.final-pile{height:430px}
+.final-pile::before{content:"Trié par score";position:absolute;top:0;right:4px;z-index:4;transform:rotate(5deg);background:var(--sur-sombre);color:var(--nuit);font-family:var(--titre);font-weight:700;font-size:12px;letter-spacing:.08em;text-transform:uppercase;padding:8px 12px;border-radius:4px}
+.fp{min-height:86px;gap:16px}
+.fp-corps{display:flex;flex-direction:column;gap:3px;min-width:0}
+.fp-src{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.7}
+.fp-corps b{font-size:18px;line-height:1.2}
+.fp-corps em{font-style:normal;font-size:13px;opacity:.75}
+.fp i{font-size:28px;padding:6px 12px}
+.fp-alerte{position:absolute;left:18px;top:-15px;z-index:2;font-size:11px;font-weight:700;text-transform:uppercase;line-height:1;display:inline-flex;align-items:center;gap:6px;background:var(--go-encre);color:var(--go);opacity:1;padding:5px 10px;border-radius:3px;letter-spacing:.06em;box-shadow:0 0 0 2px var(--profond)}
+.fp-alerte::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--go);animation:fp-pouls 1.4s ease-in-out infinite}
+@keyframes fp-pouls{50%{opacity:.25}}
+.fp-go{box-shadow:7px 7px 0 var(--sur-sombre)}
+.final-carte.trie .fp-go{--y:-150px}.final-carte.trie .fp-jaune{--y:-50px}.final-carte.trie .fp-orange{--y:50px}.final-carte.trie .fp-gris{--y:150px}
+html:not(.anim) .fp-go{--y:-150px}html:not(.anim) .fp-jaune{--y:-50px}html:not(.anim) .fp-orange{--y:50px}html:not(.anim) .fp-gris{--y:150px}
+.final-legende{bottom:-4px}
+.final-bande{grid-column:1/-1;overflow:hidden;margin:24px calc(-1*clamp(32px,5vw,72px)) 0;background:var(--laiton);color:var(--nuit);border-top:2px solid var(--nuit)}
+.final-defile{display:flex;width:max-content;animation:final-defile 32s linear infinite}
+.final-defile span{display:flex;align-items:center;gap:22px;padding:16px 11px;font-family:var(--titre);font-weight:700;font-size:15px;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
+.final-defile i{display:block;width:9px;height:9px;background:var(--nuit);transform:rotate(45deg);flex:none}
+@keyframes final-defile{to{transform:translateX(-50%)}}
+@media (prefers-reduced-motion:reduce){.final-defile{animation:none}.fp-alerte::before{animation:none}}
+@media (max-width:1180px){.final-pile::before{right:0;top:-6px}.final-carte::before{display:none}}
