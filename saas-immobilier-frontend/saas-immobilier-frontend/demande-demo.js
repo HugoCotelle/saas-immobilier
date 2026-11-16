@@ -1,6 +1,6 @@
 /* Formulaire de demande de démonstration de la page d'atterrissage (demo-agences.html).
    Une fois la demande envoyée, le visiteur est conduit sur /demo-merci.html : c'est cette page qui sert de repère
-   pour mesurer les demandes dans Google Ads. */
+   pour mesurer les demandes dans Google Ads et dans le Pixel Meta (voir consentement.js). */
 (function () {
     'use strict';
     var API_URL = 'https://saas-immobilier-921a.onrender.com';
@@ -135,7 +135,14 @@
     // ----- Page d'atterrissage : formulaire intégré à la page -----
     if (page) {
         page.appendChild(batir(function () {
-            try { sessionStorage.setItem('zelyro_demande_ok', '1'); } catch (e) { /* ignoré */ }
+            // Identifiant unique de cette demande (sert à ne la compter qu'une fois dans les mesures publicitaires).
+            var id = '';
+            try {
+                var oct = new Uint8Array(12);
+                crypto.getRandomValues(oct);
+                for (var i = 0; i < oct.length; i++) id += (oct[i] < 16 ? '0' : '') + oct[i].toString(16);
+            } catch (e) { id = Date.now().toString(36) + Math.random().toString(36).slice(2, 12); }
+            try { sessionStorage.setItem('zelyro_demande_ok', id); } catch (e) { /* ignoré */ }
             location.href = '/demo-merci.html';
         }));
     }
