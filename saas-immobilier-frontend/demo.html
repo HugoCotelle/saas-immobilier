@@ -107,10 +107,9 @@ button.row:focus-visible,.btn:focus-visible,.copy:focus-visible{outline:2px soli
 .score small{font-family:var(--sans);font-size:12px;font-weight:400;color:var(--muted);margin-left:2px}
 .time{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
 .detail{background:var(--surface);border:1px solid var(--line);border-top:0;border-radius:0 0 14px 14px;margin-top:-12px;padding:20px 14px 14px;display:grid;gap:9px}
-.crit{display:grid;grid-template-columns:92px minmax(0,1fr) 44px;gap:10px;align-items:center;font-size:13.5px}
+.crit{display:grid;grid-template-columns:92px minmax(0,1fr);gap:12px;align-items:center;font-size:13.5px}
 .crit .bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
 .crit .bar b{display:block;height:100%;background:var(--accent);border-radius:3px}
-.crit .val{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
 .hint{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
 .tap{width:8px;height:8px;border-radius:2px;background:var(--ink);transform:rotate(45deg)}
 .todo{display:grid;grid-template-columns:52px minmax(0,1fr);gap:8px 14px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px}
@@ -326,7 +325,7 @@ svg.ic{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;strok
   var ranked=P.slice().sort(function(a,b){return b.s-a.s});
   var rk=document.getElementById('list-ranked');
   rk.innerHTML=ranked.map(function(p,idx){
-    var bars=p.c.map(function(c){return '<div class="crit"><span>'+esc(c[0])+'</span><span class="bar"><b style="width:'+(c[1]/20*100)+'%"></b></span><span class="val">'+c[1]+'/20</span></div>'}).join('');
+    var bars=p.c.map(function(c){return '<div class="crit"><span>'+esc(c[0])+'</span><span class="bar"><b style="width:'+(c[1]/20*100)+'%"></b></span></div>'}).join('');
     return '<div class="item"><button type="button" class="row l-'+p.lvl+'" aria-expanded="'+(idx===0)+'" data-i="'+idx+'">'+who(p)+
       '<div class="right"><span class="chip '+p.lvl+'">'+esc(p.L)+'</span><span class="score">'+p.s+'<small>/100</small></span></div></button>'+
       '<div class="detail" '+(idx===0?'':'hidden')+'>'+bars+acts()+'</div></div>';

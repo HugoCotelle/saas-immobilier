@@ -24,6 +24,12 @@
 
         const API_URL = 'https://saas-immobilier-921a.onrender.com';
 
+        const MESSAGES_FR = {
+            'Invalid credentials': 'Email ou mot de passe incorrect.',
+            'Invalid email or password': 'Email ou mot de passe incorrect.'
+        };
+        function traduireErreur(texte) { return MESSAGES_FR[texte] || texte; }
+
         function AuthApp() {
             // Un lien d'activation (login.html#cle=ZLY-XXXX-XXXX-XXXX) remplit la clé tout seul.
             // La clé est après le # : elle n'est jamais envoyée au serveur du site.
@@ -64,7 +70,7 @@
                         // Abonnement terminé : jeton limité au téléchargement des données, avant leur effacement.
                         const exportToken = typeof data.export_token === 'string' ? data.export_token : null;
                         const purge = data.purge_prevue ? new Date(data.purge_prevue).toLocaleDateString('fr-FR') : null;
-                        setMessage({ type: 'error', text: data.message || 'Identifiants incorrects', lien, exportToken, purge });
+                        setMessage({ type: 'error', text: traduireErreur(data.message) || 'Identifiants incorrects', lien, exportToken, purge });
                     }
                 } catch (error) {
                     setMessage({ type: 'error', text: 'Serveur injoignable : ' + error.message });
@@ -127,7 +133,7 @@
             };
 
             return (
-                <div className="auth-container">
+                <main className="auth-container">
                     <div className="auth-header">
                         <h1><a href="/" aria-label="Zelyro, retour à l'accueil">Zelyro</a></h1>
                         <p>Chaque lead. Chaque bien. Aucune opportunité perdue.</p>
@@ -243,7 +249,7 @@
                         <a href="/">Accueil</a> · <a href="/mentions-legales.html">Mentions légales</a> · <a href="/confidentialite.html">Confidentialité</a> · <a href="/confidentialite.html#audience">Mesure d'audience (refuser)</a> · <a href="/cgu.html">CGU</a>
                     </div>
                     <p className="auth-trust">Base de données hébergée dans l’Union européenne · Échanges chiffrés (HTTPS)</p>
-                </div>
+                </main>
             );
         }
 
