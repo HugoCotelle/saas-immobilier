@@ -963,3 +963,107 @@ header.site-header, .site-header { background: rgba(243, 244, 241, .94); border-
 .pub .toc li a:not(.btn) { font-weight: 500; color: var(--ink-2); }
 .pub .toc li a:not(.btn):hover { background: var(--laiton); color: var(--ink); }
 .price-card.featured .price-badge { color: var(--ink); }
+
+/* ==========================================================================
+   Page de démonstration pour trafic publicitaire (demo-agences.html), refonte du 16/11/2026.
+   Réutilise les variables de la direction artistique : noir, blanc cassé, vert fluo, Familjen / Hanken Grotesk.
+   ========================================================================== */
+body.lp-demo { padding-bottom: 0; }
+.lp-demo .lp-header { padding: 0 20px; }
+.lp-demo .lp-entete-cta { white-space: nowrap; }
+
+/* Haut de page : texte, preuve, formulaire. Bureau : texte + preuve à gauche, formulaire à droite. */
+.lp-demo .lp-hero { padding: clamp(24px, 4.5vw, 64px) 0 clamp(40px, 6vw, 80px); overflow: visible; }
+.lp-demo .lp-grid {
+    grid-template-columns: minmax(0, 1.12fr) minmax(0, .88fr);
+    grid-template-areas: "copie carte" "preuve carte";
+    grid-template-rows: auto 1fr; align-items: start;
+}
+.lp-demo .lp-copy { grid-area: copie; }
+.lp-demo .lp-preuve { grid-area: preuve; margin: 8px 0 0; }
+.lp-demo .lp-carte { grid-area: carte; scroll-margin-top: 80px; }
+.lp-demo .lp-copy h1 { font-size: clamp(34px, 4.6vw, 56px); margin: 14px 0 18px; }
+.lp-demo .lp-copy .eyebrow { margin: 0; }
+.lp-demo .lp-lead { max-width: 33em; }
+.lp-demo .lp-preuve img { display: block; width: 100%; height: auto; border: 1.5px solid var(--line-strong); border-radius: 8px; background: var(--surface); box-shadow: 0 18px 40px -26px rgba(10, 13, 11, .35); }
+.lp-demo figcaption, .lp-note { font-size: 13px; color: var(--muted); margin-top: 10px; }
+.lp-cta-mobile { display: none; margin-top: 22px; }
+.lp-cta-mobile p { margin: 10px 0 0; font-size: 14px; color: var(--muted); }
+.lp-cta-mobile .btn { display: flex; width: 100%; align-items: center; justify-content: center; min-height: 54px; }
+@media (min-width: 861px) { .lp-demo .lp-carte { position: sticky; top: 84px; } }
+
+/* Formulaire */
+.dd-garantie { margin: 12px 0 0; text-align: center; font-size: 14px; font-weight: 600; color: var(--ink); }
+.dd-champ input, .dd-champ select { background: #fff; border: 1.5px solid var(--line-strong); border-radius: 6px; padding: 10px 12px; font-family: var(--sans); color: var(--ink); }
+.dd-champ input:focus, .dd-champ select:focus { outline: 2px solid var(--ink); outline-offset: 1px; border-color: var(--ink); }
+.dd-champ [aria-invalid="true"] { border-color: #8E1F1F; box-shadow: 0 0 0 1px #8E1F1F; }
+.dd-champ label { font-weight: 600; font-size: 14.5px; }
+.lp-demo .dd-actions .btn { min-height: 54px; }
+.lp-demo .dd-actions .btn:disabled { opacity: .7; cursor: progress; }
+.lp-demo .dd-retour { margin-top: 4px; }
+
+/* Sections suivantes */
+.lp-bloc { padding: clamp(44px, 6vw, 84px) 0; }
+.lp-bloc h2 { font-size: clamp(26px, 3.2vw, 40px); line-height: 1.12; letter-spacing: -.03em; margin: 0 0 clamp(24px, 3vw, 38px); max-width: 20em; }
+.lp-etapes { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(16px, 2.4vw, 28px); }
+.lp-etapes li { background: var(--surface); border: 1.5px solid var(--line-strong); border-radius: 8px; padding: 24px 24px 26px; }
+.lp-etapes h3 { font-size: 20px; margin: 14px 0 8px; letter-spacing: -.02em; }
+.lp-etapes p { margin: 0; color: var(--ink-2); line-height: 1.55; }
+.lp-n { display: inline-flex; width: 38px; height: 38px; align-items: center; justify-content: center; border-radius: 6px; background: var(--laiton); color: var(--ink); font: 700 18px/1 var(--titre); }
+
+.lp-sombre { background: var(--ink); color: var(--on-deep); }
+.lp-sombre h2 { color: var(--on-deep); margin-bottom: 14px; }
+.lp-sombre p { color: var(--on-deep-muted); font-size: 17px; line-height: 1.6; max-width: 28em; margin: 0 0 12px; }
+.lp-sombre .lp-note { color: var(--on-deep-muted); font-size: 13px; }
+.lp-sombre a { color: var(--on-deep); }
+.lp-video-grille { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: clamp(24px, 5vw, 64px); align-items: center; }
+.lp-video video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: #000; border: 1.5px solid var(--deep-line); border-radius: 8px; }
+
+.lp-match { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: clamp(24px, 5vw, 64px); align-items: center; }
+.lp-match-img { margin: 0; }
+.lp-match-img img { display: block; width: 100%; max-width: 460px; height: auto; margin: 0 auto; border: 1.5px solid var(--line-strong); border-radius: 8px; box-shadow: 0 18px 40px -26px rgba(10, 13, 11, .35); }
+.lp-match-img figcaption { text-align: center; }
+.lp-sous { font-size: 18px; margin: 26px 0 12px; letter-spacing: -.02em; }
+.lp-demo .lp-points { margin: 0 0 24px; }
+.lp-demo .lp-points li::before { background: var(--ink); }
+.lp-match .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 54px; }
+
+.lp-faq { background: var(--surface); border-top: 1.5px solid var(--line-strong); border-bottom: 1.5px solid var(--line-strong); }
+.lp-faq-int { max-width: 820px; }
+.lp-faq details { border-top: 1.5px solid var(--line-strong); padding: 0; }
+.lp-faq details:last-child { border-bottom: 1.5px solid var(--line-strong); }
+.lp-faq summary { cursor: pointer; list-style: none; padding: 18px 40px 18px 0; font-weight: 700; font-size: 17px; position: relative; min-height: 44px; }
+.lp-faq summary::-webkit-details-marker { display: none; }
+.lp-faq summary::after { content: "+"; position: absolute; right: 6px; top: 50%; transform: translateY(-50%); font: 600 24px/1 var(--sans); }
+.lp-faq details[open] summary::after { content: "\2212"; }
+.lp-faq details p { margin: 0 0 18px; color: var(--ink-2); line-height: 1.6; max-width: 40em; }
+
+.lp-final { padding-top: clamp(40px, 5vw, 64px); }
+.lp-final .final-card { padding: clamp(36px, 5vw, 64px) clamp(22px, 4vw, 56px); text-align: center; }
+.lp-final .final-card h2 { margin: 0 auto 14px; color: var(--on-deep); }
+.lp-final .final-card p { margin: 0 auto 22px; }
+.lp-final .btn { min-height: 54px; display: inline-flex; align-items: center; justify-content: center; }
+
+/* Bouton fixe (mobile) : disparaît quand le formulaire est à l'écran ou que le bandeau de cookies est ouvert */
+.lp-sticky { display: none; }
+.lp-footer nav { align-items: center; }
+
+@media (max-width: 860px) {
+    .lp-demo .lp-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "copie" "preuve" "carte"; grid-template-rows: auto; row-gap: 22px; }
+    .lp-cta-mobile { display: block; }
+    /* Sur téléphone, la capture est recadrée sur la première carte (98, « à appeler maintenant ») pour rester lisible */
+    .lp-demo .lp-preuve img { aspect-ratio: 5 / 4; object-fit: cover; object-position: 0 0; }
+    .lp-etapes { grid-template-columns: minmax(0, 1fr); }
+    .lp-video-grille, .lp-match { grid-template-columns: minmax(0, 1fr); }
+    .lp-match-img { order: 2; }
+    .lp-sticky {
+        display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 900;
+        padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px)); background: rgba(243, 244, 241, .96);
+        border-top: 1.5px solid var(--ink); transition: transform .2s ease;
+    }
+    .lp-sticky .btn { display: flex; width: 100%; align-items: center; justify-content: center; min-height: 52px; }
+    .lp-sticky.lp-sticky-cache, .cookies-ouverts .lp-sticky { transform: translateY(110%); pointer-events: none; }
+    body.lp-demo { padding-bottom: 76px; }
+    .lp-demo .lp-entete-cta { padding: 8px 12px; font-size: 13.5px; }
+}
+@media (prefers-reduced-motion: reduce) { .lp-sticky { transition: none; } }

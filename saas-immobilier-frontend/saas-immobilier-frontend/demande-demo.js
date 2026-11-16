@@ -1,11 +1,23 @@
 /* Formulaire de demande de démonstration de la page d'atterrissage (demo-agences.html).
-   Une fois la demande envoyée, le visiteur est conduit sur /demo-merci.html : c'est cette page qui sert de repère
-   pour mesurer les demandes dans Google Ads et dans le Pixel Meta (voir consentement.js). */
+
+   Garanties :
+   - une demande n'est annoncée « envoyée » que si le serveur répond qu'elle est ENREGISTRÉE (HTTP 200) ;
+   - un identifiant unique est créé à l'ouverture de la page et réutilisé à chaque nouvel essai : un double clic,
+     un retour en arrière ou une nouvelle tentative après une coupure ne créent jamais deux demandes ;
+   - la page de confirmation (/demo-merci.html) ne mesure la demande dans Google Ads et dans le Pixel Meta que si le
+     serveur a confirmé une NOUVELLE demande (drapeau posé ici) ; une demande déjà connue (doublon) n'est pas recomptée ;
+   - ce que le visiteur écrit n'est jamais envoyé à un service publicitaire ni au suivi du parcours. */
 (function () {
     'use strict';
     var API_URL = 'https://saas-immobilier-921a.onrender.com';
     var page = document.getElementById('demande-demo-form');
     if (!page) return;
+
+    var DELAI_MS = 45000;      // le serveur gratuit peut mettre du temps à se réveiller
+    var FONCTIONS = [['', 'Choisir…'], ['dirigeant', 'Dirigeant ou gérant'], ['directeur', 'Directeur d’agence'],
+        ['responsable', 'Responsable d’équipe'], ['negociateur', 'Négociateur'], ['autre', 'Autre']];
+
+    function suivi(e, d) { try { if (window.zelyroSuivi) window.zelyroSuivi(e, d); } catch (x) { /* ignoré */ } }
 
     function el(tag, attrs, enfants) {
         var n = document.createElement(tag);
@@ -15,70 +27,73 @@
         (enfants || []).forEach(function (e) { n.appendChild(e); });
         return n;
     }
-    function groupe(id, libelle, obligatoire, contenu) {
+    function groupe(id, libelle, facultatif, contenu) {
         var l = el('label', { 'for': 'dd-' + id });
         l.appendChild(document.createTextNode(libelle));
-        if (!obligatoire) l.appendChild(el('span', { 'class': 'dd-facultatif', text: ' (facultatif)' }));
-        return el('div', { 'class': 'dd-champ' }, [l, contenu]);
+        if (facultatif) l.appendChild(el('span', { 'class': 'dd-facultatif', text: ' (facultatif)' }));
+        return el('div', { 'class': 'dd-champ', 'data-champ': id }, [l, contenu]);
     }
-    function saisie(id, libelle, type, obligatoire, extra) {
+    function saisie(id, libelle, type, facultatif, extra) {
         var a = Object.assign({ id: 'dd-' + id, name: id, type: type, maxlength: '255' }, extra || {});
-        if (obligatoire) { a.required = ''; a['aria-required'] = 'true'; }
-        return groupe(id, libelle, obligatoire, el('input', a));
+        if (!facultatif) { a.required = ''; a['aria-required'] = 'true'; }
+        return groupe(id, libelle, facultatif, el('input', a));
     }
     function liste(id, libelle, options) {
-        var s = el('select', { id: 'dd-' + id, name: id });
+        var s = el('select', { id: 'dd-' + id, name: id, required: '', 'aria-required': 'true' });
         options.forEach(function (o) { s.appendChild(el('option', { value: o[0], text: o[1] })); });
         return groupe(id, libelle, false, s);
     }
 
-    // D'où vient le visiteur (annonce Google Ads, newsletter…) : lu dans l'adresse de la page, jamais dans un cookie.
-    function origine() {
+    function identifiant() {
+        var id = '';
         try {
-            var q = new URLSearchParams(location.search), p = [];
-            if (q.get('utm_source')) p.push(q.get('utm_source') + (q.get('utm_medium') ? ' / ' + q.get('utm_medium') : ''));
-            else if (q.get('gclid')) p.push('Google Ads');
-            if (q.get('utm_campaign')) p.push('campagne ' + q.get('utm_campaign'));
-            if (q.get('utm_term')) p.push('mot-clé ' + q.get('utm_term'));
-            return p.join(', ').slice(0, 200);
-        } catch (e) { return ''; }
+            var oct = new Uint8Array(12);
+            crypto.getRandomValues(oct);
+            for (var i = 0; i < oct.length; i++) id += (oct[i] < 16 ? '0' : '') + oct[i].toString(16);
+        } catch (e) { id = ''; }
+        if (!/^[0-9a-f]{24}$/.test(id)) {      // repli : 24 caractères hexadécimaux quand même, le serveur les exige
+            for (var j = 0; j < 24; j++) id += Math.floor(Math.random() * 16).toString(16);
+        }
+        return id;
     }
 
-    /* Construit un formulaire ; surSucces(prenom) est appelé quand la demande est partie. */
+    // D'où vient le visiteur : lu dans l'adresse de la page (jamais dans un cookie). Aucune donnée saisie n'y figure.
+    function provenance() {
+        var o = {};
+        try {
+            var q = new URLSearchParams(location.search);
+            ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'].forEach(function (k) {
+                var v = q.get(k);
+                if (v) o[k] = String(v).slice(0, 120);
+            });
+            if (q.get('fbclid')) o.clic_pub = 'meta';
+            else if (q.get('gclid') || q.get('gbraid') || q.get('wbraid')) o.clic_pub = 'google';
+        } catch (e) { /* navigateur ancien */ }
+        try { if (document.referrer) o.referent = document.referrer.slice(0, 300); } catch (e) { /* ignoré */ }
+        return o;
+    }
+
     function batir(surSucces) {
-        var enCours = false;
-        var f = el('form', { 'class': 'dd-form', novalidate: '' });
-        f.appendChild(el('div', { 'class': 'dd-ligne' }, [
-            saisie('nom', 'Votre nom', 'text', true, { autocomplete: 'name', maxlength: '100' }),
-            saisie('email', 'E-mail professionnel', 'email', true, { autocomplete: 'email' })
-        ]));
-        f.appendChild(el('div', { 'class': 'dd-ligne' }, [
-            saisie('agence', 'Nom de l’agence', 'text', true, { autocomplete: 'organization', maxlength: '120' }),
-            saisie('ville', 'Ville', 'text', false, { autocomplete: 'address-level2', maxlength: '80' })
-        ]));
-        f.appendChild(el('div', { 'class': 'dd-ligne' }, [
-            saisie('telephone', 'Téléphone', 'tel', false, { autocomplete: 'tel', maxlength: '30' }),
-            liste('taille', 'Taille de l’équipe', [['', 'Choisir…'], ['1', '1 personne'], ['2-5', '2 à 5 personnes'],
-                ['6-15', '6 à 15 personnes'], ['16+', '16 personnes et plus']])
-        ]));
-        f.appendChild(el('div', { 'class': 'dd-ligne' }, [
-            saisie('outil', 'Outil utilisé aujourd’hui', 'text', false, { maxlength: '80', placeholder: 'Ubiflow, Hektor, Excel…' }),
-            liste('creneau', 'Créneau souhaité', [['', 'Choisir…'], ['matin', 'Plutôt le matin'],
-                ['apres-midi', 'Plutôt l’après-midi'], ['indifferent', 'Indifférent']])
-        ]));
-        f.appendChild(groupe('message', 'Message', false,
-            el('textarea', { id: 'dd-message', name: 'message', rows: '3', maxlength: '1500' })));
+        var enCours = false, debute = false;
+        var idDemande = identifiant();
+        var f = el('form', { 'class': 'dd-form', novalidate: '', id: 'dd-form' });
+        f.appendChild(saisie('nom', 'Prénom et nom', 'text', false, { autocomplete: 'name', maxlength: '100' }));
+        f.appendChild(saisie('email', 'E-mail professionnel', 'email', false, { autocomplete: 'email', inputmode: 'email', autocapitalize: 'none', spellcheck: 'false' }));
+        f.appendChild(saisie('agence', 'Nom de l’agence', 'text', false, { autocomplete: 'organization', maxlength: '120' }));
+        f.appendChild(liste('fonction', 'Votre fonction', FONCTIONS));
+        f.appendChild(saisie('telephone', 'Téléphone', 'tel', true, { autocomplete: 'tel', inputmode: 'tel', maxlength: '30' }));
         // Champ piège : invisible pour une personne, rempli par les robots.
         f.appendChild(el('div', { 'class': 'dd-piege', 'aria-hidden': 'true' }, [
             el('label', { 'for': 'dd-site_web', text: 'Ne pas remplir' }),
             el('input', { id: 'dd-site_web', name: 'site_web', type: 'text', tabindex: '-1', autocomplete: 'off' })
         ]));
         var retour = el('p', { 'class': 'dd-retour', role: 'alert', 'aria-live': 'assertive' });
-        var bouton = el('button', { type: 'submit', 'class': 'btn btn-lg', text: 'Envoyer ma demande' });
+        var bouton = el('button', { type: 'submit', 'class': 'btn btn-lg', text: 'Demander ma démonstration' });
         f.appendChild(retour);
         f.appendChild(el('div', { 'class': 'dd-actions' }, [bouton]));
+        f.appendChild(el('p', { 'class': 'dd-garantie', text: 'Démonstration gratuite de 20 minutes, sans engagement.' }));
         f.appendChild(el('p', { 'class': 'dd-mention' }, [
-            document.createTextNode('Zelyro SAS, responsable du traitement, utilise ces informations pour répondre à votre demande de démonstration et vous recontacter, '
+            document.createTextNode('Zelyro SAS, responsable du traitement, utilise ces informations pour répondre à votre demande et vous recontacter, '
                 + 'y compris par e-mail, au sujet de nos offres (intérêt légitime). La campagne publicitaire dont vous venez, s’il y en a une, est notée. '
                 + 'Elles sont conservées 3 ans après notre dernier échange. Vous pouvez vous opposer à ce traitement, accéder à vos données ou les faire effacer : '),
             el('a', { href: 'mailto:contact@zelyro.fr', text: 'contact@zelyro.fr' }),
@@ -90,61 +105,75 @@
             retour.textContent = texte;
             retour.className = 'dd-retour' + (erreur ? ' dd-erreur' : '');
         }
+        function marquer(nom) {
+            Array.prototype.forEach.call(f.elements, function (c) { if (c.name) c.removeAttribute('aria-invalid'); });
+            if (nom && f.elements[nom]) f.elements[nom].setAttribute('aria-invalid', 'true');
+        }
         function valider(d) {
             if (d.nom.trim().length < 2) return ['nom', 'Indiquez votre nom.'];
             if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.email.trim())) return ['email', 'Indiquez une adresse e-mail valide.'];
             if (d.agence.trim().length < 2) return ['agence', 'Indiquez le nom de votre agence.'];
+            if (!d.fonction) return ['fonction', 'Choisissez votre fonction.'];
             if (d.telephone.trim() && d.telephone.replace(/\D/g, '').length < 8) return ['telephone', 'Ce numéro de téléphone semble incomplet.'];
             return null;
         }
-        f.addEventListener('input', function () { if (!enCours) message('', false); });
+        function echec(nom, texte, champ) {
+            marquer(champ || null);
+            message(texte, true);
+            suivi('formulaire_erreur', nom);      // seulement le NOM du champ ou du problème, jamais la valeur saisie
+        }
+
+        f.addEventListener('focusin', function (e) {
+            if (!debute && e.target && e.target.name && e.target.name !== 'site_web') { debute = true; suivi('formulaire_debut', 'demo'); }
+        });
+        f.addEventListener('input', function () { if (!enCours) { message('', false); marquer(null); } });
         f.addEventListener('submit', function (e) {
             e.preventDefault();
-            if (enCours) return;
+            if (enCours) return;                     // double clic ou touche Entrée répétée
             var d = {};
-            ['nom', 'email', 'agence', 'ville', 'telephone', 'taille', 'outil', 'creneau', 'message', 'site_web'].forEach(function (k) {
-                d[k] = f.elements[k].value;
-            });
-            d.origine = origine();
+            ['nom', 'email', 'agence', 'fonction', 'telephone', 'site_web'].forEach(function (k) { d[k] = f.elements[k].value; });
             var probleme = valider(d);
-            if (probleme) { message(probleme[1], true); f.elements[probleme[0]].focus(); return; }
+            if (probleme) { echec(probleme[0], probleme[1], probleme[0]); f.elements[probleme[0]].focus(); return; }
+            var corps = Object.assign({}, d, provenance(), { id_demande: idDemande, page: location.pathname, w: window.innerWidth || 0 });
             enCours = true;
             bouton.disabled = true;
             bouton.textContent = 'Envoi…';
             message('', false);
+            marquer(null);
+            var ctrl = window.AbortController ? new AbortController() : null;
+            var minuteur = ctrl ? setTimeout(function () { ctrl.abort(); }, DELAI_MS) : null;
+            var termine = false;
             fetch(API_URL + '/api/v1/demande-demo', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d)
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps),
+                signal: ctrl ? ctrl.signal : undefined
             }).then(function (r) {
-                return r.json().catch(function () { return {}; }).then(function (corps) { return { ok: r.ok, status: r.status, corps: corps }; });
+                return r.json().catch(function () { return {}; }).then(function (c) { return { ok: r.ok, status: r.status, corps: c }; });
             }).then(function (r) {
-                if (r.ok) { surSucces(d.nom.trim().split(/\s+/)[0], f); return; }
-                message(r.status === 429
-                    ? 'Vous avez déjà envoyé une demande. Nous revenons vers vous très vite, ou écrivez-nous à contact@zelyro.fr.'
-                    : (r.corps.message || 'Votre demande n’a pas pu être envoyée. Écrivez-nous à contact@zelyro.fr.'), true);
-            }).catch(function () {
-                message('Connexion impossible. Réessayez dans un instant, ou écrivez-nous à contact@zelyro.fr.', true);
+                if (r.ok) { termine = true; surSucces(r.corps || {}, idDemande); return; }
+                if (r.status === 429) echec('limite', 'Vous avez déjà envoyé une demande. Nous revenons vers vous très vite, ou écrivez-nous à contact@zelyro.fr.');
+                else if (r.status >= 500) echec('serveur', (r.corps && r.corps.message) || 'Votre demande n’a pas pu être enregistrée. Écrivez-nous à contact@zelyro.fr.');
+                else echec('refus', (r.corps && r.corps.message) || 'Votre demande n’a pas pu être envoyée. Vérifiez les champs ou écrivez-nous à contact@zelyro.fr.');
+            }).catch(function (err) {
+                if (err && err.name === 'AbortError') echec('delai', 'Le serveur met trop de temps à répondre. Vous pouvez réessayer : votre demande ne sera pas enregistrée deux fois.');
+                else echec('reseau', 'Connexion impossible. Réessayez dans un instant, ou écrivez-nous à contact@zelyro.fr.');
             }).then(function () {
+                if (minuteur) clearTimeout(minuteur);
+                if (termine) return;                 // la page va changer : le bouton reste bloqué, aucun second envoi possible
                 enCours = false;
                 bouton.disabled = false;
-                bouton.textContent = 'Envoyer ma demande';
+                bouton.textContent = 'Demander ma démonstration';
             });
         });
         return f;
     }
 
-    // ----- Page d'atterrissage : formulaire intégré à la page -----
-    if (page) {
-        page.appendChild(batir(function () {
-            // Identifiant unique de cette demande (sert à ne la compter qu'une fois dans les mesures publicitaires).
-            var id = '';
-            try {
-                var oct = new Uint8Array(12);
-                crypto.getRandomValues(oct);
-                for (var i = 0; i < oct.length; i++) id += (oct[i] < 16 ? '0' : '') + oct[i].toString(16);
-            } catch (e) { id = Date.now().toString(36) + Math.random().toString(36).slice(2, 12); }
-            try { sessionStorage.setItem('zelyro_demande_ok', id); } catch (e) { /* ignoré */ }
-            location.href = '/demo-merci.html';
-        }));
-    }
-
+    page.appendChild(batir(function (reponse, id) {
+        // Le serveur a ENREGISTRÉ la demande (HTTP 200). Le drapeau « nouvelle demande » ne sert qu'à mesurer une fois
+        // dans Google Ads / Meta : pas de drapeau pour un doublon (même personne déjà enregistrée) ni pour un robot.
+        var ref = reponse && /^[0-9a-f]{24}$/.test(reponse.ref || '') ? reponse.ref : '';
+        if (ref && reponse.doublon !== true) {
+            try { sessionStorage.setItem('zelyro_demande_ok', ref); } catch (e) { /* ignoré */ }
+        }
+        location.href = '/demo-merci.html';
+    }));
 })();

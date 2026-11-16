@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zelyro - Acquisition et demandes de démonstration</title>
+    <script src="vendor/react.production.min.js"></script>
+    <script src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/babel.min.js"></script>
+    <meta name="theme-color" content="#F3F4F1">
+    <meta name="robots" content="noindex">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F3F4F1'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234A504C'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="zelyro.css">
+    <style>
+        .tete-page { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 8px; }
+        .periodes { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+        .periodes button { background: transparent; border: 1px solid var(--line-strong); border-radius: 999px; padding: 6px 14px; font: inherit; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+        .periodes button.actif { background: var(--ink); border-color: var(--ink); color: #fff; }
+        .alerte-douce { background: var(--warm-bg); color: var(--warm); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13px; line-height: 1.6; margin-bottom: 16px; }
+        .alerte-rouge { background: var(--danger-bg); color: var(--danger); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13px; line-height: 1.6; margin-bottom: 16px; }
+        .num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+        .admin-table th.num { text-align: right; }
+        .petits-champs { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+        .petits-champs label { display: block; font-size: 12px; color: var(--ink-3); margin-bottom: 4px; }
+        .petits-champs input, .petits-champs select { min-height: 38px; font-size: 14px; }
+        .ligne-demande { cursor: pointer; }
+        .ligne-demande:hover { background: var(--surface-2); }
+        .detail-demande td { background: var(--surface-2); font-size: 13px; line-height: 1.7; white-space: normal; }
+        .detail-demande dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin: 0; }
+        .detail-demande dt { color: var(--ink-3); }
+        .detail-demande dd { margin: 0; word-break: break-word; }
+        .pastille { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+        .pastille.ok { background: var(--vert-bg, #DDF1E1); color: var(--vert, #1F8A3B); }
+        .pastille.attente { background: var(--warm-bg); color: var(--warm); }
+        .pastille.echec { background: var(--danger-bg); color: var(--danger); }
+        .entonnoir { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 8px; }
+        .entonnoir .stat-card { padding: 14px 16px; }
+        .entonnoir .stat-value { font-size: 28px; }
+        .table-scroll { overflow-x: auto; }
+        .nom-agence { color: var(--ink-3); font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useCallback } = React;
+
+        const API_URL = 'https://saas-immobilier-921a.onrender.com';
+        const fmt = (n) => (n === null || n === undefined ? '—' : Number(n).toLocaleString('fr-FR'));
+        const eur = (n) => (n === null || n === undefined ? '—' : Number(n).toLocaleString('fr-FR', { maximumFractionDigits: 2, minimumFractionDigits: Number.isInteger(Number(n)) ? 0 : 2 }) + ' €');
+        const pct = (n) => (n === null || n === undefined ? '—' : String(n).replace('.', ',') + ' %');
+        const quand = (iso) => {
+            const d = new Date(iso);
+            return isNaN(d) ? '' : d.toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        };
+        const LIBELLE_STATUT = { nouvelle: 'Nouvelle', qualifiee: 'Qualifiée', demo_programmee: 'Démo programmée', demo_realisee: 'Démo réalisée', client: 'Client', perdue: 'Perdue', non_qualifiee: 'Non qualifiée' };
+        const LIBELLE_CANAL = { meta: 'Meta (Facebook, Instagram)', google: 'Google', linkedin: 'LinkedIn', email: 'E-mail', direct: 'Direct', autre: 'Autre' };
+        const aujourdhui = () => new Date().toISOString().slice(0, 10);
+
+        function pastilleNotif(d) {
+            const lib = { envoyee: ['ok', 'Équipe prévenue'], attente: ['attente', 'En attente d’envoi'], echec: ['echec', `Échec (${d.notif_tentatives})`], abandon: ['echec', 'Abandon'] }[d.notif_statut] || ['attente', d.notif_statut];
+            return <span className={'pastille ' + lib[0]} title={d.notif_erreur || ''}>{lib[1]}</span>;
+        }
+
+        function AdminDemandes() {
+            const [user, setUser] = useState(null);
+            const [jours, setJours] = useState(30);
+            const [resume, setResume] = useState(null);
+            const [liste, setListe] = useState(null);
+            const [depenses, setDepenses] = useState([]);
+            const [filtre, setFiltre] = useState({ statut: '', canal: '', q: '' });
+            const [ouvert, setOuvert] = useState(null);
+            const [erreur, setErreur] = useState(null);
+            const [info, setInfo] = useState(null);
+            const [refuse, setRefuse] = useState(false);
+            const [nouvelle, setNouvelle] = useState({ canal: 'meta', debut: aujourdhui(), fin: aujourdhui(), montant_eur: '', note: '' });
+
+            const handleLogout = () => { localStorage.removeItem('token'); localStorage.removeItem('user'); window.location.replace('/login.html'); };
+            const appel = async (chemin, options) => {
+                const o = Object.assign({ headers: {} }, options || {});
+                o.headers = Object.assign({ 'Authorization': `Bearer ${localStorage.getItem('token')}` }, o.body ? { 'Content-Type': 'application/json' } : {}, o.headers);
+                const r = await fetch(`${API_URL}${chemin}`, o);
+                if (r.status === 401) { handleLogout(); throw new Error('Session expirée'); }
+                if (r.status === 404 && !o.tolerer404) { const e = new Error('refus'); e.refus = true; throw e; }
+                const corps = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(corps.message || `Erreur ${r.status}`);
+                return corps;
+            };
+
+            const charger = useCallback(async () => {
+                try {
+                    const q = new URLSearchParams({ jours });
+                    if (filtre.statut) q.set('statut', filtre.statut);
+                    if (filtre.canal) q.set('canal', filtre.canal);
+                    if (filtre.q) q.set('q', filtre.q);
+                    const [r, l, d] = await Promise.all([
+                        appel(`/admin/demandes-demo/resume?jours=${jours}`),
+                        appel(`/admin/demandes-demo?${q.toString()}`),
+                        appel('/admin/acquisition/depenses')
+                    ]);
+                    setResume(r); setListe(l); setDepenses(d.depenses || []); setErreur(null);
+                } catch (e) { if (e.refus) setRefuse(true); else setErreur(e.message); }
+            }, [jours, filtre]);
+
+            useEffect(() => {
+                if (!localStorage.getItem('token')) { window.location.replace('/login.html'); return; }
+                const u = localStorage.getItem('user');
+                if (u) { try { setUser(JSON.parse(u)); } catch (e) { /* ignoré */ } }
+            }, []);
+            useEffect(() => {
+                if (!localStorage.getItem('token')) return undefined;
+                const t = setTimeout(charger, filtre.q ? 300 : 0);
+                const id = setInterval(() => { if (document.visibilityState === 'visible') charger(); }, 60000);
+                return () => { clearTimeout(t); clearInterval(id); };
+            }, [charger]);
+
+            const modifier = async (id, corps) => {
+                try { await appel(`/admin/demandes-demo/${id}`, { method: 'PUT', body: JSON.stringify(corps) }); await charger(); }
+                catch (e) { setErreur(e.message); }
+            };
+            const renvoyer = async (id) => {
+                try { const r = await appel(`/admin/demandes-demo/${id}/renvoyer`, { method: 'POST' }); setInfo(r.envoyees ? 'Notification renvoyée.' : 'Aucun e-mail n’a pu partir : vérifiez la messagerie.'); await charger(); }
+                catch (e) { setErreur(e.message); }
+            };
+            const relancer = async () => {
+                try { const r = await appel('/admin/demandes-demo/relancer', { method: 'POST' }); setInfo(`${r.examinees} demande(s) examinée(s), ${r.envoyees} envoi(s) réussi(s).`); await charger(); }
+                catch (e) { setErreur(e.message); }
+            };
+            const supprimer = async (d) => {
+                if (!window.confirm(`Supprimer définitivement la demande de ${d.nom} (${d.agence}) ? Cette action est irréversible.`)) return;
+                try { await appel(`/admin/demandes-demo/${d.id}`, { method: 'DELETE' }); setOuvert(null); await charger(); }
+                catch (e) { setErreur(e.message); }
+            };
+            const exporter = async () => {
+                try {
+                    const q = new URLSearchParams({ jours });
+                    if (filtre.statut) q.set('statut', filtre.statut);
+                    if (filtre.canal) q.set('canal', filtre.canal);
+                    if (filtre.q) q.set('q', filtre.q);
+                    const r = await fetch(`${API_URL}/admin/demandes-demo/export.csv?${q.toString()}`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } });
+                    if (!r.ok) throw new Error(`Export impossible (${r.status})`);
+                    const url = URL.createObjectURL(await r.blob());
+                    const a = document.createElement('a'); a.href = url; a.download = `demandes-demo-${aujourdhui()}.csv`; document.body.appendChild(a); a.click(); a.remove();
+                    setTimeout(() => URL.revokeObjectURL(url), 5000);
+                } catch (e) { setErreur(e.message); }
+            };
+            const ajouterDepense = async (e) => {
+                e.preventDefault();
+                try { await appel('/admin/acquisition/depenses', { method: 'POST', body: JSON.stringify(nouvelle) }); setNouvelle(Object.assign({}, nouvelle, { montant_eur: '', note: '' })); await charger(); }
+                catch (err) { setErreur(err.message); }
+            };
+            const supprimerDepense = async (d) => {
+                if (!window.confirm(`Supprimer la dépense de ${eur(d.montant_eur)} (${LIBELLE_CANAL[d.canal] || d.canal}) ?`)) return;
+                try { await appel(`/admin/acquisition/depenses/${d.id}`, { method: 'DELETE' }); await charger(); }
+                catch (e) { setErreur(e.message); }
+            };
+
+            const sante = resume && resume.sante;
+            const parcours = resume && resume.parcours_page;
+            const total = resume && resume.total;
+            const depenseTotale = resume ? resume.canaux.reduce((s, c) => s + (c.depense_eur || 0), 0) : 0;
+
+            return (
+                <>
+                    <header>
+                        <div className="header-content">
+                            <div className="logo"><a href="/taches.html" aria-label="Zelyro, mes tâches du jour" style={{ color: 'inherit', textDecoration: 'none' }}>Zelyro</a></div>
+                            <nav>
+                                <a href="/taches.html">À faire</a>
+                                <a href="/prospects.html">Leads</a>
+                                <a href="/biens.html">Biens</a>
+                                <a href="/matching.html">Matching</a>
+                                <a href="/propositions.html">Propositions</a>
+                                <a href="/dashboard.html">Dashboard</a>
+                                <a href="/compte.html">Compte</a>
+                                <a href="/admin.html" className="active">Admin</a>
+                            </nav>
+                            <div className="user-info">
+                                {user && <span className="user-email">{user.email}</span>}
+                                <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="container">
+                        <div className="tete-page">
+                            <div>
+                                <h1 className="page-title">Acquisition : demandes de démonstration</h1>
+                                <p className="page-subtitle" style={{ marginBottom: 0 }}>Chaque demande est enregistrée avant tout envoi d’e-mail. Ici, la vérité commerciale de Zelyro : elle ne dépend ni de Meta ni de Google.</p>
+                            </div>
+                            <a className="btn secondary petit" href="/admin.html">Retour à l'administration</a>
+                        </div>
+
+                        {erreur && <div className="error" style={{ marginTop: 16 }}>Erreur: {erreur}</div>}
+                        {info && <div className="success" style={{ marginTop: 16 }} onClick={() => setInfo(null)}>{info}</div>}
+
+                        {refuse ? (
+                            <div className="panel" style={{ marginTop: 24 }}>
+                                <div className="empty-state">Cette page est réservée à l'équipe Zelyro.<br /><a href="/prospects.html" style={{ color: 'var(--sage-700)' }}>Retour à mes prospects</a></div>
+                            </div>
+                        ) : !resume || !liste ? (
+                            <div className="loading"><div className="loader"></div></div>
+                        ) : (
+                            <div style={{ display: 'grid', gap: 24, marginTop: 24 }}>
+
+                                {!sante.messagerie_prete && (
+                                    <div className="alerte-rouge">La messagerie n’est pas configurée (BREVO_API_KEY ou MAIL_FROM manquant côté serveur). Les demandes sont bien enregistrées ici, mais aucun e-mail ne part vers l’équipe ni vers les prospects.</div>
+                                )}
+                                {(sante.notifications_en_echec > 0 || sante.notifications_en_attente > 0 || sante.accuses_en_echec > 0) && (
+                                    <div className="alerte-douce" style={{ marginBottom: 0 }}>
+                                        {sante.notifications_en_echec} notification(s) à l’équipe en échec, {sante.notifications_en_attente} en attente, {sante.accuses_en_echec} accusé(s) de réception en échec.{' '}
+                                        <button className="btn secondary petit" onClick={relancer}>Renvoyer maintenant</button>
+                                        <span style={{ marginLeft: 8 }}>Le serveur réessaie aussi tout seul toutes les 15 minutes si la tâche planifiée est en place.</span>
+                                    </div>
+                                )}
+
+                                <div className="panel">
+                                    <div className="panel-header">
+                                        <h2 className="panel-title">Du clic à la demande</h2>
+                                        <div className="periodes" role="group" aria-label="Période">
+                                            {[[7, '7 jours'], [30, '30 jours'], [90, '90 jours'], [365, '1 an']].map(([j, l]) => (
+                                                <button key={j} className={jours === j ? 'actif' : ''} onClick={() => setJours(j)}>{l}</button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="entonnoir">
+                                        <div className="stat-card"><div className="stat-value">{fmt(parcours.visiteurs)}</div><div className="stat-label">Visiteurs de la page</div></div>
+                                        <div className="stat-card"><div className="stat-value">{fmt(parcours.clic_bouton)}</div><div className="stat-label">Clic sur un bouton</div></div>
+                                        <div className="stat-card"><div className="stat-value">{fmt(parcours.video_lue)}</div><div className="stat-label">Vidéo lancée</div></div>
+                                        <div className="stat-card"><div className="stat-value">{fmt(parcours.formulaire_commence)}</div><div className="stat-label">Formulaire commencé</div></div>
+                                        <div className="stat-card"><div className="stat-value">{fmt(parcours.erreurs_formulaire)}</div><div className="stat-label">Visiteurs avec une erreur de saisie</div></div>
+                                        <div className="stat-card"><div className="stat-value">{fmt(parcours.demandes)}</div><div className="stat-label">Demandes enregistrées</div></div>
+                                    </div>
+                                    <p className="field-hint">Visiteurs comptés une fois par jour et par appareil, sans cookie ; ceux qui refusent le suivi (« Ne pas me suivre ») ne sont pas comptés, alors que leurs demandes le sont. Aucune saisie n’est jamais enregistrée dans ces étapes.</p>
+                                </div>
+
+                                <div className="panel">
+                                    <div className="panel-header"><h2 className="panel-title">Entonnoir commercial par canal</h2><span className="panel-count">{jours} derniers jours</span></div>
+                                    {resume.canaux.length === 0 ? <div className="empty-state" style={{ padding: '24px 0' }}>Aucune demande sur la période.</div> : (
+                                        <div className="table-scroll">
+                                            <table className="admin-table">
+                                                <thead><tr><th>Canal</th><th className="num">Demandes</th><th className="num">Qualifiées</th><th className="num">Démos prévues</th><th className="num">Démos faites</th><th className="num">Clients</th><th className="num">% qualifiées</th><th className="num">Dépensé</th><th className="num">Coût / demande</th><th className="num">Coût / qualifiée</th><th className="num">Coût / client</th></tr></thead>
+                                                <tbody>
+                                                    {resume.canaux.map((c) => (
+                                                        <tr key={c.canal}>
+                                                            <td>{LIBELLE_CANAL[c.canal] || c.canal}</td>
+                                                            <td className="num">{fmt(c.demandes)}</td><td className="num">{fmt(c.qualifiees)}</td><td className="num">{fmt(c.programmees)}</td><td className="num">{fmt(c.realisees)}</td><td className="num">{fmt(c.clients)}</td>
+                                                            <td className="num">{pct(c.taux_qualification)}</td><td className="num">{eur(c.depense_eur)}</td><td className="num">{eur(c.cout_par_demande)}</td><td className="num">{eur(c.cout_par_qualifiee)}</td><td className="num">{eur(c.cout_acquisition)}</td>
+                                                        </tr>
+                                                    ))}
+                                                    <tr style={{ fontWeight: 700 }}>
+                                                        <td>Total</td><td className="num">{fmt(total.demandes)}</td><td className="num">{fmt(total.qualifiees)}</td><td className="num">{fmt(total.programmees)}</td><td className="num">{fmt(total.realisees)}</td><td className="num">{fmt(total.clients)}</td>
+                                                        <td className="num">{total.demandes ? pct(Math.round(1000 * total.qualifiees / total.demandes) / 10) : '—'}</td><td className="num">{eur(depenseTotale || null)}</td>
+                                                        <td className="num">{depenseTotale && total.demandes ? eur(Math.round(100 * depenseTotale / total.demandes) / 100) : '—'}</td>
+                                                        <td className="num">{depenseTotale && total.qualifiees ? eur(Math.round(100 * depenseTotale / total.qualifiees) / 100) : '—'}</td>
+                                                        <td className="num">{depenseTotale && total.clients ? eur(Math.round(100 * depenseTotale / total.clients) / 100) : '—'}</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                    <p className="field-hint">Les coûts n’apparaissent que si la dépense du canal est saisie plus bas. Le coût par client reste vide tant qu’aucune demande n’est passée au statut « Client ».</p>
+                                </div>
+
+                                <div className="panel">
+                                    <div className="panel-header">
+                                        <h2 className="panel-title">Demandes reçues</h2>
+                                        <button className="btn secondary petit" onClick={exporter}>Exporter en CSV</button>
+                                    </div>
+                                    <div className="petits-champs" style={{ marginBottom: 16 }}>
+                                        <div><label htmlFor="f-q">Recherche</label><input id="f-q" type="search" placeholder="Nom, e-mail, agence" value={filtre.q} onChange={(e) => setFiltre(Object.assign({}, filtre, { q: e.target.value }))} /></div>
+                                        <div><label htmlFor="f-s">Statut</label>
+                                            <select id="f-s" value={filtre.statut} onChange={(e) => setFiltre(Object.assign({}, filtre, { statut: e.target.value }))}>
+                                                <option value="">Tous</option>{Object.keys(liste.statuts).map((s) => <option key={s} value={s}>{liste.statuts[s] || s}</option>)}
+                                            </select></div>
+                                        <div><label htmlFor="f-c">Canal</label>
+                                            <select id="f-c" value={filtre.canal} onChange={(e) => setFiltre(Object.assign({}, filtre, { canal: e.target.value }))}>
+                                                <option value="">Tous</option>{liste.canaux.map((c) => <option key={c} value={c}>{LIBELLE_CANAL[c] || c}</option>)}
+                                            </select></div>
+                                    </div>
+                                    {liste.demandes.length === 0 ? <div className="empty-state" style={{ padding: '24px 0' }}>Aucune demande ne correspond.</div> : (
+                                        <div className="table-scroll">
+                                            <table className="admin-table">
+                                                <thead><tr><th>Reçue</th><th>Contact</th><th>Fonction</th><th>Canal</th><th>Statut</th><th>E-mail équipe</th></tr></thead>
+                                                <tbody>
+                                                    {liste.demandes.map((d) => (
+                                                        <React.Fragment key={d.id}>
+                                                            <tr className="ligne-demande" onClick={() => setOuvert(ouvert === d.id ? null : d.id)}>
+                                                                <td style={{ whiteSpace: 'nowrap' }}>{quand(d.cree_le)}{d.nb_soumissions > 1 ? ` · ×${d.nb_soumissions}` : ''}</td>
+                                                                <td>{d.nom}<div className="nom-agence">{d.agence}</div></td>
+                                                                <td>{d.fonction || '—'}{d.decideur ? ' · décideur' : ''}</td>
+                                                                <td>{LIBELLE_CANAL[d.canal] || d.canal}{d.campagne ? <div className="nom-agence">{d.campagne}{d.contenu ? ' · ' + d.contenu : ''}</div> : null}</td>
+                                                                <td onClick={(e) => e.stopPropagation()}>
+                                                                    <select value={d.statut} aria-label={`Statut de ${d.nom}`} onChange={(e) => modifier(d.id, { statut: e.target.value })}>
+                                                                        {Object.keys(liste.statuts).map((s) => <option key={s} value={s}>{liste.statuts[s] || s}</option>)}
+                                                                    </select>
+                                                                </td>
+                                                                <td onClick={(e) => e.stopPropagation()}>
+                                                                    {pastilleNotif(d)}{' '}
+                                                                    {d.notif_statut !== 'envoyee' && <button className="btn secondary petit" onClick={() => renvoyer(d.id)}>Renvoyer</button>}
+                                                                </td>
+                                                            </tr>
+                                                            {ouvert === d.id && (
+                                                                <tr className="detail-demande"><td colSpan={6}>
+                                                                    <dl>
+                                                                        <dt>E-mail</dt><dd><a href={`mailto:${d.email}`}>{d.email}</a></dd>
+                                                                        <dt>Téléphone</dt><dd>{d.telephone ? <a href={`tel:${d.telephone}`}>{d.telephone}</a> : '—'}</dd>
+                                                                        <dt>Ville · équipe · outil</dt><dd>{[d.ville, d.taille, d.outil].filter(Boolean).join(' · ') || '—'}</dd>
+                                                                        <dt>Message</dt><dd>{d.message || '—'}</dd>
+                                                                        <dt>Provenance</dt><dd>{[d.source, d.medium, d.campagne, d.contenu, d.terme].filter(Boolean).join(' / ') || '—'}{d.clic_pub ? ' (clic publicitaire)' : ''}{d.referent ? ` · depuis ${d.referent}` : ''}</dd>
+                                                                        <dt>Page · appareil</dt><dd>{d.page} · {d.appareil || '—'}</dd>
+                                                                        <dt>Accusé au prospect</dt><dd>{d.accuse_statut}{d.accuse_envoye_le ? ` (${quand(d.accuse_envoye_le)})` : ''}</dd>
+                                                                        {d.notif_erreur && <><dt>Dernière erreur d’envoi</dt><dd>{d.notif_erreur}</dd></>}
+                                                                        <dt>Note interne</dt>
+                                                                        <dd><textarea rows={2} style={{ width: '100%', maxWidth: 520 }} defaultValue={d.note || ''} aria-label={`Note sur ${d.nom}`} onBlur={(e) => { if (e.target.value !== (d.note || '')) modifier(d.id, { note: e.target.value }); }} /></dd>
+                                                                    </dl>
+                                                                    <p style={{ marginTop: 10 }}><button className="btn danger petit" onClick={() => supprimer(d)}>Supprimer cette demande</button></p>
+                                                                </td></tr>
+                                                            )}
+                                                        </React.Fragment>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                    <p className="field-hint">Messagerie : {liste.messagerie_prete ? 'prête' : 'non configurée'}. Destinataire des alertes : {liste.destinataire || 'non défini'}. 500 demandes au plus sont affichées ; l’export contient toutes celles du filtre.</p>
+                                </div>
+
+                                <div className="panel">
+                                    <div className="panel-header"><h2 className="panel-title">Dépenses publicitaires</h2><span className="panel-count">saisies à la main</span></div>
+                                    <form className="petits-champs" onSubmit={ajouterDepense} style={{ marginBottom: 16 }}>
+                                        <div><label htmlFor="d-c">Canal</label><select id="d-c" value={nouvelle.canal} onChange={(e) => setNouvelle(Object.assign({}, nouvelle, { canal: e.target.value }))}>{liste.canaux.map((c) => <option key={c} value={c}>{LIBELLE_CANAL[c] || c}</option>)}</select></div>
+                                        <div><label htmlFor="d-d">Du</label><input id="d-d" type="date" required value={nouvelle.debut} onChange={(e) => setNouvelle(Object.assign({}, nouvelle, { debut: e.target.value }))} /></div>
+                                        <div><label htmlFor="d-f">Au</label><input id="d-f" type="date" required value={nouvelle.fin} onChange={(e) => setNouvelle(Object.assign({}, nouvelle, { fin: e.target.value }))} /></div>
+                                        <div><label htmlFor="d-m">Montant (€)</label><input id="d-m" type="text" inputMode="decimal" required placeholder="133,12" value={nouvelle.montant_eur} onChange={(e) => setNouvelle(Object.assign({}, nouvelle, { montant_eur: e.target.value }))} style={{ width: 110 }} /></div>
+                                        <div><label htmlFor="d-n">Note</label><input id="d-n" type="text" maxLength={200} placeholder="Campagne trafic, octobre" value={nouvelle.note} onChange={(e) => setNouvelle(Object.assign({}, nouvelle, { note: e.target.value }))} /></div>
+                                        <button className="btn petit" type="submit">Ajouter</button>
+                                    </form>
+                                    {depenses.length === 0 ? <div className="empty-state" style={{ padding: '16px 0' }}>Aucune dépense saisie.</div> : (
+                                        <div className="table-scroll">
+                                            <table className="admin-table">
+                                                <thead><tr><th>Période</th><th>Canal</th><th className="num">Montant</th><th>Note</th><th></th></tr></thead>
+                                                <tbody>
+                                                    {depenses.map((d) => (
+                                                        <tr key={d.id}>
+                                                            <td style={{ whiteSpace: 'nowrap' }}>{new Date(d.debut + 'T12:00:00').toLocaleDateString('fr-FR')}{d.fin !== d.debut ? ' → ' + new Date(d.fin + 'T12:00:00').toLocaleDateString('fr-FR') : ''}</td>
+                                                            <td>{LIBELLE_CANAL[d.canal] || d.canal}</td><td className="num">{eur(d.montant_eur)}</td><td>{d.note || ''}</td>
+                                                            <td><button className="btn danger petit" onClick={() => supprimerDepense(d)}>Supprimer</button></td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </>
+            );
+        }
+
+        ReactDOM.render(<AdminDemandes />, document.getElementById('root'));
+    </script>
+</body>
+</html>

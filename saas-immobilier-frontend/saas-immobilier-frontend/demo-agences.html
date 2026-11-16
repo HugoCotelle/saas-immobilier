@@ -2,9 +2,9 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Demander une démonstration de Zelyro — logiciel pour agences immobilières</title>
-<meta name="description" content="Demandez une démonstration de Zelyro : vos demandes SeLoger et Leboncoin qualifiées automatiquement, rapprochées de vos biens et suivies jusqu’à la visite. Sans engagement.">
+<meta name="description" content="Zelyro note chaque demande SeLoger, Leboncoin et e-mail sur 100, la rapproche de vos biens et vous dit qui appeler en premier. Démonstration gratuite de 20 minutes.">
 <meta name="robots" content="noindex, follow">
 <meta name="theme-color" content="#F3F4F1">
 <link rel="canonical" href="https://www.zelyro.fr/demo-agences.html">
@@ -13,46 +13,148 @@
 <link rel="stylesheet" href="/public.css">
 <script>document.documentElement.className+=' js';</script>
 <script src="/stats.js" defer></script>
-<script src="/consentement.js?v=20261116b" defer></script>
+<script src="/consentement.js?v=20261116c" defer></script>
+<script src="/demo-suivi.js?v=20261116c" defer></script>
 </head>
-<body class="pub lp">
+<body class="pub lp lp-demo">
 <a class="skip-link" href="#contenu">Aller au contenu</a>
 <header class="site-header">
     <div class="header-content lp-header">
         <a class="logo" href="/" aria-label="Zelyro, accueil">Zelyro</a>
-        <a class="btn btn-sm btn-ghost lp-connexion" href="/login.html">Connexion</a>
+        <a class="btn btn-sm lp-entete-cta" href="#demande" data-cta="entete">Demander une démo</a>
     </div>
 </header>
 <main id="contenu">
+
 <section class="hero lp-hero">
     <div class="wrap lp-grid">
         <div class="lp-copy">
-            <h1>Chaque demande qualifiée. <em>Chaque bien rapproché.</em></h1>
-            <p class="lp-lead">Voyez en démonstration comment Zelyro trie vos demandes SeLoger, Leboncoin et e-mail, les rapproche de vos biens et prépare vos relances. Sans engagement.</p>
+            <p class="eyebrow">Pour les agences immobilières</p>
+            <h1>Sachez quel prospect <em>appeler en premier.</em></h1>
+            <p class="lp-lead">Zelyro reçoit vos demandes SeLoger, Leboncoin et e-mail, les note sur 100 et les rapproche de vos biens. Vous commencez la journée avec la liste des appels à passer.</p>
+            <div class="lp-cta-mobile">
+                <a class="btn btn-lg" href="#demande" data-cta="haut">Demander ma démonstration</a>
+                <p>Gratuite, 20 minutes, sans engagement.</p>
+            </div>
         </div>
-        <div class="lp-carte" id="demande-demo-form-bloc">
+
+        <figure class="lp-preuve">
+            <img src="/captures/zelyro-prospects-par-score.jpg" width="1400" height="527" alt="Liste des prospects dans Zelyro, classés par score : Camille R. 98 avec la mention « À appeler maintenant », Nadia B. 87, Léa D. 87.">
+            <figcaption>Vos prospects triés par score. Aperçu illustré, données fictives.</figcaption>
+        </figure>
+
+        <div class="lp-carte" id="demande">
             <h2>Demander une démonstration</h2>
-            <p class="dd-intro">Quelques informations, et nous revenons vers vous très vite pour convenir d’un créneau.</p>
+            <p class="dd-intro">Cinq informations, et nous vous proposons un créneau de 20 minutes.</p>
             <div id="demande-demo-form"></div>
             <noscript><p class="dd-mention">Le formulaire demande JavaScript. Vous pouvez aussi écrire à <a href="mailto:contact@zelyro.fr?subject=Demande%20de%20d%C3%A9mo%20Zelyro">contact@zelyro.fr</a>.</p></noscript>
         </div>
-        <div class="lp-arguments">
-            <ul class="lp-points">
-                <li>Vos demandes SeLoger et Leboncoin arrivent toutes seules, déjà qualifiées.</li>
-                <li>Un score de qualité sur 100 : vous savez qui appeler en premier.</li>
-                <li>Un score de correspondance entre chaque prospect et vos biens, avec ses raisons.</li>
-                <li>Un e-mail automatique complète les informations qui manquent au prospect.</li>
-                <li>Chaque agence ne voit que ses propres données. Base de données hébergée dans l’Union européenne.</li>
-            </ul>
-            <p class="lp-prix">À partir de 29&nbsp;€ HT par mois, sans engagement, résiliable à tout moment.</p>
+    </div>
+</section>
+
+<section class="lp-bloc" aria-labelledby="t-etapes">
+    <div class="wrap">
+        <h2 id="t-etapes">De la demande à l’appel, <em>sans copier-coller.</em></h2>
+        <ol class="lp-etapes">
+            <li>
+                <span class="lp-n" aria-hidden="true">1</span>
+                <h3>Les demandes arrivent</h3>
+                <p>SeLoger, Leboncoin, e-mail : elles se rassemblent au même endroit, sans que vous ayez à les recopier.</p>
+            </li>
+            <li>
+                <span class="lp-n" aria-hidden="true">2</span>
+                <h3>Zelyro les note</h3>
+                <p>Chaque prospect reçoit un score de qualité sur 100, avec ses raisons : financement, délai, dossier. Vous voyez qui appeler en premier.</p>
+            </li>
+            <li>
+                <span class="lp-n" aria-hidden="true">3</span>
+                <h3>Vous proposez le bon bien</h3>
+                <p>Pour chaque prospect, Zelyro propose les biens de votre portefeuille qui lui correspondent, et un e-mail automatique complète ce qui manque.</p>
+            </li>
+        </ol>
+    </div>
+</section>
+
+<section class="lp-bloc lp-sombre" aria-labelledby="t-video">
+    <div class="wrap lp-video-grille">
+        <div>
+            <h2 id="t-video">Zelyro en 30 secondes</h2>
+            <p>Des demandes éparpillées entre mails, tableurs et notes, rassemblées et notées. Le prospect à appeler en premier. Le bon bien rapproché.</p>
+            <p class="lp-note">Aperçu illustré, données fictives.</p>
+        </div>
+        <div class="lp-video">
+            <video id="video-demo" controls preload="none" playsinline poster="/captures/zelyro-video-affiche.jpg" aria-label="Zelyro en 30 secondes : des demandes éparpillées entre mails, tableurs et notes, rassemblées et notées sur 100, le prospect à appeler en premier, le bon bien rapproché.">
+                <source src="/zelyro-pub-30s.mp4" type="video/mp4">
+                Votre navigateur ne lit pas cette vidéo. <a href="/zelyro-pub-30s.mp4">Télécharger la vidéo</a>.
+            </video>
         </div>
     </div>
 </section>
+
+<section class="lp-bloc" aria-labelledby="t-match">
+    <div class="wrap lp-match">
+        <figure class="lp-match-img">
+            <img src="/captures/zelyro-biens-correspondants.jpg" width="720" height="962" loading="lazy" alt="Fiche d’un prospect dans Zelyro : trois biens correspondants, avec un score de correspondance de 93 %, 88 % et 76 % et les raisons de chaque rapprochement.">
+            <figcaption>Aperçu illustré, données fictives.</figcaption>
+        </figure>
+        <div>
+            <h2 id="t-match">Le bon bien <em>pour le bon prospect.</em></h2>
+            <p class="lp-lead">Un score de correspondance entre chaque prospect et vos biens, avec ce qui colle et ce qui coince : budget, secteur, type de bien. Vous savez quoi proposer, et pourquoi.</p>
+            <h3 class="lp-sous">Pendant les 20 minutes de démonstration</h3>
+            <ul class="lp-points">
+                <li>Le parcours d’une demande, de son arrivée à la visite.</li>
+                <li>Le score de qualité et ses explications.</li>
+                <li>Le rapprochement avec vos biens.</li>
+                <li>Les tarifs, à partir de 29&nbsp;€ HT par mois, sans engagement, résiliable à tout moment.</li>
+            </ul>
+            <p><a class="btn btn-lg" href="#demande" data-cta="milieu">Demander ma démonstration</a></p>
+        </div>
+    </div>
+</section>
+
+<section class="lp-bloc lp-faq" aria-labelledby="t-faq">
+    <div class="wrap lp-faq-int">
+        <h2 id="t-faq">Questions fréquentes</h2>
+        <details>
+            <summary>Combien de temps dure la démonstration ?</summary>
+            <p>20 minutes, gratuites et sans engagement. Après votre demande, vous recevez un e-mail de confirmation, puis nous vous proposons un créneau.</p>
+        </details>
+        <details>
+            <summary>Combien coûte Zelyro ?</summary>
+            <p>À partir de 29&nbsp;€ HT par mois, sans engagement, résiliable à tout moment. Le détail des offres est sur la <a href="/tarifs.html">page des tarifs</a>.</p>
+        </details>
+        <details>
+            <summary>Quelles demandes Zelyro reçoit-il ?</summary>
+            <p>Vos demandes SeLoger, Leboncoin et par e-mail. Chacune est qualifiée, notée sur 100 et rapprochée de vos biens.</p>
+        </details>
+        <details>
+            <summary>Mes données sont-elles protégées ?</summary>
+            <p>Chaque agence ne voit que ses propres données. La base de données est hébergée dans l’Union européenne.</p>
+        </details>
+    </div>
+</section>
+
+<section class="lp-bloc lp-final">
+    <div class="wrap">
+        <div class="final-card">
+            <h2>Voyez qui appeler <em>en premier.</em></h2>
+            <p>Démonstration gratuite de 20 minutes, sans engagement.</p>
+            <p><a class="btn btn-lg btn-light" href="#demande" data-cta="bas">Demander ma démonstration</a></p>
+        </div>
+    </div>
+</section>
+
 </main>
+
+<div class="lp-sticky lp-sticky-cache" id="lp-sticky">
+    <a class="btn btn-lg" href="#demande" data-cta="mobile">Demander ma démonstration</a>
+</div>
+
 <footer class="lp-footer">
     <div class="wrap">
         <span>© 2026 Zelyro · Logiciel destiné aux professionnels de l’immobilier.</span>
         <nav aria-label="Informations légales">
+            <a href="/login.html">Connexion</a>
             <a href="/mentions-legales.html">Mentions légales</a>
             <a href="/confidentialite.html">Confidentialité</a>
             <a href="/confidentialite.html#cookies" data-gerer-cookies>Gérer mes cookies</a>
@@ -61,6 +163,17 @@
         </nav>
     </div>
 </footer>
-<script src="/demande-demo.js" defer></script>
+<script src="/demande-demo.js?v=20261116c" defer></script>
+<script>
+/* Bouton fixe sur mobile : visible seulement entre le premier bouton et le formulaire (jamais en double). */
+(function () {
+    var b = document.getElementById('lp-sticky'), f = document.getElementById('demande'), h = document.querySelector('.lp-cta-mobile .btn');
+    if (!b || !f || !h || !('IntersectionObserver' in window)) return;
+    var vu = { f: false, h: false };
+    function maj() { b.classList.toggle('lp-sticky-cache', vu.f || vu.h); }
+    new IntersectionObserver(function (e) { vu.f = e[0].isIntersecting; maj(); }, { threshold: 0.15 }).observe(f);
+    new IntersectionObserver(function (e) { vu.h = e[0].isIntersecting; maj(); }).observe(h);
+})();
+</script>
 </body>
 </html>

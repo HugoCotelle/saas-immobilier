@@ -58,7 +58,7 @@
                 demande.ok = true;
                 demande.id = v === '1' ? 'd' + Date.now().toString(36) : v;   // '1' : ancien format du drapeau
             }
-        } catch (e) { demande.ok = true; demande.stockage = false; }   // stockage indisponible : mesure Google conservée, jamais Meta
+        } catch (e) { demande.ok = false; demande.stockage = false; }   // stockage indisponible : impossible de prouver qu'une demande vient d'être enregistrée, donc aucune mesure
         return demande;
     }
     var surMerci = location.pathname.indexOf('demo-merci') !== -1;
@@ -117,6 +117,15 @@
         document.head.appendChild(s);
     }
 
+    // Événements de parcours sur la page de démonstration (voir demo-suivi.js) : envoyés à Meta seulement si le
+    // visiteur a accepté, jamais avec une donnée saisie, jamais en cas de « Ne pas me suivre ».
+    window.zelyroMesure = function (nom, params) {
+        try {
+            if (!enligne || signalRefus() || !metaAccepte() || !window.fbq) return;
+            window.fbq('trackCustom', nom, params || {});
+        } catch (e) { /* ignoré */ }
+    };
+
     function effacerCookiesGoogle() {
         var noms = document.cookie.split(';');
         var hotes = [location.hostname, '.' + location.hostname.replace(/^www\./, '')];
@@ -133,11 +142,10 @@
 
     var banniere = null;
 
-    var defilementAvant = null;
     function fermer() {
         if (banniere && banniere.parentNode) banniere.parentNode.removeChild(banniere);
         banniere = null;
-        if (defilementAvant !== null) { document.documentElement.style.overflow = defilementAvant; defilementAvant = null; }
+        document.documentElement.classList.remove('cookies-ouverts');
     }
     function choisir(c) {
         var avant = lire();
@@ -156,35 +164,37 @@
         var st = document.createElement('style');
         st.id = 'cookies-style';
         st.textContent =
-            '.cookies-voile{position:fixed;top:0;right:0;bottom:0;left:0;z-index:9999;display:flex;align-items:center;' +
-            'justify-content:center;padding:16px;background:rgba(10,13,11,.6)}' +
-            '.cookies-bandeau{width:100%;max-width:460px;background:#fff;color:#0A0D0B;border:1px solid #B9BDB5;border-radius:8px;' +
-            'padding:26px 26px 24px;box-shadow:0 8px 32px rgba(10,13,11,.28);font:400 15px/1.55 "Hanken Grotesk",system-ui,sans-serif}' +
+            '.cookies-bandeau{position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#fff;color:#0A0D0B;' +
+            'border-top:2px solid #0A0D0B;box-shadow:0 -10px 30px rgba(10,13,11,.16);' +
+            'padding:14px 16px calc(14px + env(safe-area-inset-bottom,0px));font:400 14px/1.5 "Hanken Grotesk",system-ui,sans-serif}' +
             '.cookies-bandeau:focus{outline:none}' +
-            '.cookies-bandeau h2{font:700 20px/1.25 "Familjen Grotesk","Hanken Grotesk",system-ui,sans-serif;margin:0 0 10px;color:#0A0D0B}' +
-            '.cookies-bandeau p{margin:0 0 20px;color:#2b302c}' +
+            '.cookies-int{max-width:1160px;margin:0 auto;display:flex;align-items:center;gap:12px 28px;justify-content:space-between}' +
+            '.cookies-bandeau p{margin:0;color:#2b302c;max-width:46em}' +
+            '.cookies-bandeau strong{font-weight:700}' +
             '.cookies-bandeau a{color:#0A0D0B;text-decoration:underline;text-decoration-color:#39FF14;text-decoration-thickness:2px;text-underline-offset:3px}' +
-            '.cookies-actions{display:flex;gap:12px}' +
-            '.cookies-actions button{flex:1;font:600 15px/1 "Hanken Grotesk",system-ui,sans-serif;padding:14px;' +
-            'background:#fff;color:#0A0D0B;border:1.5px solid #0A0D0B;border-radius:6px;cursor:pointer;min-height:48px}' +
+            '.cookies-actions{display:flex;gap:10px;flex:none}' +
+            '.cookies-actions button{font:600 15px/1 "Hanken Grotesk",system-ui,sans-serif;padding:13px 22px;min-width:112px;' +
+            'background:#fff;color:#0A0D0B;border:1.5px solid #0A0D0B;border-radius:6px;cursor:pointer;min-height:46px}' +
             '.cookies-actions button:hover,.cookies-actions button:focus-visible{background:#39FF14;outline:none}' +
             '.cookies-actions button:focus-visible{box-shadow:0 0 0 2px #fff,0 0 0 4px #0A0D0B}' +
-            '@media (max-width:520px){.cookies-bandeau{padding:22px 20px 20px}.cookies-actions{flex-direction:column}}';
+            '@media (max-width:640px){.cookies-int{flex-direction:column;align-items:stretch;gap:12px}' +
+            '.cookies-actions button{flex:1;min-width:0}.cookies-bandeau{font-size:13.5px}}';
         document.head.appendChild(st);
     }
 
     function afficher(focus) {
         if (banniere) return;
         style();
-        // Fenêtre au centre de l'écran : le visiteur doit faire un choix (Refuser ou Accepter, à égalité)
-        // avant de continuer. Aucun des deux boutons n'est mis en avant par rapport à l'autre.
+        // Bandeau en bas de l'écran : il ne bloque pas la page (le visiteur peut lire, défiler et remplir le formulaire
+        // sans répondre). Refuser et Accepter sont à égalité : même taille, même style.
         banniere = document.createElement('div');
-        banniere.className = 'cookies-voile';
+        banniere.className = 'cookies-bandeau';
+        banniere.setAttribute('role', 'region');
+        banniere.setAttribute('aria-label', 'Cookies et mesure publicitaire');
+        banniere.setAttribute('tabindex', '-1');
         banniere.innerHTML =
-            '<div class="cookies-bandeau" role="dialog" aria-modal="true" aria-labelledby="cookies-titre" tabindex="-1">' +
-            '<h2 id="cookies-titre">Cookies et mesure publicitaire</h2>' +
-            '<p>Nous aimerions mesurer l’effet de nos annonces Google et Meta (Facebook, Instagram) sur le nombre de demandes de démonstration. ' +
-            'Cela dépose des cookies de Google et de Meta sur votre navigateur. Vous pouvez refuser : le site fonctionne de la même façon. ' +
+            '<div class="cookies-int"><p>Nous mesurons l’effet de nos annonces Google et Meta (Facebook, Instagram) sur le nombre de demandes de démonstration, ' +
+            'avec des cookies de Google et de Meta. Vous pouvez refuser : le site fonctionne de la même façon. ' +
             '<a href="/confidentialite.html#cookies">En savoir plus</a></p>' +
             '<div class="cookies-actions"><button type="button" data-choix="non">Refuser</button>' +
             '<button type="button" data-choix="oui">Accepter</button></div></div>';
@@ -192,18 +202,9 @@
             var b = e.target.closest ? e.target.closest('button[data-choix]') : null;
             if (b) choisir(b.getAttribute('data-choix'));
         });
-        banniere.addEventListener('keydown', function (e) {   // le clavier reste dans la fenêtre tant qu'elle est ouverte
-            if (e.key !== 'Tab') return;
-            var els = banniere.querySelectorAll('button, a[href]');
-            var premier = els[0], dernier = els[els.length - 1];
-            if (e.shiftKey && document.activeElement === premier) { e.preventDefault(); dernier.focus(); }
-            else if (!e.shiftKey && document.activeElement === dernier) { e.preventDefault(); premier.focus(); }
-        });
-        defilementAvant = document.documentElement.style.overflow;
-        document.documentElement.style.overflow = 'hidden';
         document.body.appendChild(banniere);
-        var fenetre = banniere.querySelector('.cookies-bandeau');   // le focus va à la fenêtre, sans mettre un bouton en avant
-        if (fenetre) fenetre.focus();
+        document.documentElement.classList.add('cookies-ouverts');   // la page peut libérer le bas de l'écran (bouton fixe mobile)
+        if (focus) banniere.focus();                                  // ouverture volontaire (« Gérer mes cookies ») : le focus y va
     }
 
     function demarrer() {
