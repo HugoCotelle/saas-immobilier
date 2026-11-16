@@ -117,12 +117,17 @@ class DemandeDemo(ts.Base):
     def setUp(self):
         super().setUp()
         self.envoyes = []
+        backend._assurer_schema()
+        with backend._base() as (conn, cur):      # chaque test repart sans demande (une même adresse = doublon)
+            cur.execute("DELETE FROM demandes_demo")
+            conn.commit()
 
         def faux(destinataire, sujet, texte, html, **kw):
             self.envoyes.append({"to": destinataire, "sujet": sujet, "texte": texte, "kw": kw})
             return True
         for p in (mock.patch.object(backend, "_envoyer_email", side_effect=faux),
                   mock.patch.object(backend, "_envoi_configure", return_value=True),
+                  mock.patch.object(backend, "_messagerie_prete", return_value=True),
                   mock.patch.object(backend, "_lancer_en_arriere_plan", side_effect=lambda f, *a: f(*a))):
             p.start()
             self.addCleanup(p.stop)
@@ -136,6 +141,7 @@ class DemandeDemo(ts.Base):
         equipe, accuse = self.envoyes
         self.assertEqual(equipe["to"], "contact@zelyro.fr")
         self.assertEqual(equipe["sujet"], "Demande de démo Zelyro : Julie Morel (Agence Morel)")
+        self.assertEqual(equipe["kw"]["nom_expediteur"], "Zelyro · demandes de démo")   # jamais le nom du visiteur
         for attendu in ("julie@agence-morel.fr", "06 11 22 33 44", "Senlis", "2 à 5 personnes", "Ubiflow",
                         "plutôt le matin", "On aimerait voir le matching"):
             self.assertIn(attendu, equipe["texte"])
@@ -145,10 +151,10 @@ class DemandeDemo(ts.Base):
         self.assertNotIn("matching", accuse["texte"])          # rien de la saisie, hors prénom
 
     def test_origine_de_la_visite(self):
-        self.envoyer(origine="google / cpc, campagne 123, mot-clé logiciel agence")
-        self.assertIn("Origine : google / cpc, campagne 123, mot-clé logiciel agence", self.envoyes[0]["texte"])
+        self.envoyer(utm_source="google", utm_medium="cpc", utm_campaign="123", utm_term="logiciel agence")
+        self.assertIn("Origine : google, google, cpc, 123, logiciel agence", self.envoyes[0]["texte"])
         self.envoyer(email="autre@agence-morel.fr")
-        self.assertIn("Origine : accès direct ou site", self.envoyes[2]["texte"])
+        self.assertIn("Origine : direct", self.envoyes[2]["texte"])
 
     def test_champs_obligatoires_seulement(self):
         r = self.c.post("/api/v1/demande-demo", json={"nom": "Paul Roy", "email": "paul@exemple.fr", "agence": "Roy Immo"})
@@ -175,11 +181,15 @@ class DemandeDemo(ts.Base):
         self.assertEqual(self.envoyer().status_code, 200)
         self.assertEqual(self.envoyer().status_code, 429)
 
-    def test_echec_d_envoi_a_l_equipe_est_signale(self):
+    def test_echec_d_envoi_a_l_equipe_ne_perd_pas_la_demande(self):
+        # Nouveau comportement : la demande est enregistrée avant tout envoi ; une panne de messagerie ne la perd pas
+        # (elle reste visible dans l'espace administrateur et sera renvoyée). Voir test_demandes_demo.py.
         with mock.patch.object(backend, "_envoyer_email", return_value=False):
             r = self.envoyer()
-        self.assertEqual(r.status_code, 502)
-        self.assertIn("contact@zelyro.fr", r.get_json()["message"])
+        self.assertEqual(r.status_code, 200)
+        with backend._base() as (conn, cur):
+            cur.execute("SELECT notif_statut FROM demandes_demo WHERE lower(email) = 'julie@agence-morel.fr'")
+            self.assertEqual(cur.fetchone()['notif_statut'], 'echec')
 
     def test_mails_de_demo_ne_rebouclent_pas(self):
         for sujet in ("Demande de démo Zelyro : Julie Morel (Agence Morel)", "Fwd: Votre demande de démo Zelyro"):
@@ -628,6 +638,32 @@ class FormulaireAutomatique(Base):
         self.assertIn("Vous avez contacté l'agence.", m["texte"])
         self.assertIn("L’agence utilise vos coordonnées", m["texte"])
         self.assertNotIn("votre agence", m["texte"])
+
+    def test_formulaire_mentionne_le_suivi_d_ouverture_et_repond_a_l_agence(self):
+        adresse, t = self.adresse("cm-f34@x.fr")
+        self.sql("UPDATE users SET company_name = 'Agence Morel' WHERE email = 'cm-f34@x.fr'")
+        self.envoyer(adresse, sujet="Hello", texte="Bonjour, je veux visiter. Nom : Paul Durand\nTéléphone : 06 11 22 33 44")
+        m = self.mails_formulaire()[0]
+        self.assertIn("Agence Morel est informée lorsque vous l'ouvrez.", m["texte"])
+        self.assertEqual(m["kw"]["repondre_a"], ("cm-f34@x.fr", "Agence Morel"))
+
+    def test_formulaire_sans_nom_suivi_d_ouverture_generique(self):
+        adresse, t = self.adresse("cm-f35@x.fr")
+        self.sql("UPDATE users SET company_name = NULL, first_name = NULL WHERE email = 'cm-f35@x.fr'")
+        self.envoyer(adresse, sujet="Hello", texte="Bonjour, je veux visiter. Nom : Paul Durand\nTéléphone : 06 11 22 33 44")
+        m = self.mails_formulaire()[0]
+        self.assertIn("L’agence est informée lorsque vous l'ouvrez.", m["texte"])
+        self.assertNotIn("votre agence", m["texte"])
+
+    def test_objet_sans_balises_ni_caracteres_de_controle(self):
+        adresse, t = self.adresse("cm-f36@x.fr")
+        self.sql("UPDATE users SET company_name = 'Agence Morel' WHERE email = 'cm-f36@x.fr'")
+        self.envoyer(adresse, sujet="Contact pour « T3 <b>lumineux</b>, Senlis »",
+                     texte="Réf. A1\nBonjour. Nom : Paul Durand\nTéléphone : 06 11 22 33 44")
+        sujet = self.mails_formulaire()[0]["sujet"]
+        self.assertNotIn("<", sujet)
+        self.assertNotIn(">", sujet)
+        self.assertIn("Senlis", sujet)
 
     def test_plafond_par_jour(self):
         adresse, t = self.adresse("cm-f8@x.fr")

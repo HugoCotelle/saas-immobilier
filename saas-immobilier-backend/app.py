@@ -881,12 +881,15 @@ def _assurer_schema():
                        EXISTS (SELECT 1 FROM information_schema.columns
                                WHERE table_name = 'users' AND column_name = 'rapport_hebdo_sent_on'),
                        EXISTS (SELECT 1 FROM information_schema.columns
-                               WHERE table_name = 'inbound_emails' AND column_name = 'corps_spam')
+                               WHERE table_name = 'inbound_emails' AND column_name = 'corps_spam'),
+                       to_regclass('demandes_demo') IS NOT NULL,
+                       to_regclass('acquisition_depenses') IS NOT NULL,
+                       to_regclass('site_evenements') IS NOT NULL
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
                 for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
-                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS + _DDL_FACTURATION + _DDL_RECEPTION + _DDL_RGPD + _DDL_CONTACTS):
+                            + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS + _DDL_FACTURATION + _DDL_RECEPTION + _DDL_RGPD + _DDL_CONTACTS + _DDL_DEMANDES):
                     cur.execute(ddl)
             conn.commit()
             _schema_pret = True
@@ -1068,7 +1071,7 @@ def init_database(demo=False):
         ):
             cursor.execute(ddl)
         for ddl in (_DDL_COMPTES + _DDL_SUIVI + _DDL_CAPTURE_MAIL + _DDL_COMPLETION
-                    + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS + _DDL_FACTURATION + _DDL_RECEPTION + _DDL_RGPD + _DDL_CONTACTS):
+                    + _DDL_ACCES + _DDL_GMAIL + _DDL_EQUIPE + _DDL_BIENS + _DDL_SURFACE + _DDL_ACTIVITE + _DDL_ETAPE2 + _DDL_PUSH + _DDL_RDV + _DDL_STATS + _DDL_FACTURATION + _DDL_RECEPTION + _DDL_RGPD + _DDL_CONTACTS + _DDL_DEMANDES):
             cursor.execute(ddl)
 
         # Vérifier si vide
@@ -1612,11 +1615,120 @@ def change_password():
         return erreur_interne()
 
 
-# ===== DEMANDE DE DÉMONSTRATION (formulaire du site public) =====
+# ===== DEMANDES DE DÉMONSTRATION (formulaire du site public) =====
+#
+# Chaque demande est d'abord ENREGISTRÉE dans la base, puis l'équipe est prévenue par e-mail. Une panne de la
+# messagerie ne fait donc jamais perdre une demande : elle reste visible dans l'espace administrateur avec l'état de
+# sa notification, et peut être renvoyée (manuellement, ou automatiquement par /internal/demandes-demo/relance et à
+# chaque nouvelle demande). L'identifiant de la demande (« ref ») est tiré par le navigateur : renvoyer deux fois la
+# même demande (double clic, coupure réseau) ne crée qu'une ligne et n'envoie qu'un e-mail.
 
 DEMO_TAILLES = {'1': "1 personne", '2-5': "2 à 5 personnes", '6-15': "6 à 15 personnes", '16+': "16 personnes et plus"}
 DEMO_CRENEAUX = {'matin': "plutôt le matin", 'apres-midi': "plutôt l'après-midi", 'indifferent': "indifférent"}
+DEMO_FONCTIONS = {
+    'dirigeant': "Dirigeant ou gérant",
+    'directeur': "Directeur d'agence",
+    'responsable': "Responsable ou manager",
+    'negociateur': "Négociateur ou agent commercial",
+    'autre': "Autre fonction",
+}
+DEMO_DECIDEURS = ('dirigeant', 'directeur')
+DEMO_STATUTS = {
+    'nouvelle': "Nouvelle", 'qualifiee': "Qualifiée", 'demo_programmee': "Démo programmée",
+    'demo_realisee': "Démo réalisée", 'client': "Client", 'perdue': "Perdue", 'non_qualifiee': "Non qualifiée",
+}
+DEMO_ETAPES = ('nouvelle', 'qualifiee', 'demo_programmee', 'demo_realisee', 'client')   # l'ordre du parcours commercial
+DEMO_CANAUX = ('meta', 'google', 'linkedin', 'email', 'direct', 'autre')
+DEMO_NOTIF_MAX_TENTATIVES = 6          # au-delà, la notification est abandonnée (visible, renvoi manuel possible)
+DEMO_DOUBLON_JOURS = 7                 # même adresse e-mail dans cette fenêtre : même demande, pas de nouvel e-mail
+DEMO_CONSERVATION_JOURS = 3 * 365      # annoncé sur le formulaire : 3 ans après le dernier échange (hors clients)
+DEMO_EVENEMENTS = ('cta_clic', 'formulaire_debut', 'formulaire_erreur', 'video_lecture')   # mesure du parcours, sans donnée saisie
+_REF_DEMANDE_RE = re.compile(r"^[0-9a-f]{24}$")
+_UTM_RE = re.compile(r"[^A-Za-z0-9._ +|/:\-]")
 _CARACTERES_CONTROLE_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+_DDL_DEMANDES = (
+    """CREATE TABLE IF NOT EXISTS demandes_demo (
+        id BIGSERIAL PRIMARY KEY,
+        ref VARCHAR(24) NOT NULL UNIQUE,
+        cree_le TIMESTAMP NOT NULL,
+        nom VARCHAR(100) NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        telephone VARCHAR(30),
+        agence VARCHAR(120) NOT NULL,
+        fonction VARCHAR(80),
+        decideur BOOLEAN,
+        ville VARCHAR(80),
+        taille VARCHAR(10),
+        outil VARCHAR(80),
+        creneau VARCHAR(12),
+        message TEXT,
+        source VARCHAR(120),
+        medium VARCHAR(120),
+        campagne VARCHAR(120),
+        contenu VARCHAR(120),
+        terme VARCHAR(120),
+        canal VARCHAR(20) NOT NULL DEFAULT 'direct',
+        clic_pub BOOLEAN NOT NULL DEFAULT FALSE,
+        page VARCHAR(120),
+        referent VARCHAR(120),
+        appareil VARCHAR(10),
+        statut VARCHAR(20) NOT NULL DEFAULT 'nouvelle',
+        qualifiee_le TIMESTAMP,
+        demo_programmee_le TIMESTAMP,
+        demo_prevue_le TIMESTAMP,
+        demo_realisee_le TIMESTAMP,
+        client_le TIMESTAMP,
+        perdue_le TIMESTAMP,
+        note TEXT,
+        dernier_contact_le TIMESTAMP,
+        nb_soumissions INTEGER NOT NULL DEFAULT 1,
+        derniere_soumission_le TIMESTAMP,
+        notif_statut VARCHAR(10) NOT NULL DEFAULT 'attente',
+        notif_tentatives INTEGER NOT NULL DEFAULT 0,
+        notif_erreur VARCHAR(200),
+        notif_derniere_tentative TIMESTAMP,
+        notif_envoyee_le TIMESTAMP,
+        accuse_statut VARCHAR(10) NOT NULL DEFAULT 'attente',
+        accuse_tentatives INTEGER NOT NULL DEFAULT 0,
+        accuse_derniere_tentative TIMESTAMP,
+        accuse_envoye_le TIMESTAMP,
+        CONSTRAINT demandes_demo_statut_ck CHECK (statut IN
+            ('nouvelle','qualifiee','demo_programmee','demo_realisee','client','perdue','non_qualifiee')),
+        CONSTRAINT demandes_demo_notif_ck CHECK (notif_statut IN ('attente','envoyee','echec','abandon')),
+        CONSTRAINT demandes_demo_accuse_ck CHECK (accuse_statut IN ('attente','envoye','echec','abandon'))
+    )""",
+    "CREATE INDEX IF NOT EXISTS demandes_demo_cree_le_idx ON demandes_demo (cree_le)",
+    "CREATE INDEX IF NOT EXISTS demandes_demo_email_idx ON demandes_demo (lower(email), cree_le)",
+    "CREATE INDEX IF NOT EXISTS demandes_demo_canal_idx ON demandes_demo (canal, cree_le)",
+    # Dépenses publicitaires saisies à la main : elles servent à calculer le coût d'acquisition par canal.
+    """CREATE TABLE IF NOT EXISTS acquisition_depenses (
+        id BIGSERIAL PRIMARY KEY,
+        canal VARCHAR(20) NOT NULL,
+        debut DATE NOT NULL,
+        fin DATE NOT NULL,
+        montant_eur NUMERIC(10,2) NOT NULL CHECK (montant_eur >= 0),
+        note VARCHAR(200),
+        cree_le TIMESTAMP NOT NULL,
+        CHECK (fin >= debut)
+    )""",
+    "CREATE INDEX IF NOT EXISTS acquisition_depenses_debut_idx ON acquisition_depenses (debut)",
+    # Étapes du parcours sur la page de démonstration (clic sur le bouton, début du formulaire, vidéo, erreurs).
+    # Même principe que site_visites : aucune adresse IP, empreinte qui change chaque jour, et jamais ce que le visiteur
+    # a saisi (pour une erreur, seul le nom du champ est noté).
+    """CREATE TABLE IF NOT EXISTS site_evenements (
+        id BIGSERIAL PRIMARY KEY,
+        visiteur CHAR(16) NOT NULL,
+        evenement VARCHAR(20) NOT NULL,
+        detail VARCHAR(20),
+        page VARCHAR(120) NOT NULL,
+        source VARCHAR(80),
+        campagne VARCHAR(80),
+        appareil VARCHAR(10),
+        cree_le TIMESTAMP NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS site_evenements_cree_le_idx ON site_evenements (cree_le)",
+)
 
 
 def _ligne_demo(valeur, maxi):
@@ -1625,20 +1737,220 @@ def _ligne_demo(valeur, maxi):
     return re.sub(r"\s+", " ", v).strip()[:maxi]
 
 
+def _utm_demo(valeur):
+    """Paramètre de campagne : lettres, chiffres et quelques signes seulement, 120 caractères au plus."""
+    return _UTM_RE.sub('', _ligne_demo(valeur, 160))[:120] or None
+
+
+def _hote_referent(brut):
+    brut = str(brut or '')[:300]
+    try:
+        hote = (_urlparse(brut if '//' in brut else '//' + brut).hostname or '').lower()
+    except ValueError:
+        return None
+    return (hote[4:] if hote.startswith('www.') else hote)[:120] or None
+
+
+def _canal_demande(source, medium, clic_pub, referent):
+    """Canal d'acquisition de la demande, d'après le lien d'arrivée (jamais d'après un cookie)."""
+    s = (source or '').lower()
+    m = (medium or '').lower()
+    r = (referent or '').lower()
+    if clic_pub == 'meta' or s in ('facebook', 'fb', 'instagram', 'ig', 'meta') or 'facebook' in s or 'instagram' in s:
+        return 'meta'
+    if clic_pub == 'google' or s in ('google', 'googleads', 'adwords') or m in ('cpc', 'ppc') and 'google' in s:
+        return 'google'
+    if 'linkedin' in s or 'linkedin' in r or r.endswith('lnkd.in'):
+        return 'linkedin'
+    if m in ('email', 'e-mail', 'newsletter') or s in ('email', 'e-mail', 'newsletter', 'harvey'):
+        return 'email'
+    if s or m:
+        return 'autre'
+    if r and not r.endswith('zelyro.fr'):
+        return 'autre'
+    return 'direct'
+
+
+def _destinataire_demandes():
+    return (os.getenv("DEMO_NOTIFY_EMAIL") or "contact@zelyro.fr").strip()
+
+
+def _messagerie_prete():
+    """Les deux réglages indispensables pour envoyer un e-mail (la clé Brevo et l'adresse d'expédition authentifiée)."""
+    return all((os.getenv(k) or "").strip() for k in ("BREVO_API_KEY", "MAIL_FROM"))
+
+
+def _enregistrer_demande(d):
+    """Enregistre la demande (ou reconnaît un envoi en double). Renvoie (id, ref, doublon).
+    doublon vrai : la même adresse a déjà fait une demande dans les DEMO_DOUBLON_JOURS derniers jours,
+    ou ce même identifiant a déjà été enregistré ; aucune nouvelle ligne, aucun nouvel e-mail."""
+    maintenant = _maintenant()
+    with _base() as (conn, cur):
+        # Verrou sur l'adresse : deux envois simultanés (double clic) ne créent pas deux lignes.
+        cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ('demande-demo:' + d['email'],))
+        cur.execute("SELECT id, ref FROM demandes_demo WHERE ref = %s", (d['ref'],))
+        meme = cur.fetchone()
+        if meme:
+            return meme['id'], meme['ref'], False       # même envoi rejoué : succès, comme le premier
+        cur.execute("""SELECT id, ref FROM demandes_demo WHERE lower(email) = %s AND cree_le > %s
+                       ORDER BY id DESC LIMIT 1""",
+                    (d['email'], maintenant - timedelta(days=DEMO_DOUBLON_JOURS)))
+        recent = cur.fetchone()
+        if recent:
+            cur.execute("""UPDATE demandes_demo SET nb_soumissions = nb_soumissions + 1, derniere_soumission_le = %s
+                           WHERE id = %s""", (maintenant, recent['id']))
+            conn.commit()
+            return recent['id'], recent['ref'], True
+        cur.execute("""
+            INSERT INTO demandes_demo (ref, cree_le, nom, email, telephone, agence, fonction, decideur, ville, taille,
+                outil, creneau, message, source, medium, campagne, contenu, terme, canal, clic_pub, page, referent,
+                appareil, derniere_soumission_le)
+            VALUES (%(ref)s, %(maintenant)s, %(nom)s, %(email)s, %(telephone)s, %(agence)s, %(fonction)s, %(decideur)s,
+                %(ville)s, %(taille)s, %(outil)s, %(creneau)s, %(message)s, %(source)s, %(medium)s, %(campagne)s,
+                %(contenu)s, %(terme)s, %(canal)s, %(clic_pub)s, %(page)s, %(referent)s, %(appareil)s, %(maintenant)s)
+            RETURNING id""", dict(d, maintenant=maintenant))
+        nouvelle = cur.fetchone()['id']
+        conn.commit()
+        return nouvelle, d['ref'], False
+
+
+def _lignes_demande(r):
+    """Le contenu de l'e-mail adressé à l'équipe."""
+    lignes = [
+        f"Nom : {r['nom']}", f"Fonction : {r['fonction'] or 'non renseignée'}", f"Agence : {r['agence']}",
+        f"E-mail : {r['email']}", f"Téléphone : {r['telephone'] or 'non renseigné'}",
+    ]
+    if r.get('ville'):
+        lignes.append(f"Ville : {r['ville']}")
+    if r.get('taille'):
+        lignes.append(f"Taille de l'équipe : {DEMO_TAILLES.get(r['taille'], r['taille'])}")
+    if r.get('outil'):
+        lignes.append(f"Outil actuel : {r['outil']}")
+    if r.get('creneau'):
+        lignes.append(f"Créneau souhaité : {DEMO_CRENEAUX.get(r['creneau'], r['creneau'])}")
+    origine = ", ".join(x for x in (r.get('canal'), r.get('source'), r.get('medium'), r.get('campagne'),
+                                     r.get('contenu'), r.get('terme')) if x)
+    lignes.append(f"Origine : {origine or 'accès direct'}")
+    if r.get('message'):
+        lignes.append("Message :\n" + r['message'])
+    base = (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
+    if base:
+        lignes.append(f"Fiche dans l'espace administrateur : {base}/admin-demandes.html")
+    lignes.append(f"Référence : {r['ref']}")
+    return lignes
+
+
 def _accuse_demande_demo(email, prenom):
     """Accusé de réception au visiteur. Texte fixe : rien de ce qu'il a saisi n'y est repris, sauf son prénom,
     pour que le formulaire ne serve pas à faire écrire n'importe quoi à Zelyro."""
+    paragraphes = [
+        f"Bonjour {prenom}," if prenom else "Bonjour,",
+        "Nous avons bien reçu votre demande de démonstration de Zelyro.",
+        "Nous revenons vers vous très vite, par e-mail ou par téléphone, pour convenir d'un créneau de 20 minutes.",
+        "Si vous n'êtes pas à l'origine de cette demande, ignorez simplement ce message.",
+    ]
+    texte, html = _gabarit_email("Votre demande de démonstration", paragraphes)
+    return _envoyer_email(email, "Votre demande de démo Zelyro", texte, html)
+
+
+def _traiter_notifications(demande_id=None, limite=25, forcer=False):
+    """Envoie les e-mails en attente ou en échec, un par un. Chaque envoi est « réservé » par une mise à jour
+    atomique avant de partir : deux processus (ou deux appels) ne peuvent pas envoyer deux fois le même e-mail.
+    forcer : renvoi manuel, ignore le délai d'attente et le nombre maximal de tentatives.
+    Renvoie le nombre d'e-mails d'équipe partis."""
+    maintenant = _maintenant()
+    envoyees = 0
+    with _base() as (conn, cur):
+        if demande_id is not None:
+            cur.execute("SELECT id FROM demandes_demo WHERE id = %s", (demande_id,))
+        else:
+            cur.execute("""SELECT id FROM demandes_demo
+                           WHERE (notif_statut IN ('attente','echec') AND notif_tentatives < %s)
+                              OR (accuse_statut IN ('attente','echec') AND accuse_tentatives < %s)
+                           ORDER BY id LIMIT %s""", (DEMO_NOTIF_MAX_TENTATIVES, DEMO_NOTIF_MAX_TENTATIVES, limite))
+        ids = [x['id'] for x in cur.fetchall()]
+    for i in ids:
+        try:
+            envoyees += _notifier_une_demande(i, maintenant, forcer)
+        except Exception:
+            app.logger.exception("Demande de démo %s : notification impossible (retentée plus tard)", i)
+    return envoyees
+
+
+def _notifier_une_demande(demande_id, maintenant, forcer):
+    envoye = 0
+    with _base() as (conn, cur):
+        # Réservation de l'e-mail d'équipe : une seule requête gagne, les autres ne trouvent plus la ligne.
+        delai = "TRUE" if forcer else "(notif_derniere_tentative IS NULL OR notif_derniere_tentative < %(seuil)s)"
+        plafond = "TRUE" if forcer else "notif_tentatives < %(maxi)s"
+        cur.execute(f"""UPDATE demandes_demo SET notif_tentatives = notif_tentatives + 1, notif_derniere_tentative = %(maintenant)s
+                        WHERE id = %(id)s AND notif_statut IN ('attente','echec','abandon') AND {delai} AND {plafond}
+                        RETURNING *""",
+                    {"id": demande_id, "maintenant": maintenant, "maxi": DEMO_NOTIF_MAX_TENTATIVES,
+                     "seuil": maintenant - timedelta(minutes=5)})
+        ligne = cur.fetchone()
+        conn.commit()
+    if ligne:
+        ok, erreur = False, None
+        if not _messagerie_prete():
+            erreur = "Envoi non configuré (BREVO_API_KEY ou MAIL_FROM manquant)"
+        else:
+            texte, html = _gabarit_email("Nouvelle demande de démonstration", _lignes_demande(ligne))
+            sujet = f"Demande de démo Zelyro : {ligne['nom']} ({ligne['agence']})"
+            try:
+                ok = _envoyer_email(_destinataire_demandes(), sujet, texte, html,
+                                    nom_expediteur="Zelyro · demandes de démo",
+                                    repondre_a=(ligne['email'], ligne['nom']))
+                if not ok:
+                    erreur = "Le service d'envoi a refusé le message (voir les journaux du serveur)"
+            except Exception:
+                app.logger.exception("Demande de démo %s : envoi impossible", demande_id)
+                erreur = "Envoi impossible (erreur du serveur)"
+        with _base() as (conn, cur):
+            if ok:
+                cur.execute("""UPDATE demandes_demo SET notif_statut = 'envoyee', notif_erreur = NULL, notif_envoyee_le = %s
+                               WHERE id = %s""", (_maintenant(), demande_id))
+            else:
+                cur.execute("""UPDATE demandes_demo SET notif_erreur = %s,
+                                   notif_statut = CASE WHEN notif_tentatives >= %s THEN 'abandon' ELSE 'echec' END
+                               WHERE id = %s""", ((erreur or '')[:200], DEMO_NOTIF_MAX_TENTATIVES, demande_id))
+            conn.commit()
+        envoye = 1 if ok else 0
+    # Accusé de réception au visiteur : indépendant de l'e-mail d'équipe.
+    with _base() as (conn, cur):
+        delai = "TRUE" if forcer else "(accuse_derniere_tentative IS NULL OR accuse_derniere_tentative < %(seuil)s)"
+        plafond = "TRUE" if forcer else "accuse_tentatives < %(maxi)s"
+        cur.execute(f"""UPDATE demandes_demo SET accuse_tentatives = accuse_tentatives + 1, accuse_derniere_tentative = %(maintenant)s
+                        WHERE id = %(id)s AND accuse_statut IN ('attente','echec','abandon') AND {delai} AND {plafond}
+                        RETURNING email, nom""",
+                    {"id": demande_id, "maintenant": maintenant, "maxi": DEMO_NOTIF_MAX_TENTATIVES,
+                     "seuil": maintenant - timedelta(minutes=5)})
+        acc = cur.fetchone()
+        conn.commit()
+    if acc:
+        ok = False
+        if _messagerie_prete():
+            try:
+                ok = _accuse_demande_demo(acc['email'], acc['nom'].split(' ')[0][:40])
+            except Exception:
+                app.logger.exception("Accusé de réception de démo impossible")
+        with _base() as (conn, cur):
+            cur.execute("""UPDATE demandes_demo SET accuse_envoye_le = CASE WHEN %(ok)s THEN %(maintenant)s END,
+                               accuse_statut = CASE WHEN %(ok)s THEN 'envoye'
+                                                    WHEN accuse_tentatives >= %(maxi)s THEN 'abandon' ELSE 'echec' END
+                           WHERE id = %(id)s""",
+                        {"ok": ok, "maintenant": _maintenant(), "maxi": DEMO_NOTIF_MAX_TENTATIVES, "id": demande_id})
+            conn.commit()
+    return envoye
+
+
+def _notifier_en_arriere_plan(demande_id):
+    """Envoie les e-mails de cette demande, puis profite du passage pour relancer ce qui était resté en échec."""
     try:
-        paragraphes = [
-            f"Bonjour {prenom}," if prenom else "Bonjour,",
-            "Nous avons bien reçu votre demande de démonstration de Zelyro.",
-            "Nous revenons vers vous très vite, par e-mail ou par téléphone, pour convenir d'un créneau.",
-            "Si vous n'êtes pas à l'origine de cette demande, ignorez simplement ce message.",
-        ]
-        texte, html = _gabarit_email("Votre demande de démonstration", paragraphes)
-        _envoyer_email(email, "Votre demande de démo Zelyro", texte, html)
+        _traiter_notifications(demande_id=demande_id, forcer=False)
+        _traiter_notifications(limite=10)
     except Exception:
-        app.logger.exception("Accusé de réception de démo impossible")
+        app.logger.exception("Demande de démo %s : notifications impossibles", demande_id)
 
 
 @app.route('/api/v1/demande-demo', methods=['POST'])
@@ -1647,18 +1959,21 @@ def _accuse_demande_demo(email, prenom):
 @limiter.limit("2 per day", key_func=_cle_email, deduct_when=lambda r: r.status_code == 200)
 def demande_demo():
     """Demande de démonstration envoyée depuis le site public. Public, donc limité par IP et par adresse, avec un
-    champ piège (« site_web ») que seul un robot remplit. L'équipe reçoit la demande par e-mail, le visiteur un accusé
-    de réception. Si l'envoi à l'équipe échoue on le dit : une demande ne doit pas se perdre en silence."""
+    champ piège (« site_web ») que seul un robot remplit.
+
+    La réponse 200 signifie « la demande est ENREGISTRÉE en base » : le site ne mesure une demande (Lead Meta et
+    Google Ads) que dans ce cas. L'e-mail à l'équipe et l'accusé de réception partent ensuite, en arrière-plan ;
+    s'ils échouent, la demande n'est pas perdue (voir _traiter_notifications)."""
     data = request.get_json(silent=True) or {}
     if _ligne_demo(data.get('site_web'), 50):
         return jsonify({"message": "Merci, votre demande a bien été envoyée."}), 200     # robot : on fait semblant
     nom = _ligne_demo(data.get('nom'), 100)
     email = _ligne_demo(data.get('email'), 255).lower()
     agence = _ligne_demo(data.get('agence'), 120)
-    ville = _ligne_demo(data.get('ville'), 80)
     telephone = _ligne_demo(data.get('telephone'), 30)
+    fonction_cle = _ligne_demo(data.get('fonction'), 80)
+    ville = _ligne_demo(data.get('ville'), 80)
     outil = _ligne_demo(data.get('outil'), 80)
-    origine = _ligne_demo(data.get('origine'), 200)
     message = _CARACTERES_CONTROLE_RE.sub('', str(data.get('message') or '')).strip()[:1500]
     taille = str(data.get('taille') or '')
     creneau = str(data.get('creneau') or '')
@@ -1674,26 +1989,448 @@ def demande_demo():
         return jsonify({"message": "Taille d'équipe invalide."}), 400
     if creneau and creneau not in DEMO_CRENEAUX:
         return jsonify({"message": "Créneau invalide."}), 400
-    if not _envoi_configure():
-        return jsonify({"message": "L'envoi est momentanément indisponible. Écrivez-nous à contact@zelyro.fr."}), 503
+    ref = str(data.get('id_demande') or '')
+    if not _REF_DEMANDE_RE.match(ref):
+        ref = secrets.token_hex(12)
+    fonction = DEMO_FONCTIONS.get(fonction_cle, fonction_cle) or None
+    source, medium = _utm_demo(data.get('utm_source')), _utm_demo(data.get('utm_medium'))
+    if not source:
+        source = _utm_demo(data.get('origine'))      # ancien formulaire, encore en cache dans certains navigateurs
+    clic_pub = str(data.get('clic_pub') or '')
+    clic_pub = clic_pub if clic_pub in ('meta', 'google') else ''
+    referent = _hote_referent(data.get('referent'))
+    d = {
+        "ref": ref, "nom": nom, "email": email, "telephone": telephone or None, "agence": agence,
+        "fonction": fonction, "decideur": (fonction_cle in DEMO_DECIDEURS) if fonction_cle else None,
+        "ville": ville or None, "taille": taille or None, "outil": outil or None, "creneau": creneau or None,
+        "message": message or None, "source": source, "medium": medium,
+        "campagne": _utm_demo(data.get('utm_campaign')), "contenu": _utm_demo(data.get('utm_content')),
+        "terme": _utm_demo(data.get('utm_term')), "canal": _canal_demande(source, medium, clic_pub, referent),
+        "clic_pub": bool(clic_pub), "page": _page_stats(data.get('page')) or '/demo-agences',
+        "referent": referent, "appareil": _appareil_stats(data.get('w'), request.headers.get('User-Agent', '')),
+    }
+    try:
+        _assurer_schema()
+        demande_id, ref, doublon = _enregistrer_demande(d)
+    except Exception:
+        app.logger.exception("Demande de démo non enregistrée")
+        # Rien n'est enregistré : on le dit, et le site ne compte aucune demande.
+        return jsonify({"message": "Votre demande n'a pas pu être enregistrée. Écrivez-nous à contact@zelyro.fr."}), 503
+    if not doublon:
+        _lancer_en_arriere_plan(_notifier_en_arriere_plan, demande_id)
+    return jsonify({"message": "Merci, votre demande a bien été envoyée. Nous revenons vers vous très vite.",
+                    "ref": ref, "doublon": doublon}), 200
 
-    destinataire = (os.getenv("DEMO_NOTIFY_EMAIL") or "contact@zelyro.fr").strip()
-    lignes = [
-        f"Nom : {nom}", f"E-mail : {email}", f"Téléphone : {telephone or 'non renseigné'}",
-        f"Agence : {agence}", f"Ville : {ville or 'non renseignée'}",
-        f"Taille de l'équipe : {DEMO_TAILLES.get(taille, 'non renseignée')}",
-        f"Outil actuel : {outil or 'non renseigné'}",
-        f"Créneau souhaité : {DEMO_CRENEAUX.get(creneau, 'non renseigné')}",
-        f"Origine : {origine or 'accès direct ou site'}",
-    ]
-    if message:
-        lignes.append("Message :\n" + message)
-    texte, html = _gabarit_email("Nouvelle demande de démonstration", lignes)
-    if not _envoyer_email(destinataire, f"Demande de démo Zelyro : {nom} ({agence})", texte, html,
-                          nom_expediteur=nom, repondre_a=(email, nom)):
-        return jsonify({"message": "Votre demande n'a pas pu être envoyée. Écrivez-nous à contact@zelyro.fr."}), 502
-    _lancer_en_arriere_plan(_accuse_demande_demo, email, nom.split(' ')[0][:40])
-    return jsonify({"message": "Merci, votre demande a bien été envoyée. Nous revenons vers vous très vite."}), 200
+
+@app.route('/public/stats/evenement', methods=['POST'])
+@limiter.limit("120 per hour")
+def stats_evenement():
+    """Une étape du parcours sur la page de démonstration (bouton cliqué, formulaire commencé, vidéo lancée, erreur).
+    Répond toujours 204. Mêmes règles que la mesure d'audience : rien pour qui refuse le suivi, jamais d'adresse IP,
+    et jamais ce que le visiteur a saisi."""
+    try:
+        lu = _lire_passage()
+        if lu is None:
+            return '', 204
+        donnees, page = lu
+        evenement = str(donnees.get('e') or '')
+        if evenement not in DEMO_EVENEMENTS:
+            return '', 204
+        detail = re.sub(r'[^a-z0-9_]', '', str(donnees.get('d') or '').lower())[:20] or None
+        agent = request.headers.get('User-Agent', '')
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("""INSERT INTO site_evenements (visiteur, evenement, detail, page, source, campagne, appareil, cree_le)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                        (_empreinte_visiteur(get_remote_address(), agent), evenement, detail, page,
+                         _source_stats(donnees), _campagne_stats(donnees), _appareil_stats(donnees.get('w'), agent),
+                         _maintenant()))
+            conn.commit()
+    except Exception:
+        app.logger.exception("Statistiques : événement non enregistré")
+    return '', 204
+
+
+@app.route('/internal/demandes-demo/relance', methods=['POST'])
+@limiter.exempt
+def relancer_demandes_interne():
+    """Renvoie les notifications en attente ou en échec. À appeler toutes les 15 minutes par la tâche planifiée
+    (en-tête X-Cron-Key = CRON_SECRET, comme /internal/purge)."""
+    cle = (os.getenv("CRON_SECRET") or "").strip()
+    if not cle or not secrets.compare_digest(request.headers.get('X-Cron-Key', '').encode('utf-8'), cle.encode('utf-8')):
+        return jsonify({"message": "Not found"}), 404
+    try:
+        _assurer_schema()
+        return jsonify({"envoyees": _traiter_notifications(limite=50)}), 200
+    except Exception:
+        return erreur_interne()
+
+
+# ----- Espace administrateur : section Acquisition / Demandes de démonstration -----
+
+def _json_demande(r):
+    return {
+        "id": r['id'], "ref": r['ref'], "cree_le": _iso(r['cree_le']), "nom": r['nom'], "email": r['email'],
+        "telephone": r['telephone'], "agence": r['agence'], "fonction": r['fonction'], "decideur": r['decideur'],
+        "ville": r['ville'], "taille": r['taille'], "outil": r['outil'], "creneau": r['creneau'], "message": r['message'],
+        "source": r['source'], "medium": r['medium'], "campagne": r['campagne'], "contenu": r['contenu'],
+        "terme": r['terme'], "canal": r['canal'], "clic_pub": r['clic_pub'], "page": r['page'],
+        "referent": r['referent'], "appareil": r['appareil'], "statut": r['statut'],
+        "qualifiee_le": _iso(r['qualifiee_le']), "demo_programmee_le": _iso(r['demo_programmee_le']),
+        "demo_prevue_le": _iso(r['demo_prevue_le']), "demo_realisee_le": _iso(r['demo_realisee_le']),
+        "client_le": _iso(r['client_le']), "perdue_le": _iso(r['perdue_le']), "note": r['note'],
+        "dernier_contact_le": _iso(r['dernier_contact_le']), "nb_soumissions": r['nb_soumissions'],
+        "notif_statut": r['notif_statut'], "notif_tentatives": r['notif_tentatives'], "notif_erreur": r['notif_erreur'],
+        "notif_envoyee_le": _iso(r['notif_envoyee_le']), "accuse_statut": r['accuse_statut'],
+        "accuse_envoye_le": _iso(r['accuse_envoye_le']),
+    }
+
+
+def _filtre_demandes():
+    """Conditions SQL communes à la liste, au résumé et à l'export, d'après les paramètres de l'adresse."""
+    conditions, params = [], []
+    try:
+        jours = int(request.args.get('jours', 90))
+    except ValueError:
+        jours = 90
+    if 0 < jours <= 3650:
+        conditions.append("cree_le >= %s")
+        params.append(_maintenant() - timedelta(days=jours))
+    statut = request.args.get('statut', '')
+    if statut in DEMO_STATUTS:
+        conditions.append("statut = %s")
+        params.append(statut)
+    canal = request.args.get('canal', '')
+    if canal in DEMO_CANAUX:
+        conditions.append("canal = %s")
+        params.append(canal)
+    q = _ligne_demo(request.args.get('q'), 80).lower()
+    if q:
+        conditions.append("(lower(nom) LIKE %s OR lower(email) LIKE %s OR lower(agence) LIKE %s)")
+        params += ['%' + q.replace('%', '').replace('_', '') + '%'] * 3
+    return (" WHERE " + " AND ".join(conditions)) if conditions else "", params, jours
+
+
+@app.route('/admin/demandes-demo', methods=['GET'])
+@limiter.limit("600 per hour", key_func=_cle_utilisateur)
+@admin_required
+def admin_demandes_liste():
+    """Les demandes de démonstration reçues, les plus récentes d'abord (500 au plus)."""
+    try:
+        _assurer_schema()
+        where, params, _ = _filtre_demandes()
+        with _base() as (conn, cur):
+            cur.execute(f"SELECT * FROM demandes_demo{where} ORDER BY id DESC LIMIT 500", params)
+            lignes = [_json_demande(r) for r in cur.fetchall()]
+        return jsonify({"demandes": lignes, "statuts": DEMO_STATUTS, "canaux": list(DEMO_CANAUX),
+                        "messagerie_prete": _messagerie_prete(), "destinataire": _destinataire_demandes()}), 200
+    except Exception:
+        return erreur_interne()
+
+
+def _ratio(a, b, decimales=1):
+    return round(100.0 * a / b, decimales) if b else None
+
+
+def _diviser(montant, n):
+    return round(float(montant) / n, 2) if (n and montant is not None) else None
+
+
+@app.route('/admin/demandes-demo/resume', methods=['GET'])
+@limiter.limit("300 per hour", key_func=_cle_utilisateur)
+@admin_required
+def admin_demandes_resume():
+    """Entonnoir commercial par canal (demandes, qualifiées, démos programmées et réalisées, clients), taux de
+    transformation, et coût d'acquisition quand les dépenses sont saisies. Source de vérité commerciale de Zelyro :
+    elle ne dépend ni de Meta ni de Google."""
+    try:
+        _assurer_schema()
+        try:
+            jours = max(1, min(int(request.args.get('jours', 30)), 3650))
+        except ValueError:
+            jours = 30
+        maintenant = _maintenant()
+        debut = maintenant - timedelta(days=jours)
+        with _base() as (conn, cur):
+            cur.execute("""SELECT canal,
+                    count(*) AS demandes,
+                    count(*) FILTER (WHERE qualifiee_le IS NOT NULL) AS qualifiees,
+                    count(*) FILTER (WHERE demo_programmee_le IS NOT NULL) AS programmees,
+                    count(*) FILTER (WHERE demo_realisee_le IS NOT NULL) AS realisees,
+                    count(*) FILTER (WHERE client_le IS NOT NULL) AS clients,
+                    count(*) FILTER (WHERE statut = 'perdue') AS perdues,
+                    count(*) FILTER (WHERE decideur IS TRUE) AS decideurs
+                FROM demandes_demo WHERE cree_le >= %s GROUP BY canal""", (debut,))
+            par_canal = {r['canal']: r for r in cur.fetchall()}
+            cur.execute("""SELECT canal, COALESCE(sum(montant_eur), 0) AS total FROM acquisition_depenses
+                           WHERE debut >= %s AND debut <= %s GROUP BY canal""", (debut.date(), maintenant.date()))
+            depenses = {r['canal']: float(r['total']) for r in cur.fetchall()}
+            cur.execute("""SELECT count(*) FILTER (WHERE notif_statut IN ('echec','abandon')) AS notif_echec,
+                                  count(*) FILTER (WHERE notif_statut = 'attente') AS notif_attente,
+                                  count(*) FILTER (WHERE accuse_statut IN ('echec','abandon')) AS accuse_echec
+                           FROM demandes_demo""")
+            sante = cur.fetchone()
+            cur.execute("""SELECT evenement, count(DISTINCT visiteur) AS visiteurs FROM site_evenements
+                           WHERE cree_le >= %s AND page = '/demo-agences' GROUP BY evenement""", (debut,))
+            etapes = {r['evenement']: r['visiteurs'] for r in cur.fetchall()}
+            cur.execute("""SELECT count(DISTINCT visiteur) AS visiteurs FROM site_visites
+                           WHERE cree_le >= %s AND page = '/demo-agences'""", (debut,))
+            visiteurs_page = cur.fetchone()['visiteurs']
+        canaux = []
+        for canal in sorted(set(par_canal) | set(depenses), key=lambda c: -(par_canal.get(c, {}).get('demandes') or 0)):
+            r = par_canal.get(canal) or {k: 0 for k in
+                                         ('demandes', 'qualifiees', 'programmees', 'realisees', 'clients', 'perdues', 'decideurs')}
+            depense = depenses.get(canal)
+            canaux.append({
+                "canal": canal, "demandes": r['demandes'], "qualifiees": r['qualifiees'], "programmees": r['programmees'],
+                "realisees": r['realisees'], "clients": r['clients'], "perdues": r['perdues'], "decideurs": r['decideurs'],
+                "taux_qualification": _ratio(r['qualifiees'], r['demandes']),
+                "taux_demo": _ratio(r['realisees'], r['demandes']),
+                "taux_client": _ratio(r['clients'], r['demandes']),
+                "depense_eur": depense,
+                "cout_par_demande": _diviser(depense, r['demandes']),
+                "cout_par_qualifiee": _diviser(depense, r['qualifiees']),
+                "cout_par_demo": _diviser(depense, r['realisees']),
+                "cout_acquisition": _diviser(depense, r['clients']),
+            })
+        total = {k: sum(c[k] for c in canaux) for k in ('demandes', 'qualifiees', 'programmees', 'realisees', 'clients', 'perdues')}
+        return jsonify({
+            "jours": jours, "total": total, "canaux": canaux,
+            "sante": {"notifications_en_echec": sante['notif_echec'], "notifications_en_attente": sante['notif_attente'],
+                      "accuses_en_echec": sante['accuse_echec'], "messagerie_prete": _messagerie_prete()},
+            "parcours_page": {"visiteurs": visiteurs_page, "clic_bouton": etapes.get('cta_clic', 0),
+                              "formulaire_commence": etapes.get('formulaire_debut', 0),
+                              "erreurs_formulaire": etapes.get('formulaire_erreur', 0),
+                              "video_lue": etapes.get('video_lecture', 0), "demandes": total['demandes']},
+        }), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/admin/demandes-demo/<int:demande_id>', methods=['PUT'])
+@limiter.limit("300 per hour", key_func=_cle_utilisateur)
+@admin_required
+def admin_demande_modifier(demande_id):
+    """Fait avancer une demande dans le parcours commercial, ou la note. Corps : {statut?, note?, demo_prevue_le?}."""
+    data = request.get_json(silent=True) or {}
+    try:
+        _assurer_schema()
+        maintenant = _maintenant()
+        with _base() as (conn, cur):
+            cur.execute("SELECT * FROM demandes_demo WHERE id = %s FOR UPDATE", (demande_id,))
+            r = cur.fetchone()
+            if not r:
+                return jsonify({"message": "Not found"}), 404
+            sets, params = [], []
+            statut = data.get('statut')
+            if statut is not None:
+                if statut not in DEMO_STATUTS:
+                    return jsonify({"message": "Statut invalide"}), 400
+                sets.append("statut = %s"); params.append(statut)
+                if statut in DEMO_ETAPES:
+                    rang = DEMO_ETAPES.index(statut)
+                    for i, etape in enumerate(DEMO_ETAPES[1:], start=1):
+                        colonne = etape + '_le'
+                        if i <= rang:
+                            sets.append(f"{colonne} = COALESCE({colonne}, %s)"); params.append(maintenant)
+                        else:
+                            sets.append(f"{colonne} = NULL")
+                    if rang < DEMO_ETAPES.index('demo_programmee'):
+                        sets.append("demo_prevue_le = NULL")
+                    sets.append("perdue_le = NULL")
+                elif statut == 'perdue':
+                    sets.append("perdue_le = COALESCE(perdue_le, %s)"); params.append(maintenant)
+                sets.append("dernier_contact_le = %s"); params.append(maintenant)
+            if 'note' in data:
+                note = _CARACTERES_CONTROLE_RE.sub('', str(data.get('note') or '')).strip()[:2000]
+                sets.append("note = %s"); params.append(note or None)
+            if 'demo_prevue_le' in data:
+                brut = data.get('demo_prevue_le')
+                if brut in (None, ''):
+                    sets.append("demo_prevue_le = NULL")
+                else:
+                    try:
+                        prevue = datetime.fromisoformat(str(brut).replace('Z', '+00:00'))
+                    except ValueError:
+                        return jsonify({"message": "Date invalide"}), 400
+                    if prevue.tzinfo:
+                        prevue = prevue.astimezone(timezone.utc).replace(tzinfo=None)
+                    sets.append("demo_prevue_le = %s"); params.append(prevue)
+            if not sets:
+                return jsonify({"message": "Rien à modifier"}), 400
+            cur.execute(f"UPDATE demandes_demo SET {', '.join(sets)} WHERE id = %s RETURNING *", params + [demande_id])
+            r = cur.fetchone()
+            _journal(cur, 'demande_demo_modifiee', str(demande_id), statut or 'note')
+            conn.commit()
+        return jsonify(_json_demande(r)), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/admin/demandes-demo/<int:demande_id>', methods=['DELETE'])
+@limiter.limit("60 per hour", key_func=_cle_utilisateur)
+@admin_required
+def admin_demande_effacer(demande_id):
+    """Effacement définitif d'une demande (droit à l'effacement, RGPD art. 17)."""
+    try:
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("DELETE FROM demandes_demo WHERE id = %s", (demande_id,))
+            if not cur.rowcount:
+                return jsonify({"message": "Not found"}), 404
+            _journal(cur, 'demande_demo_effacee', str(demande_id), None)
+            conn.commit()
+        return jsonify({"message": "Demande effacée"}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/admin/demandes-demo/<int:demande_id>/renvoyer', methods=['POST'])
+@limiter.limit("60 per hour", key_func=_cle_utilisateur)
+@admin_required
+def admin_demande_renvoyer(demande_id):
+    """Renvoie tout de suite l'e-mail d'équipe (et l'accusé s'il n'est pas parti) d'une demande."""
+    try:
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("SELECT 1 FROM demandes_demo WHERE id = %s", (demande_id,))
+            if not cur.fetchone():
+                return jsonify({"message": "Not found"}), 404
+            _journal(cur, 'demande_demo_renvoyee', str(demande_id), None)
+            conn.commit()
+        partis = _traiter_notifications(demande_id=demande_id, forcer=True)
+        with _base() as (conn, cur):
+            cur.execute("SELECT * FROM demandes_demo WHERE id = %s", (demande_id,))
+            r = cur.fetchone()
+        return jsonify({"envoyees": partis, "demande": _json_demande(r)}), 200
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/admin/demandes-demo/relancer', methods=['POST'])
+@limiter.limit("30 per hour", key_func=_cle_utilisateur)
+@admin_required
+def admin_demandes_relancer():
+    """Renvoie toutes les notifications en échec ou abandonnées (50 au plus par appel)."""
+    try:
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("""SELECT id FROM demandes_demo WHERE notif_statut IN ('echec','abandon','attente')
+                              OR accuse_statut IN ('echec','abandon','attente') ORDER BY id LIMIT 50""")
+            ids = [x['id'] for x in cur.fetchall()]
+            _journal(cur, 'demandes_demo_relancees', str(len(ids)), None)
+            conn.commit()
+        partis = sum(_notifier_une_demande(i, _maintenant(), True) for i in ids)
+        return jsonify({"examinees": len(ids), "envoyees": partis}), 200
+    except Exception:
+        return erreur_interne()
+
+
+def _cellule_csv(valeur):
+    """Valeur d'une cellule d'export : une cellule qui commencerait par = + - @ serait lue comme une formule par un
+    tableur (injection de formules) ; on la précède d'une apostrophe."""
+    if valeur is None:
+        return ''
+    if isinstance(valeur, datetime):
+        return valeur.strftime('%Y-%m-%d %H:%M:%S')
+    texte = str(valeur).replace('\r', ' ').replace('\n', ' ')
+    return "'" + texte if texte[:1] in ('=', '+', '-', '@', '\t') else texte
+
+
+@app.route('/admin/demandes-demo/export.csv', methods=['GET'])
+@limiter.limit("20 per hour", key_func=_cle_utilisateur)
+@admin_required
+def admin_demandes_export():
+    """Export CSV (séparateur « ; », UTF-8 avec marque d'ordre des octets, lisible par Excel) des demandes filtrées."""
+    try:
+        _assurer_schema()
+        where, params, _ = _filtre_demandes()
+        with _base() as (conn, cur):
+            cur.execute(f"SELECT * FROM demandes_demo{where} ORDER BY id DESC LIMIT 5000", params)
+            lignes = cur.fetchall()
+            _journal(cur, 'demandes_demo_exportees', str(len(lignes)), None)
+            conn.commit()
+        colonnes = ['ref', 'cree_le', 'nom', 'fonction', 'agence', 'email', 'telephone', 'ville', 'canal', 'source', 'medium',
+                    'campagne', 'contenu', 'terme', 'appareil', 'statut', 'qualifiee_le', 'demo_programmee_le',
+                    'demo_prevue_le', 'demo_realisee_le', 'client_le', 'perdue_le', 'dernier_contact_le', 'nb_soumissions',
+                    'notif_statut', 'accuse_statut', 'note']
+        sortie = io.StringIO()
+        ecrivain = csv.writer(sortie, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+        ecrivain.writerow(colonnes)
+        for r in lignes:
+            ecrivain.writerow([_cellule_csv(r[c]) for c in colonnes])
+        corps = '﻿' + sortie.getvalue()
+        return Response(corps, mimetype='text/csv; charset=utf-8', headers={
+            'Content-Disposition': 'attachment; filename="demandes-demo-%s.csv"' % _maintenant().strftime('%Y%m%d'),
+            'Cache-Control': 'no-store'})
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/admin/acquisition/depenses', methods=['GET', 'POST'])
+@limiter.limit("300 per hour", key_func=_cle_utilisateur)
+@admin_required
+def admin_acquisition_depenses():
+    """Dépenses publicitaires (saisies à la main). GET : les 200 dernières. POST : {canal, debut, fin, montant_eur, note?}."""
+    try:
+        _assurer_schema()
+        if request.method == 'GET':
+            with _base() as (conn, cur):
+                cur.execute("SELECT * FROM acquisition_depenses ORDER BY debut DESC, id DESC LIMIT 200")
+                return jsonify({"depenses": [{"id": r['id'], "canal": r['canal'], "debut": r['debut'].isoformat(),
+                                               "fin": r['fin'].isoformat(), "montant_eur": float(r['montant_eur']),
+                                               "note": r['note']} for r in cur.fetchall()]}), 200
+        data = request.get_json(silent=True) or {}
+        canal = str(data.get('canal') or '')
+        if canal not in DEMO_CANAUX:
+            return jsonify({"message": "Canal invalide"}), 400
+        try:
+            debut = datetime.strptime(str(data.get('debut')), '%Y-%m-%d').date()
+            fin = datetime.strptime(str(data.get('fin') or data.get('debut')), '%Y-%m-%d').date()
+            montant = round(float(str(data.get('montant_eur')).replace(',', '.')), 2)
+        except (ValueError, TypeError):
+            return jsonify({"message": "Dates (AAAA-MM-JJ) ou montant invalides"}), 400
+        if fin < debut or not 0 <= montant <= 1000000:
+            return jsonify({"message": "Dates ou montant invalides"}), 400
+        with _base() as (conn, cur):
+            cur.execute("""INSERT INTO acquisition_depenses (canal, debut, fin, montant_eur, note, cree_le)
+                           VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+                        (canal, debut, fin, montant, _ligne_demo(data.get('note'), 200) or None, _maintenant()))
+            nouvelle = cur.fetchone()['id']
+            _journal(cur, 'depense_acquisition_ajoutee', canal, str(montant))
+            conn.commit()
+        return jsonify({"id": nouvelle}), 201
+    except Exception:
+        return erreur_interne()
+
+
+@app.route('/admin/acquisition/depenses/<int:depense_id>', methods=['DELETE'])
+@limiter.limit("120 per hour", key_func=_cle_utilisateur)
+@admin_required
+def admin_acquisition_depense_effacer(depense_id):
+    try:
+        _assurer_schema()
+        with _base() as (conn, cur):
+            cur.execute("DELETE FROM acquisition_depenses WHERE id = %s", (depense_id,))
+            if not cur.rowcount:
+                return jsonify({"message": "Not found"}), 404
+            _journal(cur, 'depense_acquisition_effacee', str(depense_id), None)
+            conn.commit()
+        return jsonify({"message": "Supprimée"}), 200
+    except Exception:
+        return erreur_interne()
+
+
+def _purger_demandes_demo():
+    """Annoncé sur le formulaire : conservation 3 ans après le dernier échange. Les clients en sont exclus (relation
+    contractuelle) ; les demandes jamais traitées sont comptées à partir de leur réception."""
+    limite = _maintenant() - timedelta(days=DEMO_CONSERVATION_JOURS)
+    with _base() as (conn, cur):
+        cur.execute("""DELETE FROM demandes_demo WHERE statut <> 'client' AND COALESCE(dernier_contact_le, cree_le) < %s""", (limite,))
+        cur.execute("DELETE FROM site_evenements WHERE cree_le < %s",
+                    (_maintenant() - timedelta(days=STATS_CONSERVATION_JOURS),))
+        conn.commit()
+
 
 
 @app.route('/auth/forgot-password', methods=['POST'])
@@ -10636,6 +11373,9 @@ from urllib.parse import urlparse as _urlparse
 STATS_PAGES = {
     'tarifs', 'login', 'forgot-password', 'cgu', 'mentions-legales', 'confidentialite',
     'accord-sous-traitance', 'annonces', 'rdv', 'formulaire', 'completer', 'rejoindre-agence',
+    # Pages publiques de la prospection : sans elles, les visites venues des annonces n'étaient pas comptées.
+    'demo-agences', 'demo-merci', 'qualification-prospects-immobiliers', 'rapprochement-prospects-biens',
+    'suivi-prospects-immobiliers',
 }
 STATS_DIRECT_SECONDES = 90        # un visiteur est « en direct » s'il a donné signe de vie il y a moins que ça
 STATS_DOUBLON_MINUTES = 30        # recharger la même page n'ajoute pas de visite
@@ -11846,6 +12586,7 @@ def purge_interne():
         agences = _purger_agences_resiliees()
         _purger_journaux()
         _purger_stats()
+        _purger_demandes_demo()
         return jsonify({"agences_purgees": agences}), 200
     except Exception:
         return erreur_interne()
