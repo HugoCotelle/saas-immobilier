@@ -134,7 +134,10 @@
 
     // ----- Page d'atterrissage : formulaire intégré à la page -----
     if (page) {
-        page.appendChild(batir(function () { location.href = '/demo-merci.html'; }));
+        page.appendChild(batir(function () {
+            try { sessionStorage.setItem('zelyro_demande_ok', '1'); } catch (e) { /* ignoré */ }
+            location.href = '/demo-merci.html';
+        }));
     }
 
 })();

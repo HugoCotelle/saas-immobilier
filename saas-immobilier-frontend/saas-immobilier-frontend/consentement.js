@@ -30,11 +30,26 @@
         return n.doNotTrack === '1' || window.doNotTrack === '1' || n.msDoNotTrack === '1' || n.globalPrivacyControl;
     }
 
+    // La page de confirmation n'est mesurée que juste après l'envoi d'une demande (drapeau posé par
+    // demande-demo.js) : une visite directe ou un rechargement de la page ne compte pas comme une demande.
+    function demandeEnvoyee() {
+        try {
+            var ok = sessionStorage.getItem('zelyro_demande_ok') === '1';
+            if (ok) sessionStorage.removeItem('zelyro_demande_ok');
+            return ok;
+        } catch (e) { return true; }   // stockage indisponible : on ne perd pas la mesure
+    }
+
     function charger() {
         if (!enligne || window.__zelyroAds) return;
+        if (location.pathname.indexOf('demo-merci') !== -1 && !demandeEnvoyee()) return;
         window.__zelyroAds = true;
         window.dataLayer = window.dataLayer || [];
         window.gtag = function () { window.dataLayer.push(arguments); };
+        // Google Consent Mode v2 : tout est refusé par défaut, puis ce que le visiteur vient d'accepter est
+        // accordé. La bannière ne parle que de mesure des annonces : pas de personnalisation publicitaire.
+        window.gtag('consent', 'default', { ad_storage: 'denied', ad_user_data: 'denied', ad_personalization: 'denied', analytics_storage: 'denied' });
+        window.gtag('consent', 'update', { ad_storage: 'granted', ad_user_data: 'granted', ad_personalization: 'denied', analytics_storage: 'denied' });
         window.gtag('js', new Date());
         window.gtag('config', ADS_ID);
         var s = document.createElement('script');
