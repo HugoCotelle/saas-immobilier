@@ -8,9 +8,10 @@
 
     var API = 'https://saas-immobilier-921a.onrender.com';     // notre serveur : confirmation d'une demande enregistrée
     var ADS_ID = 'AW-18528941154';
-    // Libellé de la conversion « Demande de démo », fourni par Google Ads (Objectifs > Conversions),
-    // de la forme 'AbCdEfGhIjKl'. Tant qu'il est vide, les visites sont mesurées mais pas la demande de démo.
-    var CONVERSION_LABEL = '';
+    // Libellé de la conversion Google Ads « Zelyro - Démo confirmée » (action manuelle, secondaire pendant la phase de
+    // validation, une seule conversion par demande). Il n'est utilisé que par chargerGoogle(), jamais écrit dans une page HTML :
+    // l'événement part seulement après confirmation de la demande par le serveur (voir confirmerConversion).
+    var CONVERSION_LABEL = 'LIQnCPCwpbodEOLopINF';
 
     // Pixel Meta (Facebook / Instagram) : seule mesure des demandes de démonstration issues des annonces Meta.
     // Aucune donnée saisie dans le formulaire n'est transmise ; la collecte automatique du Pixel est désactivée.
