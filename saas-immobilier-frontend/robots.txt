@@ -1,3 +1,53 @@
+# robots.txt de zelyro.fr, mis à jour le 2026-11-17.
+# Les Disallow ci-dessous protègent l'application ; l'accès réel est de toute façon protégé par connexion.
+# Attention : un robot qui a son propre groupe ignore le groupe « * » : les Disallow sont donc répétés dans chaque groupe.
+
+# 1. Robots de recherche et d'accès à la demande d'un utilisateur : AUTORISÉS sur les pages publiques.
+#    Googlebot (Google Search), Bingbot (Bing), OAI-SearchBot (recherche ChatGPT), ChatGPT-User (consultation demandée
+#    par un utilisateur de ChatGPT), PerplexityBot (recherche Perplexity), Claude-SearchBot (recherche Claude),
+#    Claude-User (consultation demandée par un utilisateur de Claude), Applebot (Spotlight, Siri, Safari).
+User-agent: Googlebot
+User-agent: Bingbot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: PerplexityBot
+User-agent: Claude-SearchBot
+User-agent: Claude-User
+User-agent: Applebot
+Allow: /
+Disallow: /login.html
+Disallow: /dashboard.html
+Disallow: /biens.html
+Disallow: /compte.html
+Disallow: /forgot-password.html
+Disallow: /reset-password.html
+Disallow: /import.html
+Disallow: /leads-profile.html
+Disallow: /matching.html
+Disallow: /propositions.html
+Disallow: /prospects.html
+Disallow: /admin.html
+Disallow: /admin-devis.html
+Disallow: /admin-demandes.html
+Disallow: /admin-stats.html
+Disallow: /formulaire.html
+Disallow: /taches.html
+Disallow: /completer.html
+Disallow: /rejoindre-agence.html
+
+# 2. Robots destinés à l'entraînement des modèles d'IA : BLOQUÉS par défaut.
+#    GPTBot (OpenAI), Google-Extended (entraînement et ancrage de Gemini : sans effet sur Google Search),
+#    ClaudeBot (Anthropic), Applebot-Extended (usage des données d'Applebot pour l'entraînement : sans effet sur la
+#    recherche Apple), Meta-ExternalAgent (Meta), CCBot (Common Crawl).
+User-agent: GPTBot
+User-agent: Google-Extended
+User-agent: ClaudeBot
+User-agent: Applebot-Extended
+User-agent: Meta-ExternalAgent
+User-agent: CCBot
+Disallow: /
+
+# 3. Tous les autres robots : pages publiques autorisées, pages privées interdites.
 User-agent: *
 Allow: /
 Disallow: /login.html
@@ -13,6 +63,11 @@ Disallow: /propositions.html
 Disallow: /prospects.html
 Disallow: /admin.html
 Disallow: /admin-devis.html
+Disallow: /admin-demandes.html
+Disallow: /admin-stats.html
 Disallow: /formulaire.html
+Disallow: /taches.html
+Disallow: /completer.html
+Disallow: /rejoindre-agence.html
 
 Sitemap: https://www.zelyro.fr/sitemap.xml

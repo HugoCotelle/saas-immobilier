@@ -856,3 +856,8 @@ html:not(.anim) .fp-go{--y:-150px}html:not(.anim) .fp-jaune{--y:-50px}html:not(.
 @keyframes final-defile{to{transform:translateX(-50%)}}
 @media (prefers-reduced-motion:reduce){.final-defile{animation:none}.fp-alerte::before{animation:none}}
 @media (max-width:1180px){.final-pile::before{right:0;top:-6px}.final-carte::before{display:none}}
+
+/* Phrase descriptive au-dessus du titre d'accueil (référencement + clarté) */
+.heros-sur{display:flex;align-items:center;gap:10px;margin:0 0 18px;font-family:var(--titre);font-weight:700;font-size:13px;line-height:1.4;letter-spacing:.08em;text-transform:uppercase;color:var(--encre)}
+.heros-sur::before{content:"";flex:none;width:9px;height:9px;background:var(--laiton);transform:rotate(45deg);box-shadow:0 0 0 1.5px var(--encre)}
+@media (max-width:600px){.heros-sur{font-size:12px;letter-spacing:.06em}}

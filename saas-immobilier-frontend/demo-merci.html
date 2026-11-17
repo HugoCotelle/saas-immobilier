@@ -5,15 +5,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Demande envoyée — Zelyro</title>
 <meta name="description" content="Votre demande de démonstration Zelyro a bien été envoyée.">
-<meta name="robots" content="noindex, follow">
+<meta name="robots" content="noindex, nofollow">
+<script>
+/* Page de confirmation : accessible seulement juste après l'envoi d'une demande enregistrée (voir demande-demo.js).
+   Toute autre arrivée (lien, favori, historique, robot qui exécute le JavaScript) est renvoyée vers le formulaire. */
+(function () {
+    var ok = false;
+    try { ok = /^[0-9a-f]{24}$/.test(sessionStorage.getItem('zelyro_demande_vue') || ''); } catch (e) { /* stockage bloqué */ }
+    if (!ok) ok = /^#r=[0-9a-f]{24}$/.test(location.hash);
+    if (!ok) { document.documentElement.style.visibility = 'hidden'; location.replace('/demo-agences.html'); }
+})();
+</script>
 <meta name="theme-color" content="#F3F4F1">
 <link rel="canonical" href="https://www.zelyro.fr/demo-merci.html">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F3F4F1'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234A504C'/%3E%3C/svg%3E">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-48x48.png" type="image/png" sizes="48x48">
 <link rel="stylesheet" href="/zelyro.css">
 <link rel="stylesheet" href="/public.css">
 <script>document.documentElement.className+=' js';</script>
 <script src="/stats.js" defer></script>
-<script src="/consentement.js?v=20261116b" defer></script>
+<script src="/consentement.js?v=20261116c" defer></script>
 </head>
 <body class="pub lp">
 <a class="skip-link" href="#contenu">Aller au contenu</a>
@@ -28,7 +40,7 @@
     <div class="wrap lp-merci">
         <p class="eyebrow">Demande envoyée</p>
         <h1>Merci, <em>votre demande est bien partie.</em></h1>
-        <p class="lp-lead">Un e-mail de confirmation vient de vous être envoyé. Nous revenons vers vous très vite, par e-mail ou par téléphone, pour convenir d’un créneau.</p>
+        <p class="lp-lead">Votre demande est bien enregistrée. Un e-mail de confirmation vous parvient dans les minutes qui viennent (pensez à regarder vos courriers indésirables). Nous revenons vers vous très vite, par e-mail ou par téléphone, pour convenir d’un créneau de 20 minutes.</p>
         <p class="lp-lead">En attendant, vous pouvez découvrir Zelyro en vidéo.</p>
         <div class="cta-row"><a class="btn btn-lg" href="/#demo">Voir la démo vidéo</a><a class="btn btn-lg btn-ghost" href="/">Retour au site</a></div>
     </div>

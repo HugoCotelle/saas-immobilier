@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Zelyro — Qualification et suivi des prospects pour agences immobilières</title>
+<title>Zelyro : qualification et suivi des prospects immobiliers</title>
 <meta name="description" content="Zelyro qualifie automatiquement les prospects d’une agence immobilière, les rapproche de ses biens avec un score expliqué et organise leur suivi jusqu’à la signature.">
 <meta name="theme-color" content="#F3F4F1">
 <link rel="canonical" href="https://www.zelyro.fr/">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Zelyro — Qualification et suivi des prospects pour agences immobilières">
+<meta property="og:title" content="Zelyro : qualification et suivi des prospects immobiliers">
 <meta property="og:description" content="Chaque lead. Chaque bien. Aucune opportunité perdue.">
 <meta property="og:locale" content="fr_FR">
 <meta property="og:url" content="https://www.zelyro.fr/">
@@ -18,10 +18,12 @@
 <meta property="og:image:alt" content="Zelyro — Qualification et suivi des prospects pour agences immobilières">
 <meta property="og:site_name" content="Zelyro">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Zelyro — Qualification et suivi des prospects pour agences immobilières">
+<meta name="twitter:title" content="Zelyro : qualification et suivi des prospects immobiliers">
 <meta name="twitter:description" content="Chaque lead. Chaque bien. Aucune opportunité perdue.">
 <meta name="twitter:image" content="https://www.zelyro.fr/og-image.png">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F3F4F1'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234A504C'/%3E%3C/svg%3E">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-48x48.png" type="image/png" sizes="48x48">
 <link rel="preload" href="/vendor/fonts/familjen-grotesk-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/vendor/fonts/hanken-grotesk-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/landing.css">
@@ -33,24 +35,99 @@
       "@type": "Organization",
       "@id": "https://www.zelyro.fr/#organization",
       "name": "Zelyro",
+      "legalName": "Zelyro SAS",
       "url": "https://www.zelyro.fr/",
-      "logo": "https://www.zelyro.fr/og-image.png",
+      "logo": "https://www.zelyro.fr/favicon-512x512.png",
       "email": "contact@zelyro.fr",
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "59 rue de Ponthieu",
+        "postalCode": "75008",
+        "addressLocality": "Paris",
+        "addressCountry": "FR"
+      },
       "areaServed": "FR"
     },
     {
+      "@type": "WebSite",
+      "@id": "https://www.zelyro.fr/#website",
+      "url": "https://www.zelyro.fr/",
+      "name": "Zelyro",
+      "inLanguage": "fr-FR",
+      "publisher": {
+        "@id": "https://www.zelyro.fr/#organization"
+      }
+    },
+    {
       "@type": "SoftwareApplication",
+      "@id": "https://www.zelyro.fr/#logiciel",
       "name": "Zelyro",
       "applicationCategory": "BusinessApplication",
       "operatingSystem": "Web",
       "url": "https://www.zelyro.fr/",
+      "inLanguage": "fr-FR",
       "description": "Zelyro qualifie automatiquement les prospects d’une agence immobilière, les rapproche de ses biens avec un score expliqué et organise leur suivi jusqu’à la signature.",
-      "offers": {
-        "@type": "Offer",
-        "priceCurrency": "EUR",
-        "availability": "https://schema.org/InStock"
-      },
-      "publisher": { "@id": "https://www.zelyro.fr/#organization" }
+      "featureList": [
+        "Qualification des prospects avec un score sur 100 et des raisons lisibles",
+        "Rapprochement entre prospects et biens avec un score de correspondance, en vente comme en location",
+        "Suivi par statut, notes datées et rappels de relance",
+        "Détection des demandes SeLoger et Leboncoin depuis une boîte Gmail connectée en lecture seule ou par transfert d’e-mails",
+        "Import Excel ou CSV, formulaire de contact hébergé et API",
+        "Estimation indicative du bien d’un prospect propriétaire à partir des ventes réelles (base DVF)"
+      ],
+      "offers": [
+        {
+          "@type": "Offer",
+          "name": "Essentiel",
+          "description": "300 prospects par mois, 100 biens, 200 e-mails de suivi, 100 extractions, 2 comptes utilisateurs inclus. Prix hors taxes, par mois, sans engagement.",
+          "url": "https://www.zelyro.fr/tarifs.html",
+          "price": "29",
+          "priceCurrency": "EUR",
+          "priceSpecification": {
+            "@type": "UnitPriceSpecification",
+            "price": "29",
+            "priceCurrency": "EUR",
+            "valueAddedTaxIncluded": false,
+            "unitText": "mois"
+          },
+          "availability": "https://schema.org/InStock"
+        },
+        {
+          "@type": "Offer",
+          "name": "Agence",
+          "description": "1 500 prospects par mois, 400 biens, 1 000 e-mails de suivi, 500 extractions, 5 comptes utilisateurs inclus. Prix hors taxes, par mois, sans engagement.",
+          "url": "https://www.zelyro.fr/tarifs.html",
+          "price": "49",
+          "priceCurrency": "EUR",
+          "priceSpecification": {
+            "@type": "UnitPriceSpecification",
+            "price": "49",
+            "priceCurrency": "EUR",
+            "valueAddedTaxIncluded": false,
+            "unitText": "mois"
+          },
+          "availability": "https://schema.org/InStock"
+        },
+        {
+          "@type": "Offer",
+          "name": "Réseau",
+          "description": "6 000 prospects par mois, 1 500 biens, 4 000 e-mails de suivi, 2 000 extractions, 10 comptes utilisateurs inclus. Prix hors taxes, par mois, sans engagement.",
+          "url": "https://www.zelyro.fr/tarifs.html",
+          "price": "79",
+          "priceCurrency": "EUR",
+          "priceSpecification": {
+            "@type": "UnitPriceSpecification",
+            "price": "79",
+            "priceCurrency": "EUR",
+            "valueAddedTaxIncluded": false,
+            "unitText": "mois"
+          },
+          "availability": "https://schema.org/InStock"
+        }
+      ],
+      "publisher": {
+        "@id": "https://www.zelyro.fr/#organization"
+      }
     },
     {
       "@type": "FAQPage",
@@ -836,6 +913,9 @@
                     <li><a href="/qualification-prospects-immobiliers.html">Qualifier les prospects</a></li>
                     <li><a href="/rapprochement-prospects-biens.html">Rapprocher prospects et biens</a></li>
                     <li><a href="/suivi-prospects-immobiliers.html">Suivre les prospects</a></li>
+                    <li><a href="/logiciel-agence-immobiliere.html">Logiciel pour agence immobilière</a></li>
+                    <li><a href="/automatisation-leads-seloger-leboncoin.html">Leads SeLoger et Leboncoin</a></li>
+                    <li><a href="/complement-crm-immobilier.html">Complément à un CRM</a></li>
                     <li><a href="/#portails">Comment ça marche</a></li>
                     <li><a href="/#simulateur">Simulateur</a></li>
                     <li><a href="/#securite">Sécurité</a></li>

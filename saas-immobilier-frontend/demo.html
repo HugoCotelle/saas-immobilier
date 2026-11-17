@@ -3,11 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Démo Zelyro</title>
+<title>Démo interactive de Zelyro : qualifier ses leads immobiliers</title>
 <meta name="description" content="Démo interactive de Zelyro en cinq écrans : les demandes arrivent, sont classées par score, puis suivies jusqu'à la visite. Exemple avec des données fictives.">
 <meta name="theme-color" content="#F3F4F1">
 <link rel="canonical" href="https://www.zelyro.fr/demo.html">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F3F4F1'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234A504C'/%3E%3C/svg%3E">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-48x48.png" type="image/png" sizes="48x48">
 <style>
 /* Polices hébergées avec le site (aucune requête vers Google Fonts). */
 @font-face{font-family:'Familjen Grotesk';font-style:normal;font-weight:400 700;font-display:swap;src:url('/vendor/fonts/familjen-grotesk-latin-wght-normal.woff2') format('woff2')}
@@ -70,11 +72,11 @@ main{flex:1;display:flex;flex-direction:column;padding-top:16px;min-width:0}
 @media (prefers-reduced-motion:reduce){.step{animation:none}.progress span{transition:none}}
 .eyebrow{font-size:14px;font-weight:700;letter-spacing:0;color:var(--ink);display:flex;align-items:center;gap:8px}
 .eyebrow i{width:7px;height:7px;background:var(--accent);transform:rotate(45deg);display:block}
-h1{font-family:var(--display);font-weight:700;font-size:clamp(30px,9vw,42px);line-height:1.12;letter-spacing:-.03em;margin:0;text-wrap:balance}
-h1 em{font-style:normal;color:#0A0D0B;background:linear-gradient(transparent 64%,#39FF14 64%);padding:0 .05em}
+.scene-titre{font-family:var(--display);font-weight:700;font-size:clamp(30px,9vw,42px);line-height:1.12;letter-spacing:-.03em;margin:0;text-wrap:balance}
+.scene-titre em{font-style:normal;color:#0A0D0B;background:linear-gradient(transparent 64%,#39FF14 64%);padding:0 .05em}
 /* Mode sombre : surlignage plein (texte noir sur vert fluo), sinon le haut des lettres noires se perd sur le fond sombre. */
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) h1 em{background:linear-gradient(transparent 14%,#39FF14 14%,#39FF14 92%,transparent 92%);color:#0A0D0B;padding:0 .12em;-webkit-box-decoration-break:clone;box-decoration-break:clone}}
-:root[data-theme="dark"] h1 em{background:linear-gradient(transparent 14%,#39FF14 14%,#39FF14 92%,transparent 92%);color:#0A0D0B;padding:0 .12em;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .scene-titre em{background:linear-gradient(transparent 14%,#39FF14 14%,#39FF14 92%,transparent 92%);color:#0A0D0B;padding:0 .12em;-webkit-box-decoration-break:clone;box-decoration-break:clone}}
+:root[data-theme="dark"] .scene-titre em{background:linear-gradient(transparent 14%,#39FF14 14%,#39FF14 92%,transparent 92%);color:#0A0D0B;padding:0 .12em;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 .lede{margin:0;color:var(--muted);font-size:16px;max-width:34em}
 .note{font-size:13px;color:var(--muted)}
 .list{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
@@ -194,7 +196,7 @@ svg.ic{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;strok
 
     <section class="step" id="s1">
       <div class="eyebrow"><i></i>Lundi, 8 h 42</div>
-      <h1>Les demandes arrivent <em>de partout.</em></h1>
+      <h1 class="scene-titre">Les demandes arrivent <em>de partout.</em></h1>
       <p class="lede">Portail, site, e-mail, téléphone : quatre demandes ce matin, dans l'ordre d'arrivée.</p>
       <ul class="list" id="list-arrival"></ul>
       <p class="note">Exemple, données fictives.</p>
@@ -202,7 +204,7 @@ svg.ic{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;strok
 
     <section class="step" id="s2" hidden>
       <div class="eyebrow"><i></i>Classement</div>
-      <h1>Zelyro les rassemble <em>et les classe.</em></h1>
+      <h2 class="scene-titre">Zelyro les rassemble <em>et les classe.</em></h2>
       <p class="lede">Un seul endroit, du plus chaud au plus froid, avec un score sur 100.</p>
       <div class="hint"><span class="tap"></span>Touchez un prospect pour voir d'où vient son score.</div>
       <div class="legend" id="legend"></div>
@@ -212,7 +214,7 @@ svg.ic{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;strok
 
     <section class="step" id="s3" hidden>
       <div class="eyebrow"><i></i>Aujourd'hui</div>
-      <h1>Il vous dit <em>par où commencer.</em></h1>
+      <h2 class="scene-titre">Il vous dit <em>par où commencer.</em></h2>
       <div class="hero">
         <div class="big"><span class="num">4</span><span class="txt">actions pour ce matin,<br>classées par priorité</span></div>
         <div class="seg" aria-hidden="true"><i class="a"></i><i class="b"></i><i class="c"></i></div>
@@ -239,7 +241,7 @@ svg.ic{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;strok
 
     <section class="step" id="s4" hidden>
       <div class="eyebrow"><i></i>Jusqu'à la visite</div>
-      <h1>Puis il vous accompagne <em>jusqu'à la visite.</em></h1>
+      <h2 class="scene-titre">Puis il vous accompagne <em>jusqu'à la visite.</em></h2>
       <p class="lede">Le bien est rapproché, le message est rédigé, vous êtes prévenu quand le prospect répond.</p>
       <div class="card">
         <div class="bien"><div><strong>Villa 6 pièces</strong><div class="meta">Gouvieux · 640 000 €</div></div><span class="chip chaud">Thomas Girard · 83/100</span></div>
@@ -252,7 +254,7 @@ svg.ic{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;strok
 
     <section class="step" id="s5" hidden>
       <div class="eyebrow"><i></i>À vous</div>
-      <h1>Voyez-le dans <em>votre agence.</em></h1>
+      <h2 class="scene-titre">Voyez-le dans <em>votre agence.</em></h2>
       <p class="lede">Zelyro s'ajoute à votre logiciel actuel. Rien à changer, rien à ressaisir.</p>
       <div class="cta">
         <a class="btn wa" id="wa" href="#" target="_blank" rel="noopener" hidden><span data-ic="wa"></span>WhatsApp</a>

@@ -6,6 +6,7 @@
 (function () {
     'use strict';
 
+    var API = 'https://saas-immobilier-921a.onrender.com';     // notre serveur : confirmation d'une demande enregistrée
     var ADS_ID = 'AW-18528941154';
     // Libellé de la conversion « Demande de démo », fourni par Google Ads (Objectifs > Conversions),
     // de la forme 'AbCdEfGhIjKl'. Tant qu'il est vide, les visites sont mesurées mais pas la demande de démo.
@@ -44,28 +45,54 @@
         return n.doNotTrack === '1' || window.doNotTrack === '1' || n.msDoNotTrack === '1' || n.globalPrivacyControl;
     }
 
-    // La page de confirmation n'est mesurée que juste après l'envoi d'une demande (drapeau posé par
-    // demande-demo.js, qui contient l'identifiant unique de cette demande) : une visite directe ou un
-    // rechargement de la page ne compte pas comme une demande. Le drapeau est lu une seule fois puis effacé.
+    // La page de confirmation n'est mesurée que juste après l'envoi d'une demande ENREGISTRÉE EN BASE : demande-demo.js pose
+    // dans l'onglet l'identifiant unique de la demande (renvoyé par le serveur). Il est lu une seule fois puis effacé. Même
+    // avec cet identifiant, rien n'est mesuré avant que le serveur ait confirmé la demande (confirmerConversion) : une
+    // visite directe, un rechargement, un identifiant inventé ou un robot ne produisent donc jamais de conversion.
     var demande = null;
     function lireDemande() {
         if (demande) return demande;
-        demande = { ok: false, id: null, stockage: true };
+        demande = { ok: false, id: null };
         try {
             var v = sessionStorage.getItem('zelyro_demande_ok');
             if (v) {
                 sessionStorage.removeItem('zelyro_demande_ok');
-                demande.ok = true;
-                demande.id = v === '1' ? 'd' + Date.now().toString(36) : v;   // '1' : ancien format du drapeau
+                if (/^[0-9a-f]{24}$/.test(v)) { demande.ok = true; demande.id = v; }   // un ancien drapeau « 1 » ne prouve rien
             }
-        } catch (e) { demande.ok = true; demande.stockage = false; }   // stockage indisponible : mesure Google conservée, jamais Meta
+        } catch (e) { /* stockage indisponible : l'identifiant est alors dans l'adresse (#r=...) */ }
+        if (!demande.ok) {
+            var h = /^#r=([0-9a-f]{24})$/.exec(location.hash || '');
+            if (h) { demande.ok = true; demande.id = h[1]; }
+        }
         return demande;
+    }
+
+    // Demande au serveur l'autorisation de mesurer cette demande. Réponse « true » une seule fois par demande, et
+    // seulement si elle est en base. Toute autre réponse, une erreur ou un délai dépassé : aucune mesure.
+    function confirmerConversion(ref, suite) {
+        try {
+            var ctrl = window.AbortController ? new AbortController() : null;
+            var minuteur = ctrl ? setTimeout(function () { ctrl.abort(); }, 15000) : null;
+            fetch(API + '/api/v1/demande-demo/confirmation', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: ref }),
+                credentials: 'omit', cache: 'no-store', signal: ctrl ? ctrl.signal : undefined
+            }).then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (j) { if (minuteur) clearTimeout(minuteur); if (j && j.conversion === true) suite(); })
+              .catch(function () { /* pas de confirmation : pas de mesure */ });
+        } catch (e) { /* ignoré */ }
     }
     var surMerci = location.pathname.indexOf('demo-merci') !== -1;
 
     function charger() {
         if (!enligne) return;
-        if (surMerci && !lireDemande().ok) return;   // visite directe ou rechargement de la page de confirmation : aucune mesure
+        if (surMerci) {
+            if (!lireDemande().ok) return;   // visite directe ou rechargement de la page de confirmation : aucune mesure
+            confirmerConversion(demande.id, function () {
+                chargerGoogle();
+                if (metaAccepte()) chargerMeta();
+            });
+            return;
+        }
         chargerGoogle();
         if (metaAccepte()) chargerMeta();
     }
@@ -85,13 +112,12 @@
         s.async = true;
         s.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(ADS_ID);
         document.head.appendChild(s);
-        if (CONVERSION_LABEL && surMerci) {
-            var deja = false;
-            try { deja = sessionStorage.getItem('zelyro_conv') === '1'; } catch (e) { /* ignoré */ }
-            if (!deja) {
-                window.gtag('event', 'conversion', { send_to: ADS_ID + '/' + CONVERSION_LABEL });
-                try { sessionStorage.setItem('zelyro_conv', '1'); } catch (e) { /* ignoré */ }
-            }
+        // Conversion : seulement sur la page de confirmation, pour une demande confirmée par le serveur (voir charger).
+        // transaction_id permet aussi à Google de ne compter qu'une fois la même demande.
+        if (CONVERSION_LABEL && surMerci && demande && demande.ok && demande.id) {
+            var cleConv = 'zelyro_conv_' + demande.id, dejaConv = false;
+            try { dejaConv = sessionStorage.getItem(cleConv) === '1'; sessionStorage.setItem(cleConv, '1'); } catch (e) { /* ignoré : le serveur garantit déjà l'unicité */ }
+            if (!dejaConv) window.gtag('event', 'conversion', { send_to: ADS_ID + '/' + CONVERSION_LABEL, transaction_id: demande.id });
         }
     }
 
@@ -105,10 +131,10 @@
         n('set', 'autoConfig', false, META_ID);   // pas de collecte automatique (clics, champs de formulaire, mise en correspondance)
         n('init', META_ID);                       // aucune donnée personnelle transmise
         n('track', 'PageView');
-        // Lead : uniquement juste après une demande de démonstration acceptée par le serveur, une seule fois par demande.
-        if (surMerci && demande && demande.ok && demande.stockage && demande.id) {
+        // Lead : uniquement pour une demande enregistrée en base et confirmée par le serveur, une seule fois par demande.
+        if (surMerci && demande && demande.ok && demande.id) {
             var cleLead = 'zelyro_lead_' + demande.id, deja = false;
-            try { deja = sessionStorage.getItem(cleLead) === '1'; sessionStorage.setItem(cleLead, '1'); } catch (e) { deja = true; }
+            try { deja = sessionStorage.getItem(cleLead) === '1'; sessionStorage.setItem(cleLead, '1'); } catch (e) { /* ignoré : le serveur garantit déjà l'unicité */ }
             if (!deja) n('track', 'Lead', {}, { eventID: demande.id });
         }
         var s = document.createElement('script');
@@ -116,6 +142,15 @@
         s.src = 'https://connect.facebook.net/en_US/fbevents.js';
         document.head.appendChild(s);
     }
+
+    // Événements de parcours sur la page de démonstration (voir demo-suivi.js) : envoyés à Meta seulement si le
+    // visiteur a accepté, jamais avec une donnée saisie, jamais en cas de « Ne pas me suivre ».
+    window.zelyroMesure = function (nom, params) {
+        try {
+            if (!enligne || signalRefus() || !metaAccepte() || !window.fbq) return;
+            window.fbq('trackCustom', nom, params || {});
+        } catch (e) { /* ignoré */ }
+    };
 
     function effacerCookiesGoogle() {
         var noms = document.cookie.split(';');
@@ -133,11 +168,10 @@
 
     var banniere = null;
 
-    var defilementAvant = null;
     function fermer() {
         if (banniere && banniere.parentNode) banniere.parentNode.removeChild(banniere);
         banniere = null;
-        if (defilementAvant !== null) { document.documentElement.style.overflow = defilementAvant; defilementAvant = null; }
+        document.documentElement.classList.remove('cookies-ouverts');
     }
     function choisir(c) {
         var avant = lire();
@@ -156,35 +190,37 @@
         var st = document.createElement('style');
         st.id = 'cookies-style';
         st.textContent =
-            '.cookies-voile{position:fixed;top:0;right:0;bottom:0;left:0;z-index:9999;display:flex;align-items:center;' +
-            'justify-content:center;padding:16px;background:rgba(10,13,11,.6)}' +
-            '.cookies-bandeau{width:100%;max-width:460px;background:#fff;color:#0A0D0B;border:1px solid #B9BDB5;border-radius:8px;' +
-            'padding:26px 26px 24px;box-shadow:0 8px 32px rgba(10,13,11,.28);font:400 15px/1.55 "Hanken Grotesk",system-ui,sans-serif}' +
+            '.cookies-bandeau{position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#fff;color:#0A0D0B;' +
+            'border-top:2px solid #0A0D0B;box-shadow:0 -10px 30px rgba(10,13,11,.16);' +
+            'padding:14px 16px calc(14px + env(safe-area-inset-bottom,0px));font:400 14px/1.5 "Hanken Grotesk",system-ui,sans-serif}' +
             '.cookies-bandeau:focus{outline:none}' +
-            '.cookies-bandeau h2{font:700 20px/1.25 "Familjen Grotesk","Hanken Grotesk",system-ui,sans-serif;margin:0 0 10px;color:#0A0D0B}' +
-            '.cookies-bandeau p{margin:0 0 20px;color:#2b302c}' +
+            '.cookies-int{max-width:1160px;margin:0 auto;display:flex;align-items:center;gap:12px 28px;justify-content:space-between}' +
+            '.cookies-bandeau p{margin:0;color:#2b302c;max-width:46em}' +
+            '.cookies-bandeau strong{font-weight:700}' +
             '.cookies-bandeau a{color:#0A0D0B;text-decoration:underline;text-decoration-color:#39FF14;text-decoration-thickness:2px;text-underline-offset:3px}' +
-            '.cookies-actions{display:flex;gap:12px}' +
-            '.cookies-actions button{flex:1;font:600 15px/1 "Hanken Grotesk",system-ui,sans-serif;padding:14px;' +
-            'background:#fff;color:#0A0D0B;border:1.5px solid #0A0D0B;border-radius:6px;cursor:pointer;min-height:48px}' +
+            '.cookies-actions{display:flex;gap:10px;flex:none}' +
+            '.cookies-actions button{font:600 15px/1 "Hanken Grotesk",system-ui,sans-serif;padding:13px 22px;min-width:112px;' +
+            'background:#fff;color:#0A0D0B;border:1.5px solid #0A0D0B;border-radius:6px;cursor:pointer;min-height:46px}' +
             '.cookies-actions button:hover,.cookies-actions button:focus-visible{background:#39FF14;outline:none}' +
             '.cookies-actions button:focus-visible{box-shadow:0 0 0 2px #fff,0 0 0 4px #0A0D0B}' +
-            '@media (max-width:520px){.cookies-bandeau{padding:22px 20px 20px}.cookies-actions{flex-direction:column}}';
+            '@media (max-width:640px){.cookies-int{flex-direction:column;align-items:stretch;gap:12px}' +
+            '.cookies-actions button{flex:1;min-width:0}.cookies-bandeau{font-size:13.5px}}';
         document.head.appendChild(st);
     }
 
     function afficher(focus) {
         if (banniere) return;
         style();
-        // Fenêtre au centre de l'écran : le visiteur doit faire un choix (Refuser ou Accepter, à égalité)
-        // avant de continuer. Aucun des deux boutons n'est mis en avant par rapport à l'autre.
+        // Bandeau en bas de l'écran : il ne bloque pas la page (le visiteur peut lire, défiler et remplir le formulaire
+        // sans répondre). Refuser et Accepter sont à égalité : même taille, même style.
         banniere = document.createElement('div');
-        banniere.className = 'cookies-voile';
+        banniere.className = 'cookies-bandeau';
+        banniere.setAttribute('role', 'region');
+        banniere.setAttribute('aria-label', 'Cookies et mesure publicitaire');
+        banniere.setAttribute('tabindex', '-1');
         banniere.innerHTML =
-            '<div class="cookies-bandeau" role="dialog" aria-modal="true" aria-labelledby="cookies-titre" tabindex="-1">' +
-            '<h2 id="cookies-titre">Cookies et mesure publicitaire</h2>' +
-            '<p>Nous aimerions mesurer l’effet de nos annonces Google et Meta (Facebook, Instagram) sur le nombre de demandes de démonstration. ' +
-            'Cela dépose des cookies de Google et de Meta sur votre navigateur. Vous pouvez refuser : le site fonctionne de la même façon. ' +
+            '<div class="cookies-int"><p>Nous mesurons l’effet de nos annonces Google et Meta (Facebook, Instagram) sur le nombre de demandes de démonstration, ' +
+            'avec des cookies de Google et de Meta. Vous pouvez refuser : le site fonctionne de la même façon. ' +
             '<a href="/confidentialite.html#cookies">En savoir plus</a></p>' +
             '<div class="cookies-actions"><button type="button" data-choix="non">Refuser</button>' +
             '<button type="button" data-choix="oui">Accepter</button></div></div>';
@@ -192,18 +228,9 @@
             var b = e.target.closest ? e.target.closest('button[data-choix]') : null;
             if (b) choisir(b.getAttribute('data-choix'));
         });
-        banniere.addEventListener('keydown', function (e) {   // le clavier reste dans la fenêtre tant qu'elle est ouverte
-            if (e.key !== 'Tab') return;
-            var els = banniere.querySelectorAll('button, a[href]');
-            var premier = els[0], dernier = els[els.length - 1];
-            if (e.shiftKey && document.activeElement === premier) { e.preventDefault(); dernier.focus(); }
-            else if (!e.shiftKey && document.activeElement === dernier) { e.preventDefault(); premier.focus(); }
-        });
-        defilementAvant = document.documentElement.style.overflow;
-        document.documentElement.style.overflow = 'hidden';
         document.body.appendChild(banniere);
-        var fenetre = banniere.querySelector('.cookies-bandeau');   // le focus va à la fenêtre, sans mettre un bouton en avant
-        if (fenetre) fenetre.focus();
+        document.documentElement.classList.add('cookies-ouverts');   // la page peut libérer le bas de l'écran (bouton fixe mobile)
+        if (focus) banniere.focus();                                  // ouverture volontaire (« Gérer mes cookies ») : le focus y va
     }
 
     function demarrer() {

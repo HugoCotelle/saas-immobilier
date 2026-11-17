@@ -10,7 +10,9 @@
     <script src="carte-donnees.js"></script>
     <meta name="theme-color" content="#F3F4F1">
     <meta name="robots" content="noindex">
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F3F4F1'/%3E%3Crect x='11' y='11' width='10' height='10' rx='2' transform='rotate(45 16 16)' fill='%234A504C'/%3E%3C/svg%3E">
+    <link rel="icon" href="/favicon.ico" sizes="48x48">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/favicon-48x48.png" type="image/png" sizes="48x48">
     <link rel="stylesheet" href="zelyro.css">
     <style>
         .direct-haut { display: flex; flex-wrap: wrap; align-items: center; gap: 28px; }
@@ -71,6 +73,16 @@
         };
         const nomPage = (p) => (p === '/' ? 'Accueil' : p);
         const appareilLibelle = { ordinateur: 'Ordinateur', mobile: 'Mobile', tablette: 'Tablette' };
+        const natureLibelle = { humain: 'Humain', robot: 'Robot', suspect: 'Suspect' };
+        const raisonLibelle = {
+            agent_robot: 'Robot déclaré (moteur de recherche, outil, aperçu de lien, navigateur sans interface)',
+            sans_agent: 'Aucun identifiant de navigateur',
+            sans_langue: 'Aucune langue de navigateur (probablement un script)',
+            ecran_invalide: 'Taille d\'écran impossible ou absente',
+            merci_sans_demande: 'Page de confirmation sans demande enregistrée',
+            rafale: 'Trop de pages différentes en quelques minutes',
+        };
+        const pluriel = (n, un, plusieurs) => `${fmt(n)} ${n > 1 ? plusieurs : un}`;
 
         function cartePour(vue) {
             const c = window.ZELYRO_CARTE;
@@ -309,7 +321,10 @@
                                         <div className="direct-texte">
                                             <div><span className={`point-vivant ${nbEnDirect ? '' : 'eteint'}`}></span>
                                                 {nbEnDirect === 0 ? 'Personne sur le site en ce moment' : nbEnDirect === 1 ? 'personne sur le site en ce moment' : 'personnes sur le site en ce moment'}</div>
-                                            <div>Aujourd'hui : {fmt(direct.aujourdhui.visites)} visite{direct.aujourdhui.visites > 1 ? 's' : ''} · {fmt(direct.aujourdhui.visiteurs)} visiteur{direct.aujourdhui.visiteurs > 1 ? 's' : ''}</div>
+                                            <div>Aujourd'hui : {fmt(direct.aujourdhui.visites)} visite{direct.aujourdhui.visites > 1 ? 's' : ''} · {fmt(direct.aujourdhui.visiteurs)} visiteur{direct.aujourdhui.visiteurs > 1 ? 's' : ''} humain{direct.aujourdhui.visiteurs > 1 ? 's' : ''}</div>
+                                            {((direct.aujourdhui.robots || 0) + (direct.aujourdhui.suspects || 0)) > 0 && (
+                                                <div style={{ color: 'var(--ink-3)', fontSize: 12 }} data-testid="ecartes">Écartés des chiffres aujourd'hui : {pluriel(direct.aujourdhui.robots || 0, 'robot', 'robots')} · {pluriel(direct.aujourdhui.suspects || 0, 'visite suspecte', 'visites suspectes')}</div>
+                                            )}
                                             <div style={{ color: 'var(--ink-3)', fontSize: 12 }}>Est en direct toute personne qui a une page ouverte et visible depuis moins de {direct.fenetre_secondes} secondes.</div>
                                         </div>
                                     </div>
@@ -360,11 +375,12 @@
                                         {direct.journal.length === 0 ? <div className="empty-state" style={{ padding: '24px 0' }}>Aucune visite enregistrée pour l'instant.</div> : (
                                             <div className="table-scroll" style={{ maxHeight: 420, overflowY: 'auto' }}>
                                                 <table className="admin-table journal-table">
-                                                    <thead><tr><th>Quand</th><th>Lieu</th><th>Page</th><th>Provenance</th><th>Appareil</th></tr></thead>
+                                                    <thead><tr><th>Quand</th><th>Nature</th><th>Lieu</th><th>Page</th><th>Provenance</th><th>Appareil</th></tr></thead>
                                                     <tbody>
                                                         {direct.journal.map((j, i) => (
                                                             <tr key={i}>
                                                                 <td>{heureCourte(j.le)}</td>
+                                                                <td title={j.raison ? (raisonLibelle[j.raison] || j.raison) : ''} style={j.nature && j.nature !== 'humain' ? { color: 'var(--warm)' } : undefined}>{natureLibelle[j.nature] || 'Humain'}</td>
                                                                 <td className="large">{lieu(j.ville, j.pays)}</td>
                                                                 <td>{nomPage(j.page)}</td>
                                                                 <td>{j.campagne ? `${j.source} · ${j.campagne}` : (j.source || '')}</td>
@@ -419,6 +435,33 @@
                                             <div className="panel-header"><h2 className="panel-title">Heures de fréquentation</h2><span className="panel-count">heure de Paris</span></div>
                                             <Barres valeurs={resume.heures} etiquettes={resume.heures.map((_, h) => `${h} h`)} unite="visites" />
                                         </div>
+                                        {resume.qualite && (
+                                            <div className="panel" data-testid="qualite">
+                                                <div className="panel-header"><h2 className="panel-title">Qualité du trafic</h2><span className="panel-count">{jours} derniers jours</span></div>
+                                                <p className="panel-note" style={{ marginBottom: 14 }}>Les chiffres de cette page ne comptent que les visiteurs humains. Les robots reconnus et les visites suspectes sont enregistrés à part, jamais comptés dans la fréquentation ni dans l'acquisition.</p>
+                                                <div className="stats-grid" style={{ marginBottom: 20 }}>
+                                                    {['humain', 'robot', 'suspect'].map((n) => (
+                                                        <div className="stat-card" key={n}>
+                                                            <div className="stat-value">{fmt(resume.qualite[n].visites)}</div>
+                                                            <div className="stat-label">{n === 'humain' ? 'Visites humaines' : n === 'robot' ? 'Visites de robots' : 'Visites suspectes'}</div>
+                                                            <div className="stat-note">{pluriel(resume.qualite[n].visiteurs, 'visiteur', 'visiteurs')}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                {resume.qualite.raisons.length > 0 ? (
+                                                    <div className="table-scroll">
+                                                        <table className="admin-table journal-table">
+                                                            <thead><tr><th>Nature</th><th>Raison</th><th>Visites</th></tr></thead>
+                                                            <tbody>
+                                                                {resume.qualite.raisons.map((r, i) => (
+                                                                    <tr key={i}><td>{natureLibelle[r.nature] || r.nature}</td><td className="large">{raisonLibelle[r.raison] || r.raison}</td><td>{fmt(r.visites)}</td></tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                ) : <div className="empty-state" style={{ padding: '12px 0' }}>Aucun robot ni visite suspecte sur la période.</div>}
+                                            </div>
+                                        )}
                                         <p className="field-hint">
                                             Mesure faite par Zelyro, sans service tiers. Conservation 13 mois puis suppression automatique. Localisation approximative à la ville, d'après la base gratuite{' '}
                                             <a href="https://db-ip.com" target="_blank" rel="noopener" style={{ color: 'var(--sage-700)' }}>IP Geolocation by DB-IP</a> (licence CC BY 4.0).
