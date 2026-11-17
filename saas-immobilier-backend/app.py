@@ -768,6 +768,10 @@ _DDL_STATS = (
         vu_le TIMESTAMP NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS site_direct_vu_le_idx ON site_direct (vu_le)",
+    # Nature de chaque visite : humain, robot ou suspect (voir _nature_requete). Les visites déjà enregistrées sont
+    # « humain » : elles ne peuvent pas être reclassées après coup.
+    "ALTER TABLE site_visites ADD COLUMN IF NOT EXISTS nature VARCHAR(10) NOT NULL DEFAULT 'humain'",
+    "ALTER TABLE site_visites ADD COLUMN IF NOT EXISTS raison VARCHAR(30)",
 )
 
 
@@ -884,7 +888,11 @@ def _assurer_schema():
                                WHERE table_name = 'inbound_emails' AND column_name = 'corps_spam'),
                        to_regclass('demandes_demo') IS NOT NULL,
                        to_regclass('acquisition_depenses') IS NOT NULL,
-                       to_regclass('site_evenements') IS NOT NULL
+                       to_regclass('site_evenements') IS NOT NULL,
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'site_visites' AND column_name = 'nature'),
+                       EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'demandes_demo' AND column_name = 'conversion_le')
             """)
             if not all(cur.fetchone()):
                 cur.execute("SELECT pg_advisory_xact_lock(727301)")
@@ -1732,6 +1740,8 @@ _DDL_DEMANDES = (
         cree_le TIMESTAMP NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS site_evenements_cree_le_idx ON site_evenements (cree_le)",
+    # Conversion Google Ads / Meta : la demande n'est mesurée qu'une fois, et seulement si elle est en base.
+    "ALTER TABLE demandes_demo ADD COLUMN IF NOT EXISTS conversion_le TIMESTAMP",
 )
 
 
@@ -2112,6 +2122,41 @@ def demande_demo():
                     "ref": ref, "doublon": doublon}), 200
 
 
+DEMO_CONVERSION_MINUTES = 60       # une demande ne peut être mesurée comme conversion que dans l'heure qui suit son enregistrement
+
+
+@app.route('/api/v1/demande-demo/confirmation', methods=['POST'])
+@limiter.limit("30 per hour")
+def demande_demo_confirmation():
+    """Autorise le site à mesurer UNE conversion (Google Ads, Pixel Meta) pour une demande de démonstration.
+
+    Le site envoie l'identifiant (« ref ») que le serveur lui a renvoyé à l'enregistrement. La réponse est
+    {"conversion": true} une seule fois par demande, et seulement si cette demande est en base, enregistrée depuis
+    moins de DEMO_CONVERSION_MINUTES minutes, et que l'appel vient d'un navigateur (ni robot déclaré, ni requête sans
+    langue). Dans tous les autres cas : {"conversion": false}, sans dire pourquoi. Un identifiant inventé, un
+    rechargement de la page, un second onglet ou un robot ne produisent donc jamais de conversion. Aucune donnée
+    personnelle n'est lue ni renvoyée."""
+    data = request.get_json(silent=True) or {}
+    ref = str(data.get('ref') or '')
+    nature, _ = _nature_requete()
+    if nature != 'humain' or not _REF_DEMANDE_RE.match(ref):
+        return jsonify({"conversion": False}), 200
+    try:
+        _assurer_schema()
+        maintenant = _maintenant()
+        with _base() as (conn, cur):
+            # Une seule requête atomique : deux appels simultanés ne peuvent pas obtenir « true » tous les deux.
+            cur.execute("""UPDATE demandes_demo SET conversion_le = %s
+                           WHERE ref = %s AND conversion_le IS NULL AND cree_le > %s RETURNING id""",
+                        (maintenant, ref, maintenant - timedelta(minutes=DEMO_CONVERSION_MINUTES)))
+            ligne = cur.fetchone()
+            conn.commit()
+        return jsonify({"conversion": ligne is not None}), 200
+    except Exception:
+        app.logger.exception("Confirmation de conversion impossible")
+        return jsonify({"conversion": False}), 503
+
+
 @app.route('/public/stats/evenement', methods=['POST'])
 @limiter.limit("120 per hour")
 def stats_evenement():
@@ -2264,11 +2309,11 @@ def admin_demandes_resume():
                            WHERE cree_le >= %s AND page = '/demo-agences' GROUP BY evenement""", (debut,))
             etapes = {r['evenement']: r['visiteurs'] for r in cur.fetchall()}
             cur.execute("""SELECT count(DISTINCT visiteur) AS visiteurs FROM site_visites
-                           WHERE cree_le >= %s AND page = '/demo-agences'""", (debut,))
+                           WHERE nature = 'humain' AND cree_le >= %s AND page = '/demo-agences'""", (debut,))
             visiteurs_page = cur.fetchone()['visiteurs']
             # Visiteurs du site par canal (pages publiques mesurées, un visiteur compté une fois par source).
             cur.execute("""SELECT source, count(DISTINCT visiteur) AS visiteurs FROM site_visites
-                           WHERE cree_le >= %s GROUP BY source""", (debut,))
+                           WHERE nature = 'humain' AND cree_le >= %s GROUP BY source""", (debut,))
             visites_par_canal = {}
             for r in cur.fetchall():
                 c = _canal_depuis_source_visite(r['source'])
@@ -11731,11 +11776,52 @@ def _appareil_stats(largeur, agent):
     return 'mobile' if w < 768 else ('tablette' if w < 1100 else 'ordinateur')
 
 
-def _lire_passage():
-    """(données, page) d'une requête de mesure valide, sinon None. Les
-    visiteurs qui ont activé « Ne pas me suivre » (DNT ou GPC) et les robots
-    ne sont jamais mesurés."""
-    if not _stats_actives() or _est_robot():
+# --- Qui est derrière une visite : humain, robot ou visite suspecte ---
+# Une visite de robot ou une visite suspecte est enregistrée avec sa nature, mais n'est JAMAIS comptée dans les chiffres
+# de fréquentation, ni « en direct », ni dans l'acquisition : l'administration les affiche à part.
+STATS_RAFALE_PAGES = 15              # autant de pages différentes en 10 minutes : aucune personne ne lit aussi vite
+STATS_MERCI_VALIDITE_HEURES = 24     # la page de confirmation ne compte que pour une demande enregistrée depuis moins de 24 h
+# Plus précis que _ROBOTS_RE (qui sert aux aperçus de liens des e-mails) : « linkedin » ou « preview » seuls ne suffisent
+# pas ici, car le navigateur intégré à l'application LinkedIn est une vraie personne.
+_ROBOTS_STATS_RE = re.compile(
+    r"bot|crawl|spider|slurp|facebookexternalhit|meta-externalagent|whatsapp/|barracuda|proofpoint|mimecast|safelinks|"
+    r"curl/|wget|python-requests|python-urllib|python-httpx|aiohttp|httpx|go-http-client|java/|okhttp|axios|node-fetch|"
+    r"undici|libwww|headlesschrome|phantomjs|puppeteer|playwright|selenium|webdriver|lighthouse|pagespeed|gtmetrix|"
+    r"pingdom|uptimerobot|scrapy|chatgpt-user|perplexity-user|claude-user|google-inspectiontool|google-read-aloud|"
+    r"googleother|ahrefs|semrush|mj12|dataforseo|screaming frog|web preview|link preview", re.I)
+
+
+def _nature_requete():
+    """(nature, raison) d'après ce que la requête elle-même révèle : robot déclaré ou sans identifiant, ou
+    navigateur qui n'annonce aucune langue (un vrai navigateur en envoie toujours une)."""
+    agent = request.headers.get('User-Agent', '').strip()
+    if len(agent) < 10:
+        return 'robot', 'sans_agent'
+    if _ROBOTS_STATS_RE.search(agent):
+        return 'robot', 'agent_robot'
+    if not request.headers.get('Accept-Language', '').strip():
+        return 'suspect', 'sans_langue'
+    return 'humain', None
+
+
+def _nature_vue(donnees):
+    nature, raison = _nature_requete()
+    if nature != 'humain':
+        return nature, raison
+    try:
+        largeur = int(donnees.get('w'))
+    except (TypeError, ValueError):
+        largeur = 0
+    if largeur < 1 or largeur > 10000:
+        return 'suspect', 'ecran_invalide'
+    return 'humain', None
+
+
+def _lire_passage_classe():
+    """(données, page, nature, raison) d'une requête de mesure valide, sinon None. Seuls les visiteurs qui ont activé
+    « Ne pas me suivre » (DNT ou GPC) ne sont pas du tout enregistrés ; les robots et les visites suspectes le sont,
+    avec leur nature."""
+    if not _stats_actives():
         return None
     if request.headers.get('DNT') == '1' or request.headers.get('Sec-GPC') == '1':
         return None
@@ -11745,7 +11831,18 @@ def _lire_passage():
     page = _page_stats(donnees.get('p'))
     if not page:
         return None
-    return donnees, page
+    nature, raison = _nature_vue(donnees)
+    return donnees, page, nature, raison
+
+
+def _lire_passage():
+    """(données, page) d'une requête de mesure d'un visiteur HUMAIN, sinon None : présence « en direct » et étapes du
+    parcours ne concernent jamais les robots ni les visites suspectes. La page de confirmation n'est jamais « en
+    direct » : sa seule mesure est la visite, vérifiée dans stats_vue."""
+    lu = _lire_passage_classe()
+    if lu is None or lu[2] != 'humain' or lu[1] == '/demo-merci':
+        return None
+    return lu[0], lu[1]
 
 
 def _marquer_presence(cur, visiteur, page, appareil, geo, maintenant):
@@ -11784,29 +11881,49 @@ def _purger_stats():
 @limiter.limit("120 per hour")
 def stats_vue():
     """Une page publique vient de s'afficher. Répond toujours 204 : la
-    mesure ne doit jamais gêner la page, ni dire ce qu'elle a retenu."""
+    mesure ne doit jamais gêner la page, ni dire ce qu'elle a retenu.
+    La visite est classée humain, robot ou suspect ; seule une visite humaine compte dans les chiffres."""
     try:
-        lu = _lire_passage()
+        lu = _lire_passage_classe()
         if lu is None:
             return '', 204
-        donnees, page = lu
+        donnees, page, nature, raison = lu
         agent = request.headers.get('User-Agent', '')
         ip = get_remote_address()
         visiteur = _empreinte_visiteur(ip, agent)
-        geo = _geo_chercher(ip)
+        geo = _geo_chercher(ip) if nature == 'humain' else {}
         appareil = _appareil_stats(donnees.get('w'), agent)
         maintenant = _maintenant()
         _assurer_schema()
         with _base() as (conn, cur):
+            if nature == 'humain' and page == '/demo-merci':
+                # La page de confirmation n'est une visite humaine que si elle suit une demande enregistrée en base
+                # (identifiant « m » envoyé par stats.js) ; sinon c'est une visite suspecte, jamais comptée.
+                ref = str(donnees.get('m') or '')
+                existe = False
+                if _REF_DEMANDE_RE.match(ref):
+                    cur.execute("SELECT 1 FROM demandes_demo WHERE ref = %s AND cree_le > %s",
+                                (ref, maintenant - timedelta(hours=STATS_MERCI_VALIDITE_HEURES)))
+                    existe = cur.fetchone() is not None
+                if not existe:
+                    nature, raison = 'suspect', 'merci_sans_demande'
+            if nature == 'humain':
+                cur.execute("""SELECT count(*) AS n FROM site_visites
+                               WHERE visiteur = %s AND nature = 'humain' AND cree_le > %s""",
+                            (visiteur, maintenant - timedelta(minutes=10)))
+                if cur.fetchone()['n'] >= STATS_RAFALE_PAGES:
+                    nature, raison = 'suspect', 'rafale'
             cur.execute("""SELECT 1 FROM site_visites WHERE visiteur = %s AND page = %s AND cree_le > %s LIMIT 1""",
                         (visiteur, page, maintenant - timedelta(minutes=STATS_DOUBLON_MINUTES)))
             if not cur.fetchone():
                 cur.execute("""
-                    INSERT INTO site_visites (visiteur, page, source, campagne, appareil, pays, ville, lat, lon, cree_le)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO site_visites (visiteur, page, source, campagne, appareil, pays, ville, lat, lon, cree_le,
+                                              nature, raison)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (visiteur, page, _source_stats(donnees), _campagne_stats(donnees), appareil,
-                      geo.get('pays'), geo.get('ville'), geo.get('lat'), geo.get('lon'), maintenant))
-            _marquer_presence(cur, visiteur, page, appareil, geo, maintenant)
+                      geo.get('pays'), geo.get('ville'), geo.get('lat'), geo.get('lon'), maintenant, nature, raison))
+            if nature == 'humain' and page != '/demo-merci':      # la page de confirmation n'est jamais « en direct »
+                _marquer_presence(cur, visiteur, page, appareil, geo, maintenant)
             conn.commit()
         # La purge (13 mois) est faite chaque jour par /internal/purge, plus par tirage au hasard.
     except Exception:
@@ -11859,10 +11976,13 @@ def admin_stats_direct():
                            WHERE vu_le >= %s ORDER BY debut""",
                         (maintenant - timedelta(seconds=STATS_DIRECT_SECONDES),))
             actifs = cur.fetchall()
-            cur.execute("""SELECT cree_le, page, source, campagne, appareil, pays, ville
+            cur.execute("""SELECT cree_le, page, source, campagne, appareil, pays, ville, nature, raison
                            FROM site_visites ORDER BY id DESC LIMIT 40""")
             journal = cur.fetchall()
-            cur.execute("""SELECT count(*) AS visites, count(DISTINCT visiteur) AS visiteurs
+            cur.execute("""SELECT count(*) FILTER (WHERE nature = 'humain') AS visites,
+                                  count(DISTINCT visiteur) FILTER (WHERE nature = 'humain') AS visiteurs,
+                                  count(*) FILTER (WHERE nature = 'robot') AS robots,
+                                  count(*) FILTER (WHERE nature = 'suspect') AS suspects
                            FROM site_visites WHERE cree_le >= %s""", (_debut_jour_paris(),))
             jour = cur.fetchone()
         villes = {}
@@ -11875,13 +11995,15 @@ def admin_stats_direct():
         return jsonify({
             "en_direct": len(actifs),
             "fenetre_secondes": STATS_DIRECT_SECONDES,
-            "aujourdhui": {"visites": jour['visites'], "visiteurs": jour['visiteurs']},
+            "aujourdhui": {"visites": jour['visites'], "visiteurs": jour['visiteurs'],
+                           "robots": jour['robots'], "suspects": jour['suspects']},
             "villes": sorted(villes.values(), key=lambda v: -v["n"]),
             "visiteurs": [{"page": a['page'], "appareil": a['appareil'], "pays": a['pays'],
                            "ville": a['ville'], "depuis": _iso(a['debut'])} for a in actifs],
             "journal": [{"le": _iso(j['cree_le']), "page": j['page'], "source": j['source'],
                          "campagne": j['campagne'], "appareil": j['appareil'],
-                         "pays": j['pays'], "ville": j['ville']} for j in journal],
+                         "pays": j['pays'], "ville": j['ville'],
+                         "nature": j['nature'], "raison": j['raison']} for j in journal],
             "geo": _geo_etat(),
             "actif": _stats_actives(),
         }), 200
@@ -11906,36 +12028,43 @@ def admin_stats_resume():
         paris = "(cree_le AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris'"
         with _base() as (conn, cur):
             cur.execute("""SELECT (%s)::date AS jour, count(*) AS visites, count(DISTINCT visiteur) AS visiteurs
-                           FROM site_visites WHERE cree_le >= %%s GROUP BY 1 ORDER BY 1""" % paris, (debut,))
+                           FROM site_visites WHERE nature = 'humain' AND cree_le >= %%s GROUP BY 1 ORDER BY 1""" % paris, (debut,))
             par_jour = {r['jour']: r for r in cur.fetchall()}
             cur.execute("""SELECT extract(hour FROM %s)::int AS heure, count(*) AS visites
-                           FROM site_visites WHERE cree_le >= %%s GROUP BY 1""" % paris, (debut,))
+                           FROM site_visites WHERE nature = 'humain' AND cree_le >= %%s GROUP BY 1""" % paris, (debut,))
             par_heure = {r['heure']: r['visites'] for r in cur.fetchall()}
             cur.execute("""SELECT page, count(*) AS visites, count(DISTINCT visiteur) AS visiteurs
-                           FROM site_visites WHERE cree_le >= %s GROUP BY page ORDER BY visites DESC LIMIT 15""", (debut,))
+                           FROM site_visites WHERE nature = 'humain' AND cree_le >= %s GROUP BY page ORDER BY visites DESC LIMIT 15""", (debut,))
             pages = cur.fetchall()
             cur.execute("""SELECT COALESCE(source, 'direct') AS source, count(*) AS visites, count(DISTINCT visiteur) AS visiteurs
-                           FROM site_visites WHERE cree_le >= %s AND COALESCE(source, '') <> 'interne'
+                           FROM site_visites WHERE nature = 'humain' AND cree_le >= %s AND COALESCE(source, '') <> 'interne'
                            GROUP BY 1 ORDER BY visites DESC LIMIT 12""", (debut,))
             sources = cur.fetchall()
             cur.execute("""SELECT campagne, count(*) AS visites, count(DISTINCT visiteur) AS visiteurs
-                           FROM site_visites WHERE cree_le >= %s AND campagne IS NOT NULL
+                           FROM site_visites WHERE nature = 'humain' AND cree_le >= %s AND campagne IS NOT NULL
                            GROUP BY campagne ORDER BY visites DESC LIMIT 10""", (debut,))
             campagnes = cur.fetchall()
             cur.execute("""SELECT pays, count(*) AS visites, count(DISTINCT visiteur) AS visiteurs
-                           FROM site_visites WHERE cree_le >= %s AND pays IS NOT NULL
+                           FROM site_visites WHERE nature = 'humain' AND cree_le >= %s AND pays IS NOT NULL
                            GROUP BY pays ORDER BY visites DESC LIMIT 20""", (debut,))
             pays = cur.fetchall()
             cur.execute("""SELECT pays, ville, avg(lat)::float AS lat, avg(lon)::float AS lon,
                                   count(*) AS visites, count(DISTINCT visiteur) AS visiteurs
-                           FROM site_visites WHERE cree_le >= %s AND ville IS NOT NULL AND lat IS NOT NULL
+                           FROM site_visites WHERE nature = 'humain' AND cree_le >= %s AND ville IS NOT NULL AND lat IS NOT NULL
                            GROUP BY pays, ville ORDER BY visites DESC LIMIT 300""", (debut,))
             villes = cur.fetchall()
             cur.execute("""SELECT COALESCE(appareil, 'ordinateur') AS appareil, count(*) AS visites
-                           FROM site_visites WHERE cree_le >= %s GROUP BY 1 ORDER BY visites DESC""", (debut,))
+                           FROM site_visites WHERE nature = 'humain' AND cree_le >= %s GROUP BY 1 ORDER BY visites DESC""", (debut,))
             appareils = cur.fetchall()
             cur.execute("SELECT count(*) AS n, min(cree_le) AS premier FROM site_visites")
             total = cur.fetchone()
+            cur.execute("""SELECT nature, count(*) AS visites, count(DISTINCT visiteur) AS visiteurs
+                           FROM site_visites WHERE cree_le >= %s GROUP BY nature""", (debut,))
+            par_nature = {r['nature']: r for r in cur.fetchall()}
+            cur.execute("""SELECT nature, COALESCE(raison, '') AS raison, count(*) AS visites
+                           FROM site_visites WHERE cree_le >= %s AND nature <> 'humain'
+                           GROUP BY 1, 2 ORDER BY visites DESC LIMIT 20""", (debut,))
+            raisons = cur.fetchall()
         serie = []
         jour0 = (datetime.now(_fuseau_rdv()) - timedelta(days=jours - 1)).date()
         for i in range(jours):
@@ -11952,6 +12081,11 @@ def admin_stats_resume():
             "villes": [{"pays": v['pays'], "ville": v['ville'], "lat": v['lat'], "lon": v['lon'],
                         "visites": v['visites'], "visiteurs": v['visiteurs']} for v in villes],
             "appareils": appareils,
+            "qualite": {
+                **{n: {"visites": (par_nature.get(n) or {}).get('visites', 0),
+                       "visiteurs": (par_nature.get(n) or {}).get('visiteurs', 0)} for n in ('humain', 'robot', 'suspect')},
+                "raisons": [{"nature": r['nature'], "raison": r['raison'], "visites": r['visites']} for r in raisons],
+            },
             "depuis": _iso(total['premier']),
             "geo": _geo_etat(),
         }), 200

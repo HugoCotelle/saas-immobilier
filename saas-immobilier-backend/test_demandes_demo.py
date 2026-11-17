@@ -275,7 +275,7 @@ ok(c.delete(f"/admin/demandes-demo/{idl}", headers=admin_h).status_code == 200 a
    "effacement définitif d'une demande (RGPD)")
 
 # ---------------------------------------------------------------- 7. mesure du parcours
-UA = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) AppleWebKit Mobile Safari"}
+UA = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) AppleWebKit Mobile Safari", "Accept-Language": "fr-FR,fr;q=0.9"}
 ev = lambda **k: c.post("/public/stats/evenement", data=json.dumps(dict({"p": "/demo-agences.html", "w": 390, "s": "facebook", "c": "test_a"}, **k)), headers=UA)
 ok(ev(e="cta_clic").status_code == 204 and ev(e="formulaire_debut").status_code == 204 and ev(e="video_lecture").status_code == 204
    and ev(e="formulaire_erreur", d="email").status_code == 204, "événements du parcours acceptés (204)")
@@ -293,7 +293,7 @@ ok(sql("SELECT count(*) FROM information_schema.columns WHERE table_name='site_e
 # les pages de prospection sont enfin mesurées
 c.post("/public/stats/vue", data=json.dumps({"p": "/demo-agences.html", "w": 390, "s": "facebook", "c": "test_a"}), headers=UA)
 c.post("/public/stats/vue", data=json.dumps({"p": "/demo-merci.html", "w": 390}), headers=dict(UA, **{"X-Forwarded-For": "10.1.1.1"}))
-ok(sql("SELECT count(*) FROM site_visites WHERE page IN ('/demo-agences','/demo-merci')")[0][0] == 2, "demo-agences et demo-merci sont maintenant comptées dans les visites")
+ok(sql("SELECT count(*) FROM site_visites WHERE page IN ('/demo-agences','/demo-merci')")[0][0] == 2, "demo-agences et demo-merci sont enregistrées dans les visites (la seconde, sans demande, comme suspecte : voir section 8)")
 R = c.get("/admin/demandes-demo/resume?jours=30", headers=admin_h).get_json()["parcours_page"]
 ok(R["visiteurs"] == 1 and R["clic_bouton"] == 1 and R["formulaire_commence"] == 1 and R["video_lue"] == 1 and R["erreurs_formulaire"] == 1,
    "résumé : parcours de la page (visiteurs, bouton, formulaire commencé, vidéo, erreurs)")
@@ -393,7 +393,7 @@ for i, (ref_, s_) in enumerate([("https://chatgpt.com/", None), ("https://www.go
     d_ = {"p": "/tarifs.html", "w": 1400}
     if ref_: d_["r"] = ref_
     if s_: d_["s"] = s_
-    c.post("/public/stats/vue", data=json.dumps(d_), headers=dict({"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Test%d" % i}, **{"X-Forwarded-For": "10.9.9.%d" % (i + 1)}))
+    c.post("/public/stats/vue", data=json.dumps(d_), headers=dict({"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Test%d" % i, "Accept-Language": "fr"}, **{"X-Forwarded-For": "10.9.9.%d" % (i + 1)}))
 R = c.get("/admin/demandes-demo/resume?jours=30", headers=admin_h).get_json()
 par = {x["canal"]: x for x in R["canaux"]}
 ok(par.get("chatgpt", {}).get("visites", 0) >= 1 and par["chatgpt"]["demandes"] == 1 and par["chatgpt"]["clients"] == 1 and par["chatgpt"]["qualifiees"] == 1,
@@ -404,6 +404,198 @@ ok(par["chatgpt"].get("taux_visite_demande") is not None, "résumé : taux visit
 ok(c.post("/admin/acquisition/depenses", json={"canal": "chatgpt", "debut": "2026-11-16", "montant_eur": 5}, headers=admin_h).status_code in (200, 201),
    "les nouveaux canaux sont acceptés pour la saisie de dépenses (ex. annuaire payant)")
 ok(c.get("/admin/demandes-demo?canal=chatgpt", headers=admin_h).get_json()["demandes"] != [], "filtre par canal ChatGPT")
+
+# ---------------------------------------------------------------- 8. conversions fiables et nature des visites
+import threading
+HUMAIN = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36",
+          "Accept-Language": "fr-FR,fr;q=0.9"}
+conf = lambda ref, h=None: c.post("/api/v1/demande-demo/confirmation", json={"ref": ref}, headers=h or HUMAIN)
+conv = lambda r: r.get_json().get("conversion") if r.status_code in (200, 503) else None
+ref_n = lambda n: "%024x" % (0xc0ffee000000 + n)
+
+# --- 8.1 confirmation : une seule conversion, seulement pour une demande réellement en base
+r = post(demande(email="conv1@t.test", id_demande=ref_n(1)), HUMAIN)
+ok(r.status_code == 200 and r.get_json()["ref"] == ref_n(1), "8.1 demande enregistrée avant toute mesure")
+ok(sql("SELECT conversion_le FROM demandes_demo WHERE ref=%s", (ref_n(1),))[0][0] is None, "8.1 une demande qui vient d'être enregistrée n'est pas encore « mesurée »")
+r = conf(ref_n(1))
+ok(r.status_code == 200 and r.get_json() == {"conversion": True}, "8.1 première confirmation : conversion autorisée, réponse minimale (aucune donnée personnelle)")
+ok(sql("SELECT conversion_le FROM demandes_demo WHERE ref=%s", (ref_n(1),))[0][0] is not None, "8.1 la mesure est notée en base sur la demande")
+ok(conv(conf(ref_n(1))) is False and conv(conf(ref_n(1))) is False, "8.2 rechargement ou second onglet : plus de conversion (même demande, même confirmation)")
+
+# --- 8.3 fausses conversions
+ok(conv(conf(ref_n(999))) is False, "8.3 identifiant bien formé mais inconnu (inventé) : aucune conversion")
+for faux in ("", "abc", "G" * 24, "a" * 23, "a" * 25, "'; DROP TABLE demandes_demo;--", None, 12345, ["x"], {"a": 1}):
+    r = c.post("/api/v1/demande-demo/confirmation", json={"ref": faux}, headers=HUMAIN)
+    ok(r.status_code == 200 and r.get_json() == {"conversion": False}, "8.3 identifiant invalide refusé : %r" % (faux,))
+r = c.post("/api/v1/demande-demo/confirmation", data="pas du json", headers=HUMAIN)
+ok(r.status_code == 200 and r.get_json() == {"conversion": False}, "8.3 corps illisible : aucune conversion")
+ok(c.post("/api/v1/demande-demo/confirmation", json={}, headers=HUMAIN).get_json() == {"conversion": False}, "8.3 sans identifiant : aucune conversion")
+ok(c.get("/api/v1/demande-demo/confirmation").status_code == 405, "8.3 la route n'accepte que POST (pas d'appel par simple lien)")
+r = post(demande(email="piege@t.test", id_demande=ref_n(2), site_web="http://spam.test"), HUMAIN)
+ok(r.status_code == 200 and "ref" not in r.get_json() and not sql("SELECT 1 FROM demandes_demo WHERE email='piege@t.test'"),
+   "8.3 robot du champ piège : réponse sans identifiant, rien en base, donc aucune conversion possible")
+ok(conv(conf(ref_n(2))) is False, "8.3 l'identifiant du robot du champ piège ne produit aucune conversion")
+r = post(demande(email="", id_demande=ref_n(3)), HUMAIN)
+ok(r.status_code == 400 and conv(conf(ref_n(3))) is False, "8.3 formulaire refusé (400) : aucune conversion")
+
+# --- 8.4 robots et requêtes sans langue : refusés SANS consommer la conversion
+post(demande(email="conv4@t.test", id_demande=ref_n(4)), HUMAIN)
+for nom, h in (("Googlebot", {"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", "Accept-Language": "fr"}),
+               ("navigateur sans interface", {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) HeadlessChrome/126.0 Safari/537.36", "Accept-Language": "fr"}),
+               ("ChatGPT-User", {"User-Agent": "Mozilla/5.0 AppleWebKit/537.36 (compatible; ChatGPT-User/1.0)", "Accept-Language": "en"}),
+               ("script curl", {"User-Agent": "curl/8.5.0"}),
+               ("sans User-Agent", {"User-Agent": "", "Accept-Language": "fr"}),
+               ("sans langue", {"User-Agent": HUMAIN["User-Agent"]})):
+    ok(conv(conf(ref_n(4), h)) is False, "8.4 %s : aucune conversion" % nom)
+ok(sql("SELECT conversion_le FROM demandes_demo WHERE ref=%s", (ref_n(4),))[0][0] is None, "8.4 …et la conversion de la vraie personne reste disponible")
+ok(conv(conf(ref_n(4))) is True, "8.4 la vraie personne obtient ensuite sa conversion")
+
+# --- 8.5 délai : une demande ancienne ne peut plus être mesurée
+post(demande(email="conv5@t.test", id_demande=ref_n(5)), HUMAIN)
+sql("UPDATE demandes_demo SET cree_le = cree_le - interval '2 hours' WHERE ref=%s", (ref_n(5),))
+ok(conv(conf(ref_n(5))) is False, "8.5 demande enregistrée depuis plus d'une heure : aucune conversion")
+
+# --- 8.6 doublon : la même personne qui renvoie le formulaire n'est pas comptée deux fois
+r1 = post(demande(email="dbl@t.test", id_demande=ref_n(6)), HUMAIN).get_json()
+r2 = post(demande(email="dbl@t.test", id_demande=ref_n(7)), HUMAIN).get_json()
+ok(r1["doublon"] is False and r2["doublon"] is True and r2["ref"] == ref_n(6), "8.6 second envoi reconnu comme doublon, même référence")
+ok(conv(conf(r1["ref"])) is True, "8.6 la première demande donne une conversion")
+ok(conv(conf(r2["ref"])) is False, "8.6 le doublon (même référence) ne produit pas de seconde conversion")
+ok(sql("SELECT count(*) FROM demandes_demo WHERE email='dbl@t.test'")[0][0] == 1, "8.6 une seule demande en base")
+# demande dont la page de confirmation n'a jamais été vue, puis renvoi : mesurée une fois, pas deux
+r1 = post(demande(email="dbl2@t.test", id_demande=ref_n(8)), HUMAIN).get_json()
+r2 = post(demande(email="dbl2@t.test", id_demande=ref_n(9)), HUMAIN).get_json()
+ok(conv(conf(r2["ref"])) is True and conv(conf(r1["ref"])) is False, "8.6 onglet fermé avant la confirmation puis renvoi : mesurée une seule fois")
+
+# --- 8.7 appels simultanés : un seul « vrai »
+post(demande(email="conv7@t.test", id_demande=ref_n(10)), HUMAIN)
+resultats = []
+def appel():
+    cl = appz.app.test_client()
+    resultats.append(cl.post("/api/v1/demande-demo/confirmation", json={"ref": ref_n(10)}, headers=HUMAIN).get_json()["conversion"])
+fils = [threading.Thread(target=appel) for _ in range(10)]
+[f.start() for f in fils]; [f.join() for f in fils]
+ok(len(resultats) == 10 and resultats.count(True) == 1, "8.7 dix appels simultanés : exactement une conversion (%d)" % resultats.count(True))
+
+# --- 8.8 panne de base : aucune conversion, jamais de « true » par défaut
+post(demande(email="conv8@t.test", id_demande=ref_n(11)), HUMAIN)
+with mock.patch.object(appz, "_base", side_effect=RuntimeError("base coupée")):
+    r = conf(ref_n(11))
+ok(r.status_code == 503 and r.get_json() == {"conversion": False}, "8.8 base indisponible : 503 et aucune conversion")
+ok(conv(conf(ref_n(11))) is True, "8.8 une fois la base revenue, la conversion reste possible (non consommée à tort)")
+
+# --- 8.9 nature des visites : humain, robot, suspect
+sql("DELETE FROM site_visites"); sql("DELETE FROM site_direct")
+vue = lambda p, h, w=1280, **k: c.post("/public/stats/vue", data=json.dumps(dict({"p": p, "w": w}, **k)), headers=h)
+nat = lambda page: sql("SELECT nature, raison FROM site_visites WHERE page=%s ORDER BY id DESC LIMIT 1", (page,))
+fx = lambda i: {"X-Forwarded-For": "10.20.0.%d" % i}
+vue("/tarifs.html", dict(HUMAIN, **fx(1)))
+ok(nat("/tarifs") == [("humain", None)], "8.9 visiteur humain : « humain »")
+ok(sql("SELECT count(*) FROM site_direct")[0][0] == 1, "8.9 un humain est « en direct »")
+casse = [("/login.html", "Googlebot", {"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)", "Accept-Language": "fr"}, ("robot", "agent_robot")),
+         ("/cgu.html", "Bingbot", {"User-Agent": "Mozilla/5.0 (compatible; bingbot/2.0)", "Accept-Language": "fr"}, ("robot", "agent_robot")),
+         ("/mentions-legales.html", "GPTBot", {"User-Agent": "Mozilla/5.0 AppleWebKit/537.36 (compatible; GPTBot/1.1)"}, ("robot", "agent_robot")),
+         ("/confidentialite.html", "Chrome sans interface", {"User-Agent": "Mozilla/5.0 HeadlessChrome/126.0", "Accept-Language": "fr"}, ("robot", "agent_robot")),
+         ("/annonces.html", "Perplexity-User", {"User-Agent": "Mozilla/5.0 (compatible; Perplexity-User/1.0)", "Accept-Language": "en"}, ("robot", "agent_robot")),
+         ("/rdv.html", "outil de test de vitesse", {"User-Agent": "Mozilla/5.0 Chrome-Lighthouse", "Accept-Language": "en"}, ("robot", "agent_robot")),
+         ("/formulaire.html", "sans User-Agent", {"User-Agent": "", "Accept-Language": "fr"}, ("robot", "sans_agent")),
+         ("/completer.html", "script (curl)", {"User-Agent": "curl/8.5.0"}, ("robot", "agent_robot")),
+         ("/rejoindre-agence.html", "sans langue", {"User-Agent": HUMAIN["User-Agent"]}, ("suspect", "sans_langue"))]
+for i, (page, nom, h, attendu) in enumerate(casse):
+    vue(page, dict(h, **fx(30 + i)))
+    ok(nat(page[:-5]) == [attendu], "8.9 %s : %s / %s" % (nom, attendu[0], attendu[1]))
+ok(sql("SELECT count(*) FROM site_direct")[0][0] == 1, "8.9 robots et suspects ne sont jamais « en direct »")
+# vrais navigateurs qui ne doivent PAS être pris pour des robots
+for i, (nom, ua) in enumerate([("LinkedIn (navigateur intégré)", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 [LinkedInApp]/9.30"),
+                               ("Instagram (navigateur intégré)", "Mozilla/5.0 (iPhone) AppleWebKit/605.1.15 Mobile/15E148 Instagram 330.0"),
+                               ("Facebook (navigateur intégré)", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/460.0]"),
+                               ("Safari iPhone", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 Version/17.5 Mobile/15E148 Safari/604.1"),
+                               ("Firefox", "Mozilla/5.0 (X11; Linux x86_64; rv:127.0) Gecko/20100101 Firefox/127.0")]):
+    vue("/rdv.html" if i == 0 else "/tarifs.html", {"User-Agent": ua, "Accept-Language": "fr-FR", **fx(60 + i)}, w=390)
+    ok(nat("/rdv" if i == 0 else "/tarifs")[0][0] == "humain", "8.9 %s : reste « humain »" % nom)
+# taille d'écran impossible
+for i, w in enumerate((None, 0, -5, 20000, "abc")):
+    corps = {"p": "/annonces.html"}
+    if w is not None: corps["w"] = w
+    c.post("/public/stats/vue", data=json.dumps(corps), headers=dict(HUMAIN, **fx(80 + i)))
+    ok(nat("/annonces") == [("suspect", "ecran_invalide")], "8.9 largeur d'écran %r : suspect" % (w,))
+# « Ne pas me suivre » : rien du tout
+avant = sql("SELECT count(*) FROM site_visites")[0][0]
+vue("/cgu.html", dict(HUMAIN, DNT="1", **fx(90))); vue("/cgu.html", dict(HUMAIN, **{"Sec-GPC": "1"}, **fx(91)))
+ok(sql("SELECT count(*) FROM site_visites")[0][0] == avant, "8.9 « Ne pas me suivre » : rien n'est enregistré, même comme robot")
+
+# --- 8.10 page de confirmation : visite humaine seulement après une demande enregistrée
+sql("DELETE FROM site_visites")
+vue("/demo-merci.html", dict(HUMAIN, **fx(100)))
+ok(nat("/demo-merci") == [("suspect", "merci_sans_demande")], "8.10 /demo-merci sans identifiant de demande : suspect")
+vue("/demo-merci.html", dict(HUMAIN, **fx(101)), m=ref_n(777))
+ok(nat("/demo-merci") == [("suspect", "merci_sans_demande")], "8.10 /demo-merci avec un identifiant inventé : suspect")
+vue("/demo-merci.html", dict(HUMAIN, **fx(102)), m="pas-un-identifiant")
+ok(nat("/demo-merci") == [("suspect", "merci_sans_demande")], "8.10 /demo-merci avec un identifiant mal formé : suspect")
+vue("/demo-merci.html", dict(HUMAIN, **fx(103)), m=ref_n(5))      # demande de 2 heures, mais < 24 h
+ok(nat("/demo-merci") == [("humain", None)], "8.10 /demo-merci juste après une vraie demande : visite humaine")
+sql("UPDATE demandes_demo SET cree_le = cree_le - interval '30 hours' WHERE ref=%s", (ref_n(5),))
+vue("/demo-merci.html", dict(HUMAIN, **fx(104)), m=ref_n(5))
+ok(nat("/demo-merci") == [("suspect", "merci_sans_demande")], "8.10 /demo-merci avec une demande de plus de 24 h : suspect")
+vue("/demo-merci.html", {"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)", "Accept-Language": "fr", **fx(105)}, m=ref_n(6))
+ok(nat("/demo-merci") == [("robot", "agent_robot")], "8.10 robot sur /demo-merci, même avec un identifiant valide : robot")
+n_presence = sql("SELECT count(*) FROM site_direct WHERE page='/demo-merci'")[0][0]
+c.post("/public/stats/presence", data=json.dumps({"p": "/demo-merci.html", "w": 1280, "m": ref_n(6)}), headers=dict(HUMAIN, **fx(103)))
+ok(sql("SELECT count(*) FROM site_direct WHERE page='/demo-merci'")[0][0] == n_presence == 0, "8.10 la page de confirmation n'est jamais « en direct »")
+
+# --- 8.11 rafale : trop de pages différentes en quelques minutes
+sql("DELETE FROM site_visites"); sql("DELETE FROM site_direct")
+pages = sorted(appz.STATS_PAGES - {'demo-merci'})
+bot_rafale = dict(HUMAIN, **fx(120))
+for p in pages[:appz.STATS_RAFALE_PAGES]:
+    vue("/" + p + ".html", bot_rafale)
+ok(sql("SELECT count(*) FROM site_visites WHERE nature='humain'")[0][0] == appz.STATS_RAFALE_PAGES, "8.11 %d pages en 10 minutes : encore humain" % appz.STATS_RAFALE_PAGES)
+vue("/" + pages[appz.STATS_RAFALE_PAGES] + ".html", bot_rafale)
+ok(sql("SELECT nature, raison FROM site_visites ORDER BY id DESC LIMIT 1") == [("suspect", "rafale")], "8.11 la page suivante est une rafale : suspect")
+
+# --- 8.12 le tableau de bord ne compte que les humains et montre les autres à part
+sql("DELETE FROM site_visites"); sql("DELETE FROM site_direct")
+for i in range(3):
+    vue("/tarifs.html", dict(HUMAIN, **fx(140 + i)))
+vue("/tarifs.html", {"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)", "Accept-Language": "fr", **fx(150)})
+vue("/tarifs.html", {"User-Agent": "Mozilla/5.0 HeadlessChrome/126", "Accept-Language": "fr", **fx(151)})
+vue("/cgu.html", {"User-Agent": HUMAIN["User-Agent"], **fx(152)})
+D = c.get("/admin/stats/direct", headers=admin_h).get_json()
+ok(D["aujourdhui"]["visites"] == 3 and D["aujourdhui"]["visiteurs"] == 3, "8.12 en direct : « aujourd'hui » ne compte que les 3 humains")
+ok(D["aujourdhui"]["robots"] == 2 and D["aujourdhui"]["suspects"] == 1, "8.12 en direct : 2 robots et 1 visite suspecte affichés à part")
+ok(D["en_direct"] == 3, "8.12 « sur le site maintenant » : 3 humains")
+ok(sorted({j["nature"] for j in D["journal"]}) == ["humain", "robot", "suspect"] and all("raison" in j for j in D["journal"]),
+   "8.12 le journal montre la nature et la raison de chaque visite")
+Rz = c.get("/admin/stats/resume?jours=30", headers=admin_h).get_json()
+ok(Rz["totaux"]["visites"] == 3 and Rz["totaux"]["visiteurs"] == 3, "8.12 bilan : totaux humains seulement")
+ok(sum(p["visites"] for p in Rz["pages"]) == 3 and sum(a["visites"] for a in Rz["appareils"]) == 3
+   and sum(s["visites"] for s in Rz["sources"]) == 3, "8.12 bilan : pages, sources et appareils sans robots")
+q = Rz["qualite"]
+ok(q["humain"]["visites"] == 3 and q["robot"]["visites"] == 2 and q["suspect"]["visites"] == 1, "8.12 qualité du trafic : 3 humains, 2 robots, 1 suspect")
+ok({(r["nature"], r["raison"]): r["visites"] for r in q["raisons"]} == {("robot", "agent_robot"): 2, ("suspect", "sans_langue"): 1},
+   "8.12 qualité du trafic : raisons détaillées")
+vide = c.get("/admin/stats/resume?jours=1", headers=admin_h).get_json()["qualite"]
+ok(set(vide) >= {"humain", "robot", "suspect", "raisons"}, "8.12 les trois natures sont toujours présentes")
+ok(c.get("/admin/stats/direct").status_code == 401 and c.get("/admin/stats/resume", headers=autre_h).status_code in (403, 404),
+   "8.12 espace réservé à l'administrateur")
+# acquisition : les robots n'entrent pas dans les visiteurs par canal
+sql("DELETE FROM site_visites")
+vue("/demo-agences.html", dict(HUMAIN, **fx(160)), s="facebook")
+vue("/demo-agences.html", {"User-Agent": "Mozilla/5.0 (compatible; bingbot/2.0)", "Accept-Language": "fr", **fx(161)}, s="facebook")
+Ra = c.get("/admin/demandes-demo/resume?jours=30", headers=admin_h).get_json()
+ok(Ra["parcours_page"]["visiteurs"] == 1, "8.12 acquisition : un robot sur la page de démonstration n'est pas un visiteur (%s)" % Ra["parcours_page"]["visiteurs"])
+
+# --- 8.13 base existante : colonnes ajoutées sans perte, anciennes lignes = humain
+sql("INSERT INTO site_visites (visiteur, page, cree_le) VALUES ('ancienne00000000', '/tarifs', now() at time zone 'utc')")
+ok(sql("SELECT nature, raison FROM site_visites WHERE visiteur='ancienne00000000'") == [("humain", None)], "8.13 ancienne ligne (sans nature) : humain")
+sql("ALTER TABLE site_visites DROP COLUMN nature"); sql("ALTER TABLE site_visites DROP COLUMN raison"); sql("ALTER TABLE demandes_demo DROP COLUMN conversion_le")
+appz._schema_pret = False
+appz._assurer_schema()
+ok(sql("SELECT count(*) FROM information_schema.columns WHERE (table_name='site_visites' AND column_name IN ('nature','raison')) "
+       "OR (table_name='demandes_demo' AND column_name='conversion_le')")[0][0] == 3,
+   "8.13 une base existante reçoit les trois colonnes au démarrage (contrôle de schéma)")
+ok(sql("SELECT nature FROM site_visites WHERE visiteur='ancienne00000000'") == [("humain",)], "8.13 les lignes existantes restent « humain »")
+sql("DELETE FROM site_visites WHERE visiteur='ancienne00000000'")
 
 patch1.stop(); patch2.stop()
 cur.execute("DELETE FROM users WHERE email LIKE '%@t.test'"); conn.commit()
