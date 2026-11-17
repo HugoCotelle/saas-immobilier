@@ -5,7 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Demande envoyée — Zelyro</title>
 <meta name="description" content="Votre demande de démonstration Zelyro a bien été envoyée.">
-<meta name="robots" content="noindex, follow">
+<meta name="robots" content="noindex, nofollow">
+<script>
+/* Page de confirmation : accessible seulement juste après l'envoi d'une demande enregistrée (voir demande-demo.js).
+   Toute autre arrivée (lien, favori, historique, robot qui exécute le JavaScript) est renvoyée vers le formulaire. */
+(function () {
+    var ok = false;
+    try { ok = /^[0-9a-f]{24}$/.test(sessionStorage.getItem('zelyro_demande_vue') || ''); } catch (e) { /* stockage bloqué */ }
+    if (!ok) ok = /^#r=[0-9a-f]{24}$/.test(location.hash);
+    if (!ok) { document.documentElement.style.visibility = 'hidden'; location.replace('/demo-agences.html'); }
+})();
+</script>
 <meta name="theme-color" content="#F3F4F1">
 <link rel="canonical" href="https://www.zelyro.fr/demo-merci.html">
 <link rel="icon" href="/favicon.ico" sizes="48x48">

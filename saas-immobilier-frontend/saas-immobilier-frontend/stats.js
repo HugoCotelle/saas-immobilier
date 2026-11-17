@@ -27,6 +27,16 @@
         var page = location.pathname || '/';
         var largeur = window.innerWidth || (screen && screen.width) || 0;
         var corps = { p: page, w: largeur };
+        // Page de confirmation : mesurée seulement avec l'identifiant d'une demande qui vient d'être enregistrée (le serveur
+        // le vérifie). Visite directe : la page renvoie vers le formulaire et rien n'est envoyé ici.
+        var merci = /^\/demo-merci(\.html)?$/.test(page);
+        if (merci) {
+            var m = '';
+            try { m = sessionStorage.getItem('zelyro_demande_vue') || ''; } catch (e) { /* stockage bloqué */ }
+            if (!/^[0-9a-f]{24}$/.test(m)) { var h = /^#r=([0-9a-f]{24})$/.exec(location.hash || ''); m = h ? h[1] : ''; }
+            if (!m) return;
+            corps.m = m;
+        }
         try {
             var q = new URLSearchParams(location.search);
             if (q.get('utm_source')) corps.s = String(q.get('utm_source')).slice(0, 80);
@@ -84,6 +94,7 @@
         // permet de compter les personnes « en direct ».
         var presence = { p: page, w: largeur };
         function battement() {
+            if (merci) return;      // la page de confirmation n'est jamais « en direct »
             if (document.visibilityState !== 'hidden') envoyer('/public/stats/presence', presence);
         }
         setInterval(battement, 30000);

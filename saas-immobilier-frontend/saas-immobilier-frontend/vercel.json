@@ -42,6 +42,14 @@
       ]
     },
     {
+      "source": "/demo-merci.html",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
+      "source": "/demo-merci",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
       "source": "/sw.js",
       "headers": [
         {

@@ -4,8 +4,9 @@
    - une demande n'est annoncée « envoyée » que si le serveur répond qu'elle est ENREGISTRÉE (HTTP 200) ;
    - un identifiant unique est créé à l'ouverture de la page et réutilisé à chaque nouvel essai : un double clic,
      un retour en arrière ou une nouvelle tentative après une coupure ne créent jamais deux demandes ;
-   - la page de confirmation (/demo-merci.html) ne mesure la demande dans Google Ads et dans le Pixel Meta que si le
-     serveur a confirmé une NOUVELLE demande (drapeau posé ici) ; une demande déjà connue (doublon) n'est pas recomptée ;
+   - la page de confirmation (/demo-merci.html) n'est accessible que juste après une demande enregistrée (drapeau posé
+     ici) et ne mesure la demande dans Google Ads et dans le Pixel Meta qu'après une confirmation du serveur, une seule
+     fois par demande (voir consentement.js) : un doublon, un rechargement ou un robot ne sont pas recomptés ;
    - ce que le visiteur écrit n'est jamais envoyé à un service publicitaire ni au suivi du parcours. */
 (function () {
     'use strict';
@@ -171,12 +172,18 @@
     }
 
     page.appendChild(batir(function (reponse, id) {
-        // Le serveur a ENREGISTRÉ la demande (HTTP 200). Le drapeau « nouvelle demande » ne sert qu'à mesurer une fois
-        // dans Google Ads / Meta : pas de drapeau pour un doublon (même personne déjà enregistrée) ni pour un robot.
+        // Le serveur a ENREGISTRÉ la demande (HTTP 200) et renvoie son identifiant. Deux drapeaux, dans cet onglet seulement :
+        // - « zelyro_demande_vue » autorise l'accès à la page de confirmation (il est gardé : un rechargement l'affiche encore) ;
+        // - « zelyro_demande_ok » sert UNE fois à demander au serveur l'autorisation de mesurer la conversion (consentement.js).
+        // Sans identifiant (robot du champ piège), aucun drapeau : la page de confirmation renvoie vers le formulaire.
         var ref = reponse && /^[0-9a-f]{24}$/.test(reponse.ref || '') ? reponse.ref : '';
-        if (ref && reponse.doublon !== true) {
-            try { sessionStorage.setItem('zelyro_demande_ok', ref); } catch (e) { /* ignoré */ }
+        var suite = '/demo-merci.html';
+        if (ref) {
+            try {
+                sessionStorage.setItem('zelyro_demande_ok', ref);
+                sessionStorage.setItem('zelyro_demande_vue', ref);
+            } catch (e) { suite += '#r=' + ref; }      // stockage bloqué : l'identifiant voyage dans l'adresse (jamais envoyé au serveur par le navigateur)
         }
-        location.href = '/demo-merci.html';
+        location.href = suite;
     }));
 })();

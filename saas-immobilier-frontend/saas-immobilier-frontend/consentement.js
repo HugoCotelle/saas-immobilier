@@ -6,6 +6,7 @@
 (function () {
     'use strict';
 
+    var API = 'https://saas-immobilier-921a.onrender.com';     // notre serveur : confirmation d'une demande enregistrée
     var ADS_ID = 'AW-18528941154';
     // Libellé de la conversion « Demande de démo », fourni par Google Ads (Objectifs > Conversions),
     // de la forme 'AbCdEfGhIjKl'. Tant qu'il est vide, les visites sont mesurées mais pas la demande de démo.
@@ -44,28 +45,54 @@
         return n.doNotTrack === '1' || window.doNotTrack === '1' || n.msDoNotTrack === '1' || n.globalPrivacyControl;
     }
 
-    // La page de confirmation n'est mesurée que juste après l'envoi d'une demande (drapeau posé par
-    // demande-demo.js, qui contient l'identifiant unique de cette demande) : une visite directe ou un
-    // rechargement de la page ne compte pas comme une demande. Le drapeau est lu une seule fois puis effacé.
+    // La page de confirmation n'est mesurée que juste après l'envoi d'une demande ENREGISTRÉE EN BASE : demande-demo.js pose
+    // dans l'onglet l'identifiant unique de la demande (renvoyé par le serveur). Il est lu une seule fois puis effacé. Même
+    // avec cet identifiant, rien n'est mesuré avant que le serveur ait confirmé la demande (confirmerConversion) : une
+    // visite directe, un rechargement, un identifiant inventé ou un robot ne produisent donc jamais de conversion.
     var demande = null;
     function lireDemande() {
         if (demande) return demande;
-        demande = { ok: false, id: null, stockage: true };
+        demande = { ok: false, id: null };
         try {
             var v = sessionStorage.getItem('zelyro_demande_ok');
             if (v) {
                 sessionStorage.removeItem('zelyro_demande_ok');
-                demande.ok = true;
-                demande.id = v === '1' ? 'd' + Date.now().toString(36) : v;   // '1' : ancien format du drapeau
+                if (/^[0-9a-f]{24}$/.test(v)) { demande.ok = true; demande.id = v; }   // un ancien drapeau « 1 » ne prouve rien
             }
-        } catch (e) { demande.ok = false; demande.stockage = false; }   // stockage indisponible : impossible de prouver qu'une demande vient d'être enregistrée, donc aucune mesure
+        } catch (e) { /* stockage indisponible : l'identifiant est alors dans l'adresse (#r=...) */ }
+        if (!demande.ok) {
+            var h = /^#r=([0-9a-f]{24})$/.exec(location.hash || '');
+            if (h) { demande.ok = true; demande.id = h[1]; }
+        }
         return demande;
+    }
+
+    // Demande au serveur l'autorisation de mesurer cette demande. Réponse « true » une seule fois par demande, et
+    // seulement si elle est en base. Toute autre réponse, une erreur ou un délai dépassé : aucune mesure.
+    function confirmerConversion(ref, suite) {
+        try {
+            var ctrl = window.AbortController ? new AbortController() : null;
+            var minuteur = ctrl ? setTimeout(function () { ctrl.abort(); }, 15000) : null;
+            fetch(API + '/api/v1/demande-demo/confirmation', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: ref }),
+                credentials: 'omit', cache: 'no-store', signal: ctrl ? ctrl.signal : undefined
+            }).then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (j) { if (minuteur) clearTimeout(minuteur); if (j && j.conversion === true) suite(); })
+              .catch(function () { /* pas de confirmation : pas de mesure */ });
+        } catch (e) { /* ignoré */ }
     }
     var surMerci = location.pathname.indexOf('demo-merci') !== -1;
 
     function charger() {
         if (!enligne) return;
-        if (surMerci && !lireDemande().ok) return;   // visite directe ou rechargement de la page de confirmation : aucune mesure
+        if (surMerci) {
+            if (!lireDemande().ok) return;   // visite directe ou rechargement de la page de confirmation : aucune mesure
+            confirmerConversion(demande.id, function () {
+                chargerGoogle();
+                if (metaAccepte()) chargerMeta();
+            });
+            return;
+        }
         chargerGoogle();
         if (metaAccepte()) chargerMeta();
     }
@@ -85,13 +112,12 @@
         s.async = true;
         s.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(ADS_ID);
         document.head.appendChild(s);
-        if (CONVERSION_LABEL && surMerci) {
-            var deja = false;
-            try { deja = sessionStorage.getItem('zelyro_conv') === '1'; } catch (e) { /* ignoré */ }
-            if (!deja) {
-                window.gtag('event', 'conversion', { send_to: ADS_ID + '/' + CONVERSION_LABEL });
-                try { sessionStorage.setItem('zelyro_conv', '1'); } catch (e) { /* ignoré */ }
-            }
+        // Conversion : seulement sur la page de confirmation, pour une demande confirmée par le serveur (voir charger).
+        // transaction_id permet aussi à Google de ne compter qu'une fois la même demande.
+        if (CONVERSION_LABEL && surMerci && demande && demande.ok && demande.id) {
+            var cleConv = 'zelyro_conv_' + demande.id, dejaConv = false;
+            try { dejaConv = sessionStorage.getItem(cleConv) === '1'; sessionStorage.setItem(cleConv, '1'); } catch (e) { /* ignoré : le serveur garantit déjà l'unicité */ }
+            if (!dejaConv) window.gtag('event', 'conversion', { send_to: ADS_ID + '/' + CONVERSION_LABEL, transaction_id: demande.id });
         }
     }
 
@@ -105,10 +131,10 @@
         n('set', 'autoConfig', false, META_ID);   // pas de collecte automatique (clics, champs de formulaire, mise en correspondance)
         n('init', META_ID);                       // aucune donnée personnelle transmise
         n('track', 'PageView');
-        // Lead : uniquement juste après une demande de démonstration acceptée par le serveur, une seule fois par demande.
-        if (surMerci && demande && demande.ok && demande.stockage && demande.id) {
+        // Lead : uniquement pour une demande enregistrée en base et confirmée par le serveur, une seule fois par demande.
+        if (surMerci && demande && demande.ok && demande.id) {
             var cleLead = 'zelyro_lead_' + demande.id, deja = false;
-            try { deja = sessionStorage.getItem(cleLead) === '1'; sessionStorage.setItem(cleLead, '1'); } catch (e) { deja = true; }
+            try { deja = sessionStorage.getItem(cleLead) === '1'; sessionStorage.setItem(cleLead, '1'); } catch (e) { /* ignoré : le serveur garantit déjà l'unicité */ }
             if (!deja) n('track', 'Lead', {}, { eventID: demande.id });
         }
         var s = document.createElement('script');
