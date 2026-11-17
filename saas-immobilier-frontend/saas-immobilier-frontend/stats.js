@@ -32,9 +32,53 @@
             if (q.get('utm_source')) corps.s = String(q.get('utm_source')).slice(0, 80);
             if (q.get('utm_campaign')) corps.c = String(q.get('utm_campaign')).slice(0, 80);
         } catch (e) { /* navigateur ancien */ }
-        if (document.referrer) corps.r = document.referrer.slice(0, 300);
+        // Si le visiteur a changé de page sur zelyro.fr, le site d'origine (nom de domaine seul) est reporté dans l'adresse
+        // des liens vers la démonstration (voir relayerOrigine) : on le retrouve ici.
+        var ref = document.referrer || '';
+        try {
+            var rh0 = new URLSearchParams(location.search).get('rh');
+            var hoteRef = ref ? new URL(ref).hostname : '';
+            if (rh0 && /^[a-z0-9.-]{1,120}$/i.test(rh0) && (!hoteRef || /(^|\.)zelyro\.fr$/.test(hoteRef))) ref = 'https://' + rh0;
+        } catch (e) { /* adresse invalide : on garde le référent d'origine */ }
+        if (ref) corps.r = ref.slice(0, 300);
 
         envoyer('/public/stats/vue', corps);
+
+        // Origine jusqu'au formulaire de démonstration. Les liens vers /demo-agences.html reprennent, dans leur adresse :
+        // les paramètres de campagne de la page, un drapeau de clic publicitaire (« cp », jamais l'identifiant du clic) ou
+        // le NOM DE DOMAINE SEUL du site d'où vient le visiteur (« rh », jamais le chemin ni les paramètres). Rien n'est
+        // stocké dans le navigateur : l'information ne part que si le visiteur envoie lui-même le formulaire.
+        function relayerOrigine() {
+            try {
+                var q = new URLSearchParams(location.search), porte = {};
+                ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'].forEach(function (k) {
+                    var v = q.get(k);
+                    if (v) porte[k] = String(v).slice(0, 120);
+                });
+                var cp = q.get('cp');
+                if (cp === 'meta' || cp === 'google') porte.cp = cp;
+                else if (q.get('fbclid')) porte.cp = 'meta';
+                else if (q.get('gclid') || q.get('gbraid') || q.get('wbraid')) porte.cp = 'google';
+                var rh = q.get('rh');
+                if (rh && /^[a-z0-9.-]{1,120}$/i.test(rh)) porte.rh = rh.toLowerCase();
+                if (document.referrer) {
+                    var h = new URL(document.referrer).hostname.toLowerCase().replace(/^www\./, '');
+                    if (h && !/(^|\.)zelyro\.fr$/.test(h)) porte.rh = h.slice(0, 120);
+                }
+                var cles = Object.keys(porte);
+                if (!cles.length) return;
+                var liens = document.querySelectorAll('a[href]');
+                for (var i = 0; i < liens.length; i++) {
+                    var u;
+                    try { u = new URL(liens[i].getAttribute('href'), location.href); } catch (e) { continue; }
+                    if (u.origin !== location.origin || !/^\/demo-agences(\.html)?$/.test(u.pathname)) continue;
+                    cles.forEach(function (k) { if (!u.searchParams.has(k)) u.searchParams.set(k, porte[k]); });
+                    liens[i].setAttribute('href', u.pathname + u.search + u.hash);
+                }
+            } catch (e) { /* la mesure ne doit jamais gêner la page */ }
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', relayerOrigine);
+        else relayerOrigine();
 
         // Signe de vie toutes les 30 secondes tant que la page est visible : c'est ce qui
         // permet de compter les personnes « en direct ».

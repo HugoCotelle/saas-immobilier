@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Automatiser les leads SeLoger et Leboncoin d’une agence | Zelyro</title>
+<meta name="description" content="Zelyro lit les mails de demande SeLoger et Leboncoin de votre agence, crée le prospect, le note sur 100 et le rapproche de vos biens. Sans copier-coller.">
+<meta name="theme-color" content="#F3F4F1">
+<link rel="canonical" href="https://www.zelyro.fr/automatisation-leads-seloger-leboncoin.html">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Automatiser les leads SeLoger et Leboncoin d’une agence | Zelyro">
+<meta property="og:description" content="Zelyro lit les mails de demande SeLoger et Leboncoin de votre agence, crée le prospect, le note sur 100 et le rapproche de vos biens. Sans copier-coller.">
+<meta property="og:locale" content="fr_FR">
+<meta property="og:url" content="https://www.zelyro.fr/automatisation-leads-seloger-leboncoin.html">
+<meta property="og:image" content="https://www.zelyro.fr/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Zelyro — Qualification et suivi des prospects pour agences immobilières">
+<meta property="og:site_name" content="Zelyro">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Automatiser les leads SeLoger et Leboncoin d’une agence | Zelyro">
+<meta name="twitter:description" content="Zelyro lit les mails de demande SeLoger et Leboncoin de votre agence, crée le prospect, le note sur 100 et le rapproche de vos biens. Sans copier-coller.">
+<meta name="twitter:image" content="https://www.zelyro.fr/og-image.png">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-48x48.png" type="image/png" sizes="48x48">
+<link rel="preload" href="/vendor/fonts/familjen-grotesk-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/vendor/fonts/hanken-grotesk-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/landing.css">
+<link rel="stylesheet" href="/fonction.css">
+<style>
+.zt-wrap{overflow-x:auto;margin-top:32px}
+.zt{width:100%;border-collapse:collapse;font-size:16px;line-height:1.5;min-width:560px}
+.zt caption{text-align:left;padding:0 0 12px;font-size:14.5px;color:var(--gris)}
+.zt th,.zt td{padding:14px 16px;text-align:left;vertical-align:top;border-bottom:1px solid var(--ligne)}
+.zt thead th{font-family:var(--titre);font-weight:700;background:var(--creme-3);border-bottom:1px solid var(--ligne-forte)}
+.zt tbody th{font-weight:700;color:var(--encre)}
+.zt td strong{font-weight:700}
+.zt-note{margin-top:14px;font-size:14.5px;color:var(--gris);max-width:70ch}
+.fonc-bloc-texte{padding-block:clamp(40px,5vw,72px)}
+.fonc-bloc-texte .cadre{max-width:860px}
+.fonc-bloc-texte h2{font-size:clamp(26px,3.2vw,40px);margin-bottom:16px}
+.fonc-bloc-texte p{font-size:18px;line-height:1.6;color:var(--encre-2)}
+.fonc-bloc-texte p+p{margin-top:14px}
+.fonc-def{padding-block:clamp(28px,4vw,48px);background:var(--creme-3)}
+.fonc-def .cadre{max-width:860px}
+.fonc-def h2{font-size:clamp(22px,2.4vw,30px);margin-bottom:10px}
+.fonc-def p{font-size:18px;line-height:1.6;color:var(--encre-2)}
+.fonc-maj{margin-top:10px;font-size:14.5px;color:var(--gris)}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Accueil",
+          "item": "https://www.zelyro.fr/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Leads SeLoger et Leboncoin",
+          "item": "https://www.zelyro.fr/automatisation-leads-seloger-leboncoin.html"
+        }
+      ]
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://www.zelyro.fr/automatisation-leads-seloger-leboncoin.html#page",
+      "url": "https://www.zelyro.fr/automatisation-leads-seloger-leboncoin.html",
+      "name": "Automatiser les leads SeLoger et Leboncoin d’une agence | Zelyro",
+      "description": "Zelyro lit les mails de demande SeLoger et Leboncoin de votre agence, crée le prospect, le note sur 100 et le rapproche de vos biens. Sans copier-coller.",
+      "inLanguage": "fr-FR",
+      "datePublished": "2026-11-17",
+      "dateModified": "2026-11-17",
+      "isPartOf": {
+        "@id": "https://www.zelyro.fr/#website"
+      },
+      "about": {
+        "@id": "https://www.zelyro.fr/#logiciel"
+      },
+      "publisher": {
+        "@id": "https://www.zelyro.fr/#organization"
+      }
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Faut-il une boîte Gmail ?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Non, mais c’est le moyen le plus automatique : avec Gmail connecté, les demandes sont détectées d’elles-mêmes. Sans Gmail, vous transférez simplement les mails de portail à Zelyro."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Que lit Zelyro dans ma boîte mail ?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Uniquement les messages envoyés par SeLoger et Leboncoin, en lecture seule. Les clés d’accès sont chiffrées dans la base et vous pouvez retirer l’accès à tout moment depuis votre compte."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Une alerte « nouvelles annonces » consomme-t-elle mon forfait ?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Non. Les alertes et les mails qui ne sont pas une demande de contact sont ignorés et ne consomment rien. Une extraction n’est décomptée que lorsqu’elle aboutit à un prospect."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "L’intelligence artificielle décide-t-elle de la qualité d’un prospect ?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Non. Elle sert uniquement à lire le texte du mail. Le score est calculé par des règles lisibles, dont les raisons sont affichées. Cette lecture est facultative et se désactive dans votre compte."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Puis-je importer les prospects que j’ai déjà ?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Oui, par un fichier Excel ou CSV : chaque prospect importé est qualifié à partir des informations présentes dans le fichier. L’API permet aussi d’envoyer prospects et biens depuis votre logiciel."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Zelyro répond-il au prospect à ma place ?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Si le prospect a laissé son adresse e-mail, un message l’invite à préciser sa recherche. Le suivi commercial (appel, visite, proposition) reste le vôtre : Zelyro vous dit qui appeler et quand."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+<script>document.documentElement.className+=' js';</script>
+<script src="/stats.js" defer></script>
+<script src="/consentement.js?v=20261116b" defer></script>
+<script src="/landing.js" defer></script>
+</head>
+<body>
+<a class="evitement" href="#contenu">Aller au contenu</a>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs><symbol id="i-fleche" viewBox="0 0 16 16"><path d="M3 8h9.5M8.5 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol></defs></svg>
+
+<header class="barre" id="barre">
+    <div class="cadre barre-in">
+        <a class="logo" href="/" aria-label="Zelyro, retour à l’accueil"><i aria-hidden="true"></i>Zelyro</a>
+        <nav class="nav" id="nav" aria-label="Navigation principale">
+            <a href="/#demo">Démo vidéo</a>
+            <a href="/#fonctionnalites">Fonctionnalités</a>
+            <a href="/#portails">Comment ça marche</a>
+            <a href="/#securite">Sécurité</a>
+            <a href="/#tarifs">Tarifs</a>
+            <a href="/#faq">FAQ</a>
+            <a class="nav-demo" href="/demo-agences.html">Demander une démo</a>
+        </nav>
+        <div class="barre-actions">
+            <a class="jauge" id="jauge" href="/demo-agences.html" aria-label="Demander une démo" data-niveau="gris">
+                <span class="jauge-anneau" aria-hidden="true"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" class="j-fond"/><circle cx="18" cy="18" r="15" class="j-val" id="jauge-val"/></svg><b id="jauge-num">0</b></span>
+                <span class="jauge-txt" id="jauge-txt">Votre visite</span>
+            </a>
+            <a class="btn btn-contour btn-petit" id="nav-login" href="/login.html">Connexion</a>
+            <a class="btn btn-petit" href="/demo-agences.html">Demander une démo</a>
+            <button class="burger" type="button" aria-expanded="false" aria-controls="nav" aria-label="Ouvrir le menu"><span></span></button>
+        </div>
+    </div>
+    <div class="progression" aria-hidden="true"><i id="progression"></i></div>
+</header>
+
+<main id="contenu">
+
+<section class="fonc-hero" aria-labelledby="titre-page">
+    <div class="cadre">
+        <nav class="fonc-fil" aria-label="Fil d’Ariane"><a href="/">Accueil</a><span aria-hidden="true">/</span><span aria-current="page">Leads SeLoger et Leboncoin</span></nav>
+        <div class="fonc-grille">
+            <div>
+                <p class="fonc-sur">Leads SeLoger et Leboncoin</p>
+                <h1 id="titre-page">Vos demandes SeLoger et Leboncoin deviennent des prospects <em>sans copier-coller</em>.</h1>
+                <p class="chapo">Zelyro lit, en lecture seule, les e-mails de demande de contact que SeLoger et Leboncoin envoient à votre agence, crée le prospect, le note sur 100 et le rapproche de vos biens. Les alertes « nouvelles annonces » et les mails qui ne sont pas une demande sont ignorés.</p>
+                <div class="actions">
+                    <a class="btn btn-grand btn-aimant" href="/demo-agences.html">Demander une démo<svg aria-hidden="true"><use href="#i-fleche"/></svg></a>
+                    <a class="btn btn-grand btn-contour" href="/login.html#inscription">Créer un compte</a>
+                </div>
+                <p class="fonc-note">Démonstration gratuite de 20 minutes, sans engagement. À partir de 29&nbsp;€ HT par mois.</p>
+                <p class="fonc-maj">Mis à jour le 17 novembre 2026.</p>
+            </div>
+            <figure class="fx" style="margin:0"><img src="/captures/zelyro-prospects-par-score.jpg" width="1400" height="527" alt="Liste des prospects dans Zelyro, classés par score sur 100 : Camille R. 98 avec la mention « À appeler maintenant », Nadia B. 87, Léa D. 87." style="width:100%;height:auto;border-radius:6px;display:block"><figcaption style="margin-top:10px;font-size:14px;color:var(--gris)">Aperçu de l’application, données fictives.</figcaption></figure>
+        </div>
+    </div>
+</section>
+
+<section class="fonc-bloc-texte" aria-labelledby="titre-pb">
+    <div class="cadre">
+        <h2 id="titre-pb">Recopier chaque demande à la main fait perdre du temps, et des prospects.</h2>
+        <p>Une demande de portail arrive dans une boîte mail, souvent après d’autres. La recopier dans un tableau ou dans un logiciel prend du temps et retarde le premier rappel. Zelyro transforme directement le message en fiche prospect, déjà notée.</p>
+    </div>
+</section>
+
+<section class="fonc-etapes-bloc" aria-labelledby="titre-etapes">
+    <div class="cadre">
+        <div class="tete">
+            <h2 id="titre-etapes">Comment fonctionne la détection</h2>
+        </div>
+        <ol class="fonc-etapes"><li><h3>Connectez votre boîte Gmail, ou transférez les mails</h3><p>Autorisez Zelyro à lire, en lecture seule, les notifications de SeLoger et de Leboncoin. Sans Gmail, transférez simplement ces mails à Zelyro. Vous pouvez déconnecter l’accès à tout moment depuis votre compte.</p></li><li><h3>Zelyro lit le message</h3><p>Nom, coordonnées, bien concerné, budget, projet : les informations utiles sont extraites du texte. Cette lecture utilise l’intelligence artificielle ; elle est facultative et se désactive dans votre compte.</p></li><li><h3>Le prospect est créé, noté et rapproché</h3><p>Il apparaît avec son niveau et son score sur 100, et il est comparé aux biens du portefeuille. S’il a laissé son e-mail, un message l’invite à préciser sa recherche.</p></li></ol>
+    </div>
+</section>
+
+<section class="section fonc-crit-bloc ch-sombre" aria-labelledby="titre-exemple">
+    <div class="cadre">
+        <div class="tete">
+            <h2 id="titre-exemple">Un exemple, avec des données fictives.</h2>
+            <p class="chapo">Mail reçu : « Bonjour, je suis intéressé par la maison de 5 pièces à Montreuil. Notre prêt est en cours de validation et nous souhaitons acheter d’ici six mois, avec un budget de 840&nbsp;000&nbsp;€. Pouvez-vous me rappeler ? » Le portail joint l’adresse e-mail et le téléphone du contact.</p>
+        </div>
+        <ul class="fonc-crit"><li><span class="tag">Extrait</span><h3>Recherche</h3><p>Maison, Montreuil.</p></li><li><span class="tag">Extrait</span><h3>Budget</h3><p>840&nbsp;000&nbsp;€.</p></li><li><span class="tag">Extrait</span><h3>Projet</h3><p>Financement en cours, achat sous 6 mois.</p></li><li><span class="tag">Résultat</span><h3>Prospect créé</h3><p>Score de 56 sur 100 : financement en cours 22, achat sous 6 mois 14, coordonnées 8, budget 5, secteur 4, type de bien 3. Niveau « Projet en cours ».</p></li><li><span class="tag">Résultat</span><h3>Bien rapproché</h3><p>Comparé aux biens du portefeuille, avec un score de correspondance et ses raisons.</p></li><li><span class="tag">Résultat</span><h3>Prochaine action</h3><p>Vous voyez le prospect classé et vous savez s’il faut l’appeler maintenant.</p></li></ul>
+    </div>
+</section>
+
+<section class="fonc-bloc-texte" aria-labelledby="titre-quota">
+    <div class="cadre">
+        <h2 id="titre-quota">Un quota qui ne compte que l’utile.</h2>
+        <p>Une extraction (la lecture d’un mail) n’est décomptée que lorsqu’elle aboutit à un prospect. Les alertes et les mails sans demande de contact ne consomment rien de votre forfait.</p>
+        <p>Les forfaits incluent 100 extractions par mois pour l’Essentiel (29&nbsp;€ HT), 500 pour l’Agence (49&nbsp;€ HT) et 2&nbsp;000 pour le Réseau (79&nbsp;€ HT). Voir les <a href="/tarifs.html">tarifs</a>.</p>
+    </div>
+</section>
+
+<section class="fonc-faq-bloc" aria-labelledby="titre-faq">
+    <div class="cadre">
+        <div class="tete">
+            <h2 id="titre-faq">Questions fréquentes</h2>
+        </div>
+        <div class="fonc-faq"><details><summary>Faut-il une boîte Gmail ?</summary><div class="rep">Non, mais c’est le moyen le plus automatique : avec Gmail connecté, les demandes sont détectées d’elles-mêmes. Sans Gmail, vous transférez simplement les mails de portail à Zelyro.</div></details><details><summary>Que lit Zelyro dans ma boîte mail ?</summary><div class="rep">Uniquement les messages envoyés par SeLoger et Leboncoin, en lecture seule. Les clés d’accès sont chiffrées dans la base et vous pouvez retirer l’accès à tout moment depuis votre compte.</div></details><details><summary>Une alerte « nouvelles annonces » consomme-t-elle mon forfait ?</summary><div class="rep">Non. Les alertes et les mails qui ne sont pas une demande de contact sont ignorés et ne consomment rien. Une extraction n’est décomptée que lorsqu’elle aboutit à un prospect.</div></details><details><summary>L’intelligence artificielle décide-t-elle de la qualité d’un prospect ?</summary><div class="rep">Non. Elle sert uniquement à lire le texte du mail. Le score est calculé par des règles lisibles, dont les raisons sont affichées. Cette lecture est facultative et se désactive dans votre compte.</div></details><details><summary>Puis-je importer les prospects que j’ai déjà ?</summary><div class="rep">Oui, par un fichier Excel ou CSV : chaque prospect importé est qualifié à partir des informations présentes dans le fichier. L’API permet aussi d’envoyer prospects et biens depuis votre logiciel.</div></details><details><summary>Zelyro répond-il au prospect à ma place ?</summary><div class="rep">Si le prospect a laissé son adresse e-mail, un message l’invite à préciser sa recherche. Le suivi commercial (appel, visite, proposition) reste le vôtre : Zelyro vous dit qui appeler et quand.</div></details></div>
+    </div>
+</section>
+
+<section class="fonc-liens-bloc" aria-labelledby="titre-liens">
+    <div class="cadre">
+        <h2 id="titre-liens" style="font-size:clamp(26px,3vw,38px)">À lire aussi</h2>
+        <ul class="fonc-liens"><li><a href="/logiciel-agence-immobiliere.html"><b>Logiciel pour agence immobilière</b><span>Ce que fait Zelyro, ce qu’il ne fait pas, et ses tarifs.</span><em>Lire la suite <svg aria-hidden="true"><use href="#i-fleche"/></svg></em></a></li><li><a href="/qualification-prospects-immobiliers.html"><b>Qualifier les prospects</b><span>Un score sur 100 pour chaque prospect, avec ses raisons.</span><em>Lire la suite <svg aria-hidden="true"><use href="#i-fleche"/></svg></em></a></li><li><a href="/rapprochement-prospects-biens.html"><b>Rapprocher prospects et biens</b><span>Un score de correspondance sur 100 entre chaque prospect et chaque bien.</span><em>Lire la suite <svg aria-hidden="true"><use href="#i-fleche"/></svg></em></a></li></ul>
+    </div>
+</section>
+
+<section class="section fonc-cta ch-sombre" aria-labelledby="titre-cta">
+    <div class="cadre">
+        <div class="tete">
+            <h2 id="titre-cta">Voyez vos mails de portail devenir des prospects.</h2>
+            <p>Une démonstration gratuite de 20 minutes, sur des exemples proches de votre quotidien. À partir de 29&nbsp;€ HT par mois, sans engagement. <a href="/tarifs.html" style="color:var(--laiton)">Voir les tarifs</a>.</p>
+            <div class="actions">
+                <a class="btn btn-grand btn-clair" href="/demo-agences.html">Demander une démo<svg aria-hidden="true"><use href="#i-fleche"/></svg></a>
+                <a class="btn btn-grand btn-contour-clair" href="/login.html#inscription">Créer un compte</a>
+            </div>
+        </div>
+    </div>
+</section>
+
+</main>
+
+<footer class="pied">
+    <div class="cadre">
+        <div class="pied-grille">
+            <div>
+                <a class="logo logo-clair" href="/" aria-label="Zelyro, retour à l’accueil"><i aria-hidden="true"></i>Zelyro</a>
+                <p class="pied-dev">Chaque lead. Chaque bien. Aucune opportunité perdue.</p>
+            </div>
+            <div class="pied-col">
+                <h2>Produit</h2>
+                <ul>
+                    <li><a href="/#fonctionnalites">Fonctionnalités</a></li>
+                    <li><a href="/qualification-prospects-immobiliers.html">Qualifier les prospects</a></li>
+                    <li><a href="/rapprochement-prospects-biens.html">Rapprocher prospects et biens</a></li>
+                    <li><a href="/suivi-prospects-immobiliers.html">Suivre les prospects</a></li>
+                    <li><a href="/logiciel-agence-immobiliere.html">Logiciel pour agence immobilière</a></li>
+                    <li><a href="/automatisation-leads-seloger-leboncoin.html">Leads SeLoger et Leboncoin</a></li>
+                    <li><a href="/complement-crm-immobilier.html">Complément à un CRM</a></li>
+                    
+                    <li><a href="/#portails">Comment ça marche</a></li>
+                    <li><a href="/#simulateur">Simulateur</a></li>
+                    <li><a href="/#securite">Sécurité</a></li>
+                    <li><a href="/#tarifs">Tarifs</a></li>
+                    <li><a href="/#faq">FAQ</a></li>
+                </ul>
+            </div>
+            <div class="pied-col">
+                <h2>Informations légales</h2>
+                <ul>
+                    <li><a href="/mentions-legales.html">Mentions légales</a></li>
+                    <li><a href="/confidentialite.html">Politique de confidentialité</a></li>
+                    <li><a href="/confidentialite.html#cookies" data-gerer-cookies>Gérer mes cookies</a></li>
+                    <li><a href="/confidentialite.html#audience">Mesure d’audience (refuser)</a></li>
+                    <li><a href="/cgu.html">Conditions générales d’utilisation</a></li>
+                    <li><a href="/accord-sous-traitance.html">Accord de sous-traitance (DPA)</a></li>
+                </ul>
+            </div>
+            <div class="pied-col">
+                <h2>Contact</h2>
+                <ul>
+                    <li><a href="mailto:contact@zelyro.fr">contact@zelyro.fr</a></li>
+                    <li><a href="/demo-agences.html">Demander une démo</a></li>
+                    <li><a href="/login.html">Connexion</a></li>
+                    <li><a href="/login.html#inscription">Créer un compte</a></li>
+                </ul>
+            </div>
+        </div>
+        <div class="pied-bas">
+            <span>© 2026 Zelyro</span>
+            <span>Logiciel destiné aux professionnels de l’immobilier.</span>
+        </div>
+    </div>
+</footer>
+</body>
+</html>

@@ -68,6 +68,9 @@
             });
             if (q.get('fbclid')) o.clic_pub = 'meta';
             else if (q.get('gclid') || q.get('gbraid') || q.get('wbraid')) o.clic_pub = 'google';
+            else if (q.get('cp') === 'meta' || q.get('cp') === 'google') o.clic_pub = q.get('cp');      // reporté par stats.js depuis la page précédente
+            var rh = q.get('rh');       // nom de domaine seul du site d'origine, reporté par stats.js (jamais un chemin)
+            if (rh && /^[a-z0-9.-]{1,120}$/i.test(rh)) o.referent_origine = rh.toLowerCase();
         } catch (e) { /* navigateur ancien */ }
         try { if (document.referrer) o.referent = document.referrer.slice(0, 300); } catch (e) { /* ignoré */ }
         return o;

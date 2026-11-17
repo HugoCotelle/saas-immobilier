@@ -56,7 +56,12 @@
             return isNaN(d) ? '' : d.toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
         };
         const LIBELLE_STATUT = { nouvelle: 'Nouvelle', qualifiee: 'Qualifiée', demo_programmee: 'Démo programmée', demo_realisee: 'Démo réalisée', client: 'Client', perdue: 'Perdue', non_qualifiee: 'Non qualifiée' };
-        const LIBELLE_CANAL = { meta: 'Meta (Facebook, Instagram)', google: 'Google', linkedin: 'LinkedIn', email: 'E-mail', direct: 'Direct', autre: 'Autre' };
+        const LIBELLE_CANAL = {
+            meta: 'Meta Ads (Facebook, Instagram)', google: 'Google Ads', google_organique: 'Google organique', bing_organique: 'Bing organique',
+            chatgpt: 'ChatGPT', perplexity: 'Perplexity', gemini: 'Gemini', claude: 'Claude', copilot: 'Copilot',
+            appvizer: 'Appvizer', capterra: 'Capterra', linkedin: 'LinkedIn', email: 'E-mail', referent: 'Autres sites référents',
+            direct: 'Direct ou source inconnue', autre: 'Autre lien balisé'
+        };
         const aujourdhui = () => new Date().toISOString().slice(0, 10);
 
         function pastilleNotif(d) {
@@ -241,17 +246,17 @@
                                     {resume.canaux.length === 0 ? <div className="empty-state" style={{ padding: '24px 0' }}>Aucune demande sur la période.</div> : (
                                         <div className="table-scroll">
                                             <table className="admin-table">
-                                                <thead><tr><th>Canal</th><th className="num">Demandes</th><th className="num">Qualifiées</th><th className="num">Démos prévues</th><th className="num">Démos faites</th><th className="num">Clients</th><th className="num">% qualifiées</th><th className="num">Dépensé</th><th className="num">Coût / demande</th><th className="num">Coût / qualifiée</th><th className="num">Coût / client</th></tr></thead>
+                                                <thead><tr><th>Canal</th><th className="num">Visiteurs</th><th className="num">Demandes</th><th className="num">Qualifiées</th><th className="num">Démos prévues</th><th className="num">Démos faites</th><th className="num">Clients</th><th className="num">% qualifiées</th><th className="num">Dépensé</th><th className="num">Coût / demande</th><th className="num">Coût / qualifiée</th><th className="num">Coût / client</th></tr></thead>
                                                 <tbody>
                                                     {resume.canaux.map((c) => (
                                                         <tr key={c.canal}>
                                                             <td>{LIBELLE_CANAL[c.canal] || c.canal}</td>
-                                                            <td className="num">{fmt(c.demandes)}</td><td className="num">{fmt(c.qualifiees)}</td><td className="num">{fmt(c.programmees)}</td><td className="num">{fmt(c.realisees)}</td><td className="num">{fmt(c.clients)}</td>
+                                                            <td className="num">{fmt(c.visites)}</td><td className="num">{fmt(c.demandes)}</td><td className="num">{fmt(c.qualifiees)}</td><td className="num">{fmt(c.programmees)}</td><td className="num">{fmt(c.realisees)}</td><td className="num">{fmt(c.clients)}</td>
                                                             <td className="num">{pct(c.taux_qualification)}</td><td className="num">{eur(c.depense_eur)}</td><td className="num">{eur(c.cout_par_demande)}</td><td className="num">{eur(c.cout_par_qualifiee)}</td><td className="num">{eur(c.cout_acquisition)}</td>
                                                         </tr>
                                                     ))}
                                                     <tr style={{ fontWeight: 700 }}>
-                                                        <td>Total</td><td className="num">{fmt(total.demandes)}</td><td className="num">{fmt(total.qualifiees)}</td><td className="num">{fmt(total.programmees)}</td><td className="num">{fmt(total.realisees)}</td><td className="num">{fmt(total.clients)}</td>
+                                                        <td>Total</td><td className="num">{fmt(total.visites)}</td><td className="num">{fmt(total.demandes)}</td><td className="num">{fmt(total.qualifiees)}</td><td className="num">{fmt(total.programmees)}</td><td className="num">{fmt(total.realisees)}</td><td className="num">{fmt(total.clients)}</td>
                                                         <td className="num">{total.demandes ? pct(Math.round(1000 * total.qualifiees / total.demandes) / 10) : '—'}</td><td className="num">{eur(depenseTotale || null)}</td>
                                                         <td className="num">{depenseTotale && total.demandes ? eur(Math.round(100 * depenseTotale / total.demandes) / 100) : '—'}</td>
                                                         <td className="num">{depenseTotale && total.qualifiees ? eur(Math.round(100 * depenseTotale / total.qualifiees) / 100) : '—'}</td>
@@ -261,7 +266,7 @@
                                             </table>
                                         </div>
                                     )}
-                                    <p className="field-hint">Les coûts n’apparaissent que si la dépense du canal est saisie plus bas. Le coût par client reste vide tant qu’aucune demande n’est passée au statut « Client ».</p>
+                                    <p className="field-hint">Les visiteurs sont ceux des pages publiques mesurées (sans cookie, sans adresse IP, « Ne pas me suivre » respecté) ; un moteur IA qui n’envoie ni référent ni lien balisé apparaît dans « Direct ou source inconnue ». Les coûts n’apparaissent que si la dépense du canal est saisie plus bas. Le coût par client reste vide tant qu’aucune demande n’est passée au statut « Client ».</p>
                                 </div>
 
                                 <div className="panel">
