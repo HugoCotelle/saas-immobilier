@@ -1638,7 +1638,11 @@ DEMO_STATUTS = {
     'demo_realisee': "Démo réalisée", 'client': "Client", 'perdue': "Perdue", 'non_qualifiee': "Non qualifiée",
 }
 DEMO_ETAPES = ('nouvelle', 'qualifiee', 'demo_programmee', 'demo_realisee', 'client')   # l'ordre du parcours commercial
-DEMO_CANAUX = ('meta', 'google', 'linkedin', 'email', 'direct', 'autre')
+# Canaux d'acquisition. « meta » et « google » désignent la publicité payante (Meta Ads, Google Ads) : ces clés existent
+# déjà en base et dans les dépenses saisies, elles ne changent pas. Les autres séparent le référencement naturel, les
+# moteurs de réponse IA, les annuaires, les autres sites et le trafic direct ou sans source connue.
+DEMO_CANAUX = ('meta', 'google', 'google_organique', 'bing_organique', 'chatgpt', 'perplexity', 'gemini', 'claude',
+               'copilot', 'appvizer', 'capterra', 'linkedin', 'email', 'referent', 'direct', 'autre')
 DEMO_NOTIF_MAX_TENTATIVES = 6          # au-delà, la notification est abandonnée (visible, renvoi manuel possible)
 DEMO_DOUBLON_JOURS = 7                 # même adresse e-mail dans cette fenêtre : même demande, pas de nouvel e-mail
 DEMO_CONSERVATION_JOURS = 3 * 365      # annoncé sur le formulaire : 3 ans après le dernier échange (hors clients)
@@ -1751,24 +1755,106 @@ def _hote_referent(brut):
     return (hote[4:] if hote.startswith('www.') else hote)[:120] or None
 
 
+# --- Classification des sources (visites et demandes) -----------------------------------------------------------
+# Elle ne lit que le paramètre utm_source / utm_medium du lien et le NOM DE DOMAINE du site d'où vient le visiteur
+# (jamais le chemin ni les paramètres de l'adresse précédente), sans cookie, sans adresse IP, sans service tiers.
+# Limite connue : certains moteurs IA (Gemini, Claude, Perplexity...) n'envoient pas toujours de référent ; leurs
+# visites tombent alors dans « direct ». ChatGPT ajoute en général utm_source=chatgpt.com aux liens de sa recherche.
+_IA_ET_ANNUAIRES_UTM = (('chatgpt', 'chatgpt'), ('openai', 'chatgpt'), ('perplexity', 'perplexity'), ('gemini', 'gemini'),
+                        ('claude', 'claude'), ('copilot', 'copilot'), ('appvizer', 'appvizer'), ('capterra', 'capterra'))
+_GOOGLE_RECHERCHE_RE = re.compile(r'^(www\.)?google\.[a-z]{2,3}(\.[a-z]{2})?$')
+_APPVIZER_RE = re.compile(r'(^|\.)appvizer\.[a-z]{2,3}(\.[a-z]{2})?$')
+_CAPTERRA_RE = re.compile(r'(^|\.)capterra\.[a-z]{2,3}(\.[a-z]{2})?$')
+
+
+def _nom_source_utm(source):
+    """Nom normalisé d'un utm_source connu (ChatGPT, Perplexity, Gemini, Claude, Copilot, Appvizer, Capterra), sinon None."""
+    s = (source or '').lower()
+    for jeton, nom in _IA_ET_ANNUAIRES_UTM:
+        if jeton in s:
+            return nom
+    return None
+
+
+def _nom_source_hote(hote):
+    """Nom normalisé d'après le seul nom de domaine du site d'origine (moteur IA ou annuaire), sinon None."""
+    h = (hote or '').lower()
+    if h.startswith('www.'):
+        h = h[4:]
+    if not h:
+        return None
+    if h in ('chatgpt.com', 'chat.openai.com') or h.endswith('.chatgpt.com') or h.endswith('.openai.com'):
+        return 'chatgpt'
+    if h == 'perplexity.ai' or h.endswith('.perplexity.ai'):
+        return 'perplexity'
+    if h in ('gemini.google.com', 'bard.google.com'):
+        return 'gemini'
+    if h in ('claude.ai', 'claude.com') or h.endswith('.claude.ai'):
+        return 'claude'
+    if h in ('copilot.microsoft.com', 'copilot.cloud.microsoft'):
+        return 'copilot'
+    if _APPVIZER_RE.search(h):
+        return 'appvizer'
+    if _CAPTERRA_RE.search(h):
+        return 'capterra'
+    return None
+
+
 def _canal_demande(source, medium, clic_pub, referent):
-    """Canal d'acquisition de la demande, d'après le lien d'arrivée (jamais d'après un cookie)."""
+    """Canal d'acquisition de la demande, d'après le lien d'arrivée (jamais d'après un cookie). Ordre : publicité payante
+    (clic publicitaire ou utm), puis moteurs IA et annuaires (utm_source ou domaine d'origine), LinkedIn, e-mail, moteurs
+    de recherche naturels, autres liens balisés, autres sites, et enfin direct (adresse tapée ou source inconnue)."""
     s = (source or '').lower()
     m = (medium or '').lower()
     r = (referent or '').lower()
+    if r.startswith('www.'):
+        r = r[4:]
+    organique = m in ('organic', 'seo')
+    if s in ('google', 'bing') and organique:
+        return s + '_organique'
     if clic_pub == 'meta' or s in ('facebook', 'fb', 'instagram', 'ig', 'meta') or 'facebook' in s or 'instagram' in s:
         return 'meta'
     if clic_pub == 'google' or s in ('google', 'googleads', 'adwords') or m in ('cpc', 'ppc') and 'google' in s:
         return 'google'
+    nom = _nom_source_utm(s)
+    if not nom and not s and not m:
+        nom = _nom_source_hote(r)
+    if nom:
+        return nom
     if 'linkedin' in s or 'linkedin' in r or r.endswith('lnkd.in'):
         return 'linkedin'
     if m in ('email', 'e-mail', 'newsletter') or s in ('email', 'e-mail', 'newsletter', 'harvey'):
         return 'email'
+    if not s and not m and r:
+        if r.endswith('zelyro.fr'):
+            return 'direct'
+        if r == 'bing.com' or r.endswith('.bing.com'):
+            return 'bing_organique'
+        if _GOOGLE_RECHERCHE_RE.match(r):
+            return 'google_organique'
     if s or m:
         return 'autre'
     if r and not r.endswith('zelyro.fr'):
-        return 'autre'
+        return 'referent'
     return 'direct'
+
+
+def _canal_depuis_source_visite(nom):
+    """Rattache le nom de source d'une visite (colonne source de site_visites, voir _source_stats) à un canal."""
+    n = (nom or '').lower()
+    if not n or n == 'direct':
+        return 'direct'
+    if n == 'interne':
+        return None
+    table = {'facebook': 'meta', 'fb': 'meta', 'instagram': 'meta', 'ig': 'meta', 'meta': 'meta',
+             'google': 'google', 'googleads': 'google', 'adwords': 'google',
+             'google-organique': 'google_organique', 'bing-organique': 'bing_organique',
+             'linkedin': 'linkedin', 'e-mail': 'email', 'email': 'email', 'newsletter': 'email', 'harvey': 'email'}
+    if n in table:
+        return table[n]
+    if n in DEMO_CANAUX:
+        return n
+    return 'referent' if '.' in n else 'autre'
 
 
 def _destinataire_demandes():
@@ -1999,6 +2085,10 @@ def demande_demo():
     clic_pub = str(data.get('clic_pub') or '')
     clic_pub = clic_pub if clic_pub in ('meta', 'google') else ''
     referent = _hote_referent(data.get('referent'))
+    if not referent or referent.endswith('zelyro.fr'):
+        # Le visiteur a changé de page sur zelyro.fr avant le formulaire : le site d'origine (nom de domaine seul)
+        # est reporté dans l'adresse des liens vers la démonstration (voir stats.js).
+        referent = _hote_referent(data.get('referent_origine')) or referent
     d = {
         "ref": ref, "nom": nom, "email": email, "telephone": telephone or None, "agence": agence,
         "fonction": fonction, "decideur": (fonction_cle in DEMO_DECIDEURS) if fonction_cle else None,
@@ -2176,13 +2266,24 @@ def admin_demandes_resume():
             cur.execute("""SELECT count(DISTINCT visiteur) AS visiteurs FROM site_visites
                            WHERE cree_le >= %s AND page = '/demo-agences'""", (debut,))
             visiteurs_page = cur.fetchone()['visiteurs']
+            # Visiteurs du site par canal (pages publiques mesurées, un visiteur compté une fois par source).
+            cur.execute("""SELECT source, count(DISTINCT visiteur) AS visiteurs FROM site_visites
+                           WHERE cree_le >= %s GROUP BY source""", (debut,))
+            visites_par_canal = {}
+            for r in cur.fetchall():
+                c = _canal_depuis_source_visite(r['source'])
+                if c:
+                    visites_par_canal[c] = visites_par_canal.get(c, 0) + (r['visiteurs'] or 0)
         canaux = []
-        for canal in sorted(set(par_canal) | set(depenses), key=lambda c: -(par_canal.get(c, {}).get('demandes') or 0)):
+        for canal in sorted(set(par_canal) | set(depenses) | set(visites_par_canal),
+                        key=lambda c: (-(par_canal.get(c, {}).get('demandes') or 0), -visites_par_canal.get(c, 0))):
             r = par_canal.get(canal) or {k: 0 for k in
                                          ('demandes', 'qualifiees', 'programmees', 'realisees', 'clients', 'perdues', 'decideurs')}
             depense = depenses.get(canal)
             canaux.append({
-                "canal": canal, "demandes": r['demandes'], "qualifiees": r['qualifiees'], "programmees": r['programmees'],
+                "canal": canal, "visites": visites_par_canal.get(canal, 0),
+                "taux_visite_demande": _ratio(r['demandes'], visites_par_canal.get(canal, 0)),
+                "demandes": r['demandes'], "qualifiees": r['qualifiees'], "programmees": r['programmees'],
                 "realisees": r['realisees'], "clients": r['clients'], "perdues": r['perdues'], "decideurs": r['decideurs'],
                 "taux_qualification": _ratio(r['qualifiees'], r['demandes']),
                 "taux_demo": _ratio(r['realisees'], r['demandes']),
@@ -2193,7 +2294,7 @@ def admin_demandes_resume():
                 "cout_par_demo": _diviser(depense, r['realisees']),
                 "cout_acquisition": _diviser(depense, r['clients']),
             })
-        total = {k: sum(c[k] for c in canaux) for k in ('demandes', 'qualifiees', 'programmees', 'realisees', 'clients', 'perdues')}
+        total = {k: sum(c[k] for c in canaux) for k in ('visites', 'demandes', 'qualifiees', 'programmees', 'realisees', 'clients', 'perdues')}
         return jsonify({
             "jours": jours, "total": total, "canaux": canaux,
             "sante": {"notifications_en_echec": sante['notif_echec'], "notifications_en_attente": sante['notif_attente'],
@@ -11376,6 +11477,8 @@ STATS_PAGES = {
     # Pages publiques de la prospection : sans elles, les visites venues des annonces n'étaient pas comptées.
     'demo-agences', 'demo-merci', 'qualification-prospects-immobiliers', 'rapprochement-prospects-biens',
     'suivi-prospects-immobiliers',
+    # Pages de référencement (SEO/GEO) : leurs visites doivent être comptées.
+    'logiciel-agence-immobiliere', 'automatisation-leads-seloger-leboncoin', 'complement-crm-immobilier',
 }
 STATS_DIRECT_SECONDES = 90        # un visiteur est « en direct » s'il a donné signe de vie il y a moins que ça
 STATS_DOUBLON_MINUTES = 30        # recharger la même page n'ajoute pas de visite
@@ -11584,7 +11687,7 @@ def _source_stats(donnees):
     une, sinon le site d'où il vient, sinon « direct »."""
     utm = re.sub(r'[^a-z0-9._-]', '', str(donnees.get('s') or '').lower())[:80]
     if utm:
-        return utm
+        return _nom_source_utm(utm) or utm
     try:
         hote = (_urlparse(str(donnees.get('r') or '')[:300]).hostname or '').lower()
     except ValueError:
@@ -11596,6 +11699,13 @@ def _source_stats(donnees):
     site = (_urlparse(_site_url() or '').hostname or '').lower()
     if hote.endswith('zelyro.fr') or (site and hote == site.replace('www.', '', 1)):
         return 'interne'
+    nom_ia = _nom_source_hote(hote)
+    if nom_ia:
+        return nom_ia
+    if hote == 'bing.com' or hote.endswith('.bing.com'):
+        return 'bing-organique'
+    if _GOOGLE_RECHERCHE_RE.match(hote):
+        return 'google-organique'
     for domaines, nom in _SOURCES_CONNUES:
         for d in domaines:
             if d.endswith('.'):

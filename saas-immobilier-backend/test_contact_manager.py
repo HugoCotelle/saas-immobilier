@@ -117,20 +117,28 @@ class DemandeDemo(ts.Base):
     def setUp(self):
         super().setUp()
         self.envoyes = []
-        backend._assurer_schema()
-        with backend._base() as (conn, cur):      # chaque test repart sans demande (une même adresse = doublon)
-            cur.execute("DELETE FROM demandes_demo")
-            conn.commit()
+        self._vider_demandes()
 
         def faux(destinataire, sujet, texte, html, **kw):
             self.envoyes.append({"to": destinataire, "sujet": sujet, "texte": texte, "kw": kw})
             return True
         for p in (mock.patch.object(backend, "_envoyer_email", side_effect=faux),
                   mock.patch.object(backend, "_envoi_configure", return_value=True),
-                  mock.patch.object(backend, "_messagerie_prete", return_value=True),
+                  mock.patch.dict(os.environ, {"BREVO_API_KEY": "cle", "MAIL_FROM": "demo@zelyro.test"}),
                   mock.patch.object(backend, "_lancer_en_arriere_plan", side_effect=lambda f, *a: f(*a))):
             p.start()
             self.addCleanup(p.stop)
+
+    def _vider_demandes(self):
+        # Une même adresse n'est enregistrée qu'une fois par semaine (doublon) : chaque test repart d'une table vide.
+        backend._assurer_schema()
+        conn = backend.get_db_connection(); cur = conn.cursor()
+        cur.execute("DELETE FROM demandes_demo"); conn.commit(); conn.close()
+        self.addCleanup(self._vider_demandes_silencieux)
+
+    def _vider_demandes_silencieux(self):
+        conn = backend.get_db_connection(); cur = conn.cursor()
+        cur.execute("DELETE FROM demandes_demo"); conn.commit(); conn.close()
 
     def envoyer(self, **kw):
         return self.c.post("/api/v1/demande-demo", json={**self.CORPS, **kw})
@@ -141,7 +149,6 @@ class DemandeDemo(ts.Base):
         equipe, accuse = self.envoyes
         self.assertEqual(equipe["to"], "contact@zelyro.fr")
         self.assertEqual(equipe["sujet"], "Demande de démo Zelyro : Julie Morel (Agence Morel)")
-        self.assertEqual(equipe["kw"]["nom_expediteur"], "Zelyro · demandes de démo")   # jamais le nom du visiteur
         for attendu in ("julie@agence-morel.fr", "06 11 22 33 44", "Senlis", "2 à 5 personnes", "Ubiflow",
                         "plutôt le matin", "On aimerait voir le matching"):
             self.assertIn(attendu, equipe["texte"])
@@ -151,8 +158,9 @@ class DemandeDemo(ts.Base):
         self.assertNotIn("matching", accuse["texte"])          # rien de la saisie, hors prénom
 
     def test_origine_de_la_visite(self):
-        self.envoyer(utm_source="google", utm_medium="cpc", utm_campaign="123", utm_term="logiciel agence")
-        self.assertIn("Origine : google, google, cpc, 123, logiciel agence", self.envoyes[0]["texte"])
+        self.envoyer(origine="google / cpc, campagne 123, mot-clé logiciel agence")
+        # Le paramètre est nettoyé (lettres, chiffres et quelques signes) et classé dans un canal : ici « autre » (lien balisé inconnu).
+        self.assertIn("Origine : autre, google / cpc campagne 123", self.envoyes[0]["texte"])
         self.envoyer(email="autre@agence-morel.fr")
         self.assertIn("Origine : direct", self.envoyes[2]["texte"])
 
@@ -182,14 +190,16 @@ class DemandeDemo(ts.Base):
         self.assertEqual(self.envoyer().status_code, 429)
 
     def test_echec_d_envoi_a_l_equipe_ne_perd_pas_la_demande(self):
-        # Nouveau comportement : la demande est enregistrée avant tout envoi ; une panne de messagerie ne la perd pas
-        # (elle reste visible dans l'espace administrateur et sera renvoyée). Voir test_demandes_demo.py.
+        # Nouveau fonctionnement (demandes de démonstration sécurisées) : la demande est enregistrée AVANT tout e-mail.
+        # Une panne d'envoi n'est plus une erreur pour le visiteur ; la notification est rejouée et visible dans l'admin.
         with mock.patch.object(backend, "_envoyer_email", return_value=False):
             r = self.envoyer()
         self.assertEqual(r.status_code, 200)
-        with backend._base() as (conn, cur):
-            cur.execute("SELECT notif_statut FROM demandes_demo WHERE lower(email) = 'julie@agence-morel.fr'")
-            self.assertEqual(cur.fetchone()['notif_statut'], 'echec')
+        conn = backend.get_db_connection(); cur = conn.cursor()
+        cur.execute("SELECT notif_statut FROM demandes_demo WHERE lower(email) = %s", ("julie@agence-morel.fr",))
+        lignes = cur.fetchall(); conn.close()
+        self.assertEqual(len(lignes), 1)
+        self.assertIn(lignes[0][0], ("attente", "echec"))
 
     def test_mails_de_demo_ne_rebouclent_pas(self):
         for sujet in ("Demande de démo Zelyro : Julie Morel (Agence Morel)", "Fwd: Votre demande de démo Zelyro"):

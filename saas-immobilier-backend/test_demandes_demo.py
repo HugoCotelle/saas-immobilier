@@ -306,6 +306,105 @@ ok(not sql("SELECT 1 FROM demandes_demo WHERE email='g@t.test'") and sql("SELECT
    "purge à 3 ans : demande ancienne effacée, client conservé")
 ok(sql("SELECT count(*) FROM demandes_demo WHERE cree_le > (now() at time zone 'utc') - interval '1 day'")[0][0] > 5, "les demandes récentes sont conservées")
 
+
+# ---------------------------------------------------------------- 9. classification des sources (SEO, GEO, annuaires)
+CAS = [
+    # (utm_source, utm_medium, clic_pub, hôte d'origine, canal attendu)
+    ("facebook", "paid", "meta", "l.instagram.com", "meta"),
+    (None, None, "meta", None, "meta"),
+    ("google", "cpc", "google", None, "google"),
+    (None, None, "google", "google.fr", "google"),
+    (None, None, "", "www.google.fr", "google_organique"),
+    (None, None, "", "google.com", "google_organique"),
+    (None, None, "", "google.co.uk", "google_organique"),
+    ("google", "organic", "", None, "google_organique"),
+    (None, None, "", "www.bing.com", "bing_organique"),
+    ("bing", "organic", "", None, "bing_organique"),
+    ("chatgpt.com", None, "", None, "chatgpt"),
+    (None, None, "", "chatgpt.com", "chatgpt"),
+    (None, None, "", "chat.openai.com", "chatgpt"),
+    (None, None, "", "www.perplexity.ai", "perplexity"),
+    ("perplexity", None, "", None, "perplexity"),
+    (None, None, "", "gemini.google.com", "gemini"),
+    ("gemini", "referral", "", None, "gemini"),
+    (None, None, "", "claude.ai", "claude"),
+    (None, None, "", "copilot.microsoft.com", "copilot"),
+    (None, None, "", "www.appvizer.fr", "appvizer"),
+    ("appvizer", "listing", "", None, "appvizer"),
+    (None, None, "", "www.capterra.com", "capterra"),
+    (None, None, "", "capterra.fr", "capterra"),
+    (None, None, "", "lnkd.in", "linkedin"),
+    ("newsletter", "email", "", None, "email"),
+    ("harvey", None, "", None, "email"),
+    ("partenaire", "lien", "", None, "autre"),
+    (None, None, "", "blog-immo.example", "referent"),
+    (None, None, "", "mail.google.com", "referent"),
+    (None, None, "", "www.zelyro.fr", "direct"),
+    (None, None, "", None, "direct"),
+    # pièges : un domaine qui ressemble sans être le bon ne doit pas passer
+    (None, None, "", "chatgpt.com.pirate.example", "referent"),
+    (None, None, "", "notgoogle.fr", "referent"),
+    (None, None, "", "google.fr.pirate.example", "referent"),
+]
+for s_, m_, cp_, h_, attendu in CAS:
+    obtenu = appz._canal_demande(s_, m_, cp_, h_)
+    ok(obtenu == attendu, f"canal {attendu} : source={s_} medium={m_} clic={cp_ or '-'} domaine={h_} (obtenu {obtenu})")
+ok(all(appz._canal_demande(*x[:4]) in appz.DEMO_CANAUX for x in CAS), "tout canal calculé figure dans la liste des canaux")
+ok(len(appz.DEMO_CANAUX) == len(set(appz.DEMO_CANAUX)) and all(len(x) <= 20 for x in appz.DEMO_CANAUX), "canaux uniques et compatibles avec la colonne (20 caractères)")
+
+# Mêmes règles pour les visites (colonne source de site_visites).
+with appz.app.test_request_context("/"):
+    VIS = [({"s": "chatgpt.com"}, "chatgpt"), ({"r": "https://chatgpt.com/c/secret-123?x=1"}, "chatgpt"),
+           ({"r": "https://www.perplexity.ai/search/abc"}, "perplexity"), ({"r": "https://gemini.google.com/app"}, "gemini"),
+           ({"r": "https://claude.ai/chat/uuid"}, "claude"), ({"r": "https://copilot.microsoft.com/"}, "copilot"),
+           ({"r": "https://www.google.fr/search?q=logiciel+agence"}, "google-organique"), ({"r": "https://www.bing.com/search?q=x"}, "bing-organique"),
+           ({"r": "https://www.appvizer.fr/immobilier"}, "appvizer"), ({"r": "https://www.capterra.com/p/1/x"}, "capterra"),
+           ({"r": "https://mail.google.com/mail/u/0/"}, "e-mail"), ({"s": "facebook"}, "facebook"), ({"s": "google"}, "google"),
+           ({"r": "https://blog-immo.example/article"}, "blog-immo.example"), ({}, "direct")]
+    for dn, attendu in VIS:
+        obtenu = appz._source_stats(dn)
+        ok(obtenu == attendu, f"visite : {dn} -> {attendu} (obtenu {obtenu})")
+        ok("secret" not in obtenu and "?" not in obtenu and "/" not in obtenu, "visite : aucun chemin ni paramètre du site d'origine n'est conservé")
+for nom, canal in [("chatgpt", "chatgpt"), ("google-organique", "google_organique"), ("bing-organique", "bing_organique"), ("facebook", "meta"),
+                   ("google", "google"), ("e-mail", "email"), ("blog-immo.example", "referent"), ("campagne-x", "autre"), ("direct", "direct"), ("interne", None)]:
+    ok(appz._canal_depuis_source_visite(nom) == canal, f"visite {nom} rattachée au canal {canal}")
+
+# Origine portée par le lien jusqu'au formulaire (le visiteur a changé de page sur zelyro.fr entre-temps).
+sql("DELETE FROM demandes_demo WHERE email LIKE %s", ("src%@t.test",))
+r = post(demande(id_demande="d1" * 12, email="src1@t.test", utm_source=None, utm_medium=None, clic_pub=None,
+                 referent="https://www.zelyro.fr/logiciel-agence-immobiliere.html", referent_origine="chatgpt.com"))
+ok(r.status_code == 200 and sql("SELECT canal, referent FROM demandes_demo WHERE email='src1@t.test'")[0] == ("chatgpt", "chatgpt.com"),
+   "origine portée par le lien : une demande venue de ChatGPT puis d'une page du site est classée « chatgpt »")
+r = post(demande(id_demande="d2" * 12, email="src2@t.test", utm_source=None, utm_medium=None, clic_pub=None,
+                 referent="https://www.perplexity.ai/search/x?q=secret", referent_origine="chatgpt.com"))
+ok(sql("SELECT canal, referent FROM demandes_demo WHERE email='src2@t.test'")[0] == ("perplexity", "perplexity.ai"),
+   "le référent direct prime sur l'origine portée, et seul le nom de domaine est enregistré")
+r = post(demande(id_demande="d3" * 12, email="src3@t.test", utm_source=None, utm_medium=None, clic_pub=None,
+                 referent="https://www.zelyro.fr/tarifs.html", referent_origine="https://pirate.example/a?b=c#d"))
+ok(sql("SELECT canal, referent FROM demandes_demo WHERE email='src3@t.test'")[0] == ("referent", "pirate.example"),
+   "origine portée : seul le nom de domaine est gardé (ni chemin, ni paramètres)")
+r = post(demande(id_demande="d4" * 12, email="src4@t.test", utm_source=None, utm_medium=None, clic_pub=None,
+                 referent="https://www.google.fr/", referent_origine=None))
+ok(sql("SELECT canal FROM demandes_demo WHERE email='src4@t.test'")[0][0] == "google_organique", "demande venue de Google sans publicité : « google_organique »")
+sql("UPDATE demandes_demo SET statut='client', qualifiee_le=now() at time zone 'utc', client_le=now() at time zone 'utc' WHERE email='src1@t.test'")
+
+# Visites par canal dans le résumé de l'espace administrateur.
+for i, (ref_, s_) in enumerate([("https://chatgpt.com/", None), ("https://www.google.fr/", None), ("https://www.capterra.com/x", None), (None, "linkedin")]):
+    d_ = {"p": "/tarifs.html", "w": 1400}
+    if ref_: d_["r"] = ref_
+    if s_: d_["s"] = s_
+    c.post("/public/stats/vue", data=json.dumps(d_), headers=dict({"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Test%d" % i}, **{"X-Forwarded-For": "10.9.9.%d" % (i + 1)}))
+R = c.get("/admin/demandes-demo/resume?jours=30", headers=admin_h).get_json()
+par = {x["canal"]: x for x in R["canaux"]}
+ok(par.get("chatgpt", {}).get("visites", 0) >= 1 and par["chatgpt"]["demandes"] == 1 and par["chatgpt"]["clients"] == 1 and par["chatgpt"]["qualifiees"] == 1,
+   "résumé : le canal ChatGPT montre visites, demande, qualifiée et client")
+ok(par.get("google_organique", {}).get("visites", 0) >= 1 and par.get("capterra", {}).get("visites", 0) >= 1 and par.get("linkedin", {}).get("visites", 0) >= 1,
+   "résumé : visites par canal (Google organique, Capterra, LinkedIn)")
+ok(par["chatgpt"].get("taux_visite_demande") is not None, "résumé : taux visite -> demande calculé")
+ok(c.post("/admin/acquisition/depenses", json={"canal": "chatgpt", "debut": "2026-11-16", "montant_eur": 5}, headers=admin_h).status_code in (200, 201),
+   "les nouveaux canaux sont acceptés pour la saisie de dépenses (ex. annuaire payant)")
+ok(c.get("/admin/demandes-demo?canal=chatgpt", headers=admin_h).get_json()["demandes"] != [], "filtre par canal ChatGPT")
+
 patch1.stop(); patch2.stop()
 cur.execute("DELETE FROM users WHERE email LIKE '%@t.test'"); conn.commit()
 print("\nÉCHEC" if ok.failed else "\nTOUS LES TESTS PASSENT")
